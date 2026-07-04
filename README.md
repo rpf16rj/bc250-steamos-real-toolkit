@@ -28,6 +28,83 @@ A SteamOS-focused toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) board. I
 sudo ./bc250-tollkit-steam-os-real.sh
 ```
 
+## Menu Preview
+
+### Main menu — `bc250-tollkit-steam-os-real.sh`
+
+```text
+  ╔═════════════════════════════════════════════════════════════════════╗
+  ║                                                                     ║
+  ║                 BC-250 SteamOS Real Toolkit                         ║
+  ║           CPU/GPU Governors & Performance Profiles                  ║
+  ║                                                                     ║
+  ╚═════════════════════════════════════════════════════════════════════╝
+
+  Performance
+  ─────────────────────────────────────────────────────────────────────
+  [ 1]  Performance Profiles       CPU & GPU performance profiles
+
+  Governors
+  ─────────────────────────────────────────────────────────────────────
+  [ 2]  Install CPU Governor       bc250-smu-oc CPU overclock service
+  [ 3]  Install GPU Governor       cyan-skillfish GPU governor service
+
+  Revert
+  ─────────────────────────────────────────────────────────────────────
+  [ 4]  Revert CPU Governor        Remove bc250-smu-oc service
+  [ 5]  Revert GPU Governor        Remove cyan-skillfish-governor-smu
+
+  System
+  ─────────────────────────────────────────────────────────────────────
+  [ S]  Status                     Current system summary
+  [ 0]  Exit                       
+
+  ═════════════════════════════════════════════════════════════════════
+  Enter selection: 0
+
+  Goodbye.
+```
+
+### CU Dashboard — `bc250-cu-live-manager.sh status`
+
+```text
+(deck@steamdeck bc250-steamos-real-toolkit)$ sudo ./bc250-cu-live-manager.sh
+[ OK ] using extracted UMR database at /var/lib/umr/database
++------------------------------------------------------------------------------+
+| BC-250 CU Dashboard / Live Dispatch                                          |
++------------------------------------------------------------------------------+
+  UMR        : /usr/bin/umr
+  UMR inst   : 0 (auto)
+  ASIC       : cyan_skillfish.gfx1013
+  amdgpu     : bc250_cc_write_mode=not exposed, active_cu_number=24
+  Service    : enabled
+  Boot sync  : current table saved
+  Source     : SPI dispatch masks + amdgpu boot CU map
+  Legend     : D+ driver+routed, S+ SPI+routed, D! driver+off, -- off
+
+  +---------+------+------+------+------+------+------+------------+--------+
+  | Row     | WGP0 | WGP1 | WGP2 | WGP3 | WGP4 | SPI  | CC         | CUs    |
+  |         | 0-1  | 2-3  | 4-5  | 6-7  | 8-9  |      |            |        |
+  +---------+------+------+------+------+------+------+------------+--------+
+  | SE0.SH0 |  D+  |  D+  |  D+  |  S+  |  S+  | 0x1f | 0xffe00000 |  10/10 |
+  | SE0.SH1 |  D+  |  D+  |  D+  |  S+  |  S+  | 0x1f | 0xffe00000 |  10/10 |
+  | SE1.SH0 |  D+  |  D+  |  D+  |  S+  |  S+  | 0x1f | 0xffe00000 |  10/10 |
+  | SE1.SH1 |  D+  |  D+  |  D+  |  S+  |  S+  | 0x1f | 0xffe00000 |  10/10 |
+  +---------+------+------+------+------+------+------+------------+--------+
+
+  CUs active & routed  : 40/40
+
++------------------------------------------------------------------------------+
+| Actions                                                                      |
++------------------------------------------------------------------------------+
+|  [e] Edit WGP table      [f] Enable all CUs      [t] Enable default CUs      |
+|  [i] Install service     [w] Write table         [u] Uninstall service       |
+|  [q] Quit                                                                    |
++------------------------------------------------------------------------------+
+
+> Select action: 
+```
+
 ## Toolkit Menu Options
 
 ### 1. Performance Profiles
