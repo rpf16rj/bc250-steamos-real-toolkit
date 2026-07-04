@@ -1,6 +1,6 @@
 # BC-250 SteamOS Real Toolkit
 
-A SteamOS-focused toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) board. It installs and manages the CPU and GPU governors, applies performance profiles, and includes the live CU/WGP manager for unlocking up to 40 compute units.
+A toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) running **real SteamOS**. It installs and manages the CPU and GPU governors, applies performance profiles, and includes the live CU/WGP manager for unlocking up to 40 compute units.
 
 > **Warning:** Overclocking and unlocking compute units increase power draw and heat. Make sure your PSU, cabling, and cooling can handle the load before applying high-risk profiles.
 
@@ -11,12 +11,21 @@ A SteamOS-focused toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) board. I
 
 ## Requirements
 
-- SteamOS (or another Arch-based distro with `steamos-readonly` support)
+- Real SteamOS (tested on 3.8.21 beta; not a CachyOS port)
 - AMD BC-250 board (PCI ID `1002:13fe`)
 - Root access (`sudo`)
 - Internet connection for AUR/git installs
 - An AUR helper such as `shelly`, `paru`, or `yay`
 - `umr` for the CU live manager (it will be installed if missing)
+
+## Why real SteamOS
+
+These scripts are not a generic CachyOS re-package. They are adapted for real SteamOS:
+
+- Handles SteamOS read-only filesystem via `steamos-readonly disable/enable` for installs and removals.
+- Extracts the compressed `umr` database shipped with SteamOS (`/usr/share/umr/database/database.tar.zst`) into `/var/lib/umr/database` and uses `--database-path` so `umr` can read BC-250 registers.
+- Installs the CU live manager service into `/var/usrlocal/bin` because `/usr/local/bin` is read-only on SteamOS.
+- Persists `UMR_DATABASE_PATH` in the service config so the boot service keeps working.
 
 ## Quick Start
 
