@@ -58,15 +58,15 @@ sudo ./bc250-tollkit-steam-os-real.sh
   [ 2]  Install CPU Governor       bc250-smu-oc CPU overclock service
   [ 3]  Install GPU Governor       cyan-skillfish GPU governor service
 
+  Tweaks
+  ─────────────────────────────────────────────────────────────────────
+  [ 4]  Disable CPU Mitigations    Add mitigations=off to GRUB
+
   Revert
   ─────────────────────────────────────────────────────────────────────
-  [ 4]  Revert CPU Governor        Remove bc250-smu-oc service
-  [ 5]  Revert GPU Governor        Remove cyan-skillfish-governor-smu
-
-  Advanced
-  ─────────────────────────────────────────────────────────────────────
-  [ 6]  Disable CPU Mitigations    Add mitigations=off to GRUB
-  [ 7]  Re-enable CPU Mitigations  Remove mitigations=off from GRUB
+  [ 5]  Re-enable CPU Mitigations  Remove mitigations=off from GRUB
+  [ 6]  Revert CPU Governor        Remove bc250-smu-oc service
+  [ 7]  Revert GPU Governor        Remove cyan-skillfish-governor-smu
 
   System
   ─────────────────────────────────────────────────────────────────────
@@ -143,19 +143,19 @@ Installs `cyan-skillfish-governor-smu` from the AUR and enables the `cyan-skillf
 
 On SteamOS, the toolkit temporarily disables the read-only filesystem, installs the build dependencies, builds the AUR package, and re-enables read-only mode.
 
-### 4. Revert CPU Governor
-Stops and disables `bc250-smu-oc.service`, uninstalls the package via `pipx`, and removes `/etc/bc250-smu-oc.conf`.
-
-### 5. Revert GPU Governor
-Stops and disables `cyan-skillfish-governor-smu.service`, and removes the package via your AUR helper.
-
-### 6. Disable CPU Mitigations
+### 4. Disable CPU Mitigations
 Adds `mitigations=off` to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub` and regenerates `/efi/EFI/steamos/grub.cfg` using SteamOS's `update-grub` wrapper. A reboot is required.
 
 This is done on real SteamOS by temporarily disabling the read-only filesystem, editing GRUB, running `update-grub`, and re-enabling read-only mode. A backup is saved at `/etc/default/grub.bak`.
 
-### 7. Re-enable CPU Mitigations
+### 5. Re-enable CPU Mitigations
 Removes `mitigations=off` from `/etc/default/grub`, regenerates the GRUB config, and reboots to restore the default CPU security patches.
+
+### 6. Revert CPU Governor
+Stops and disables `bc250-smu-oc.service`, uninstalls the package via `pipx`, and removes `/etc/bc250-smu-oc.conf`.
+
+### 7. Revert GPU Governor
+Stops and disables `cyan-skillfish-governor-smu.service`, and removes the package via your AUR helper.
 
 ### S. Status
 Shows the current kernel, active performance profile, and the state of the CPU/GPU governor services.

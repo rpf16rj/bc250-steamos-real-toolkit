@@ -1240,13 +1240,13 @@ show_menu() {
     print_item  "2"  "Install CPU Governor"  "bc250-smu-oc CPU overclock service"
     print_item  "3"  "Install GPU Governor"  "cyan-skillfish GPU governor service"
     echo ""
-    print_section "Revert"
-    print_item  "4"  "Revert CPU Governor"     "Remove bc250-smu-oc service"
-    print_item  "5"  "Revert GPU Governor"     "Remove cyan-skillfish-governor-smu"
+    print_section "Tweaks"
+    print_item  "4"  "Disable CPU Mitigations" "Add mitigations=off to GRUB"
     echo ""
-    print_section "Advanced"
-    print_item  "6"  "Disable CPU Mitigations" "Add mitigations=off to GRUB"
-    print_item  "7"  "Re-enable CPU Mitigations" "Remove mitigations=off from GRUB"
+    print_section "Revert"
+    print_item  "5"  "Re-enable CPU Mitigations" "Remove mitigations=off from GRUB"
+    print_item  "6"  "Revert CPU Governor"     "Remove bc250-smu-oc service"
+    print_item  "7"  "Revert GPU Governor"     "Remove cyan-skillfish-governor-smu"
     echo ""
     print_section "System"
     print_item  "S"  "Status"                "Current system summary"
@@ -1263,10 +1263,10 @@ while true; do
         1) run_overclock_menu ;;
         2) run_cpu_governor;       press_enter ;;
         3) run_gpu_governor;       press_enter ;;
-        4) run_revert_cpu_governor; press_enter ;;
-        5) run_revert_gpu_governor; press_enter ;;
-        6) run_disable_mitigations; press_enter ;;
-        7) run_revert_mitigations;   press_enter ;;
+        4) run_disable_mitigations; press_enter ;;
+        5) run_revert_mitigations;   press_enter ;;
+        6) run_revert_cpu_governor; press_enter ;;
+        7) run_revert_gpu_governor; press_enter ;;
         S) run_status;             press_enter ;;
         0)
             echo -e "\n  ${DIM}Goodbye.${RESET}\n"
