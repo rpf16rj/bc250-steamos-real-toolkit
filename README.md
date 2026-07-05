@@ -1,39 +1,57 @@
 # BC-250 SteamOS Real Toolkit
 
-A toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) running **real SteamOS**. It installs and manages the CPU and GPU governors, applies performance profiles, and includes the live CU/WGP manager for unlocking up to 40 compute units.
+A toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) running **real SteamOS** — not a CachyOS port.
 
 > **Warning:** Overclocking and unlocking compute units increase power draw and heat. Make sure your PSU, cabling, and cooling can handle the load before applying high-risk profiles.
 
-## Contents
+## Features
 
-- `bc250-tollkit-steam-os-real.sh` — interactive menu for CPU/GPU governor installation and performance profiles.
-- `bc250-cu-live-manager.sh` — live CU/WGP manager using `umr` to enable/disable compute pairs at runtime.
+- **CPU & GPU governors** — install/revert `bc250-smu-oc` and `cyan-skillfish-governor-smu`.
+- **Performance profiles** — presets from Stock to Extreme, or fully custom CPU/GPU combos.
+- **CPU mitigations toggle** — disable/re-enable via GRUB, adapted for SteamOS's bootloader.
+- **CU live manager** — unlock up to 40 compute units at runtime using `umr`, with boot persistence.
+- **Built for SteamOS's read-only filesystem** — handles `steamos-readonly`, `umr` database extraction, and read-only-safe service install paths automatically.
+
+## Benefits
+
+- Real perf gains: Forza Horizon 6 went from ~55 fps to ~80 fps with governors + 40 CUs enabled.
+- No manual bootloader/database fiddling — the scripts handle SteamOS quirks for you.
+- Fully revertible: every install has a matching revert option.
 
 ## Requirements
 
-- Real SteamOS (tested on 3.8.21 beta; not a CachyOS port)
+- Real SteamOS (tested on 3.8.21 beta)
 - AMD BC-250 board (PCI ID `1002:13fe`)
 - Root access (`sudo`)
-- Internet connection for AUR/git installs
+- Internet connection
 - An AUR helper such as `shelly`, `paru`, or `yay`
-- `umr` for the CU live manager (it will be installed if missing)
-
-## Why real SteamOS
-
-These scripts are not a generic CachyOS re-package. They are adapted for real SteamOS:
-
-- Handles SteamOS read-only filesystem via `steamos-readonly disable/enable` for installs and removals.
-- Extracts the compressed `umr` database shipped with SteamOS (`/usr/share/umr/database/database.tar.zst`) into `/var/lib/umr/database` and uses `--database-path` so `umr` can read BC-250 registers.
-- Installs the CU live manager service into `/var/usrlocal/bin` because `/usr/local/bin` is read-only on SteamOS.
-- Persists `UMR_DATABASE_PATH` in the service config so the boot service keeps working.
 
 ## Quick Start
 
-1. Clone or copy this repository to your SteamOS machine.
-2. Open a terminal in the folder.
-3. Run the toolkit:
+### One-click install & run
+
+Open a terminal on your SteamOS machine (Desktop Mode → Konsole) and run:
 
 ```bash
+curl -sSL https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/bc250-tollkit-steam-os-real.sh -o bc250-tollkit-steam-os-real.sh && chmod +x bc250-tollkit-steam-os-real.sh && sudo ./bc250-tollkit-steam-os-real.sh
+```
+
+This downloads the toolkit script, makes it executable, and launches the interactive menu with root privileges (the script re-execs itself with `sudo` if needed).
+
+### CU Live Manager
+
+To also get the CU live manager (unlock 40 CUs), download it the same way:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/bc250-cu-live-manager.sh -o bc250-cu-live-manager.sh && chmod +x bc250-cu-live-manager.sh && sudo ./bc250-cu-live-manager.sh
+```
+
+### Manual install (clone the repo)
+
+```bash
+git clone https://github.com/rpf16rj/bc250-steamos-real-toolkit.git
+cd bc250-steamos-real-toolkit
+chmod +x bc250-tollkit-steam-os-real.sh bc250-cu-live-manager.sh
 sudo ./bc250-tollkit-steam-os-real.sh
 ```
 
@@ -53,13 +71,10 @@ sudo ./bc250-tollkit-steam-os-real.sh
   ─────────────────────────────────────────────────────────────────────
   [ 1]  Performance Profiles       CPU & GPU performance profiles
 
-  Governors
+  Governors & Tweaks
   ─────────────────────────────────────────────────────────────────────
   [ 2]  Install CPU Governor       bc250-smu-oc CPU overclock service
   [ 3]  Install GPU Governor       cyan-skillfish GPU governor service
-
-  Tweaks
-  ─────────────────────────────────────────────────────────────────────
   [ 4]  Disable CPU Mitigations    Add mitigations=off to GRUB
 
   Revert
@@ -119,84 +134,24 @@ sudo ./bc250-tollkit-steam-os-real.sh
 > Select action: 
 ```
 
-## Toolkit Menu Options
-
-### 1. Performance Profiles
-Apply pre-defined CPU/GPU overclock presets or create a custom mix:
-
-- **Stock** — CPU 3.5 GHz, GPU 1500 MHz
-- **Mild** — CPU 3.5 GHz, GPU 1600 MHz
-- **Moderate** — CPU 3.5 GHz, GPU 1750 MHz
-- **Strong** — CPU 3.5 GHz, GPU 1850 MHz
-- **Aggressive** — CPU 3.5 GHz, GPU 2000 MHz
-- **Extreme** — higher CPU/GPU clocks, requires explicit `OC` acknowledgement
-
-You can also choose **Custom** to mix CPU and GPU profiles independently, or edit the config files directly with nano.
-
-### 2. Install CPU Governor
-Installs `bc250-smu-oc` from the [bc250-collective/bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc) repository and enables the `bc250-smu-oc.service` systemd service.
-
-On SteamOS, the toolkit temporarily disables the read-only filesystem to install `python-pipx` and `stress`, then re-enables it.
-
-### 3. Install GPU Governor
-Installs `cyan-skillfish-governor-smu` from the AUR and enables the `cyan-skillfish-governor-smu.service` systemd service.
-
-On SteamOS, the toolkit temporarily disables the read-only filesystem, installs the build dependencies, builds the AUR package, and re-enables read-only mode.
-
-### 4. Disable CPU Mitigations
-Adds `mitigations=off` to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub` and regenerates `/efi/EFI/steamos/grub.cfg` using SteamOS's `update-grub` wrapper. A reboot is required.
-
-This is done on real SteamOS by temporarily disabling the read-only filesystem, editing GRUB, running `update-grub`, and re-enabling read-only mode. A backup is saved at `/etc/default/grub.bak`.
-
-### 5. Re-enable CPU Mitigations
-Removes `mitigations=off` from `/etc/default/grub`, regenerates the GRUB config, and reboots to restore the default CPU security patches.
-
-### 6. Revert CPU Governor
-Stops and disables `bc250-smu-oc.service`, uninstalls the package via `pipx`, and removes `/etc/bc250-smu-oc.conf`.
-
-### 7. Revert GPU Governor
-Stops and disables `cyan-skillfish-governor-smu.service`, and removes the package via your AUR helper.
-
-### S. Status
-Shows the current kernel, active performance profile, and the state of the CPU/GPU governor services.
-
 ## CU Live Manager
 
-The `bc250-cu-live-manager.sh` script lets you control which Work Group Processors (WGPs) are active. This can re-enable all 40 CUs on the BC-250 after boot.
-
-### Run the interactive menu
+`bc250-cu-live-manager.sh` unlocks up to 40 compute units at runtime via `umr`, with an interactive dashboard and optional boot-persistence service.
 
 ```bash
 sudo ./bc250-cu-live-manager.sh
 ```
 
-Useful commands:
+Quick reference:
 
 | Command | Action |
 |---------|--------|
 | `status` | Show current CU routing status |
 | `enable all` | Enable all 40 CUs |
 | `stock-dispatch` | Restore the driver-default 24 CU layout |
-| `table` | Interactive TUI to edit WGP routing |
-| `install-service` | Install a systemd service that restores a saved table on boot |
-| `write-service-table` | Save the current table for the boot service |
-| `apply-service` | Apply the saved table now |
+| `install-service` / `write-service-table` | Persist a CU table across reboots |
 
-### Example: enable 40 CUs and persist across reboots
-
-```bash
-sudo ./bc250-cu-live-manager.sh enable all
-sudo ./bc250-cu-live-manager.sh write-service-table
-sudo ./bc250-cu-live-manager.sh install-service
-```
-
-### SteamOS note
-
-The SteamOS-packaged `umr` ships its register database compressed in `/usr/share/umr/database/database.tar.zst` and cannot read BC-250 registers directly. The script automatically extracts this database to `/var/lib/umr/database` and passes `--database-path` to `umr`.
-
-### Kernel patch for true 40 CU enumeration
-
-The live manager can route work to all 40 CUs, but the kernel driver still reports the stock number of CUs unless the `amdgpu` module is patched with `bc250_cc_write_mode=3`. To get the full 40 CU benefit you need to apply the kernel patch from [duggasco/bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock).
+**Note:** the driver still reports the stock CU count unless you separately apply the kernel patch from [duggasco/bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock).
 
 ## Validation
 
