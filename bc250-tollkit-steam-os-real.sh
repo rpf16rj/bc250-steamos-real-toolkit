@@ -1222,8 +1222,14 @@ run_status() {
     [[ "$gpu_svc_state" == "active" ]] && gpu_color="$GREEN" || gpu_color="$RED"
     echo -e "  ${CYAN}CPU Service${RESET}       ${cpu_color}${cpu_label}${RESET}"
     echo -e "  ${CYAN}GPU Service${RESET}       ${gpu_color}${gpu_svc_state}${RESET}"
-    echo ""
 
+    if mitigations_currently_off; then
+        echo -e "  ${CYAN}CPU Mitigations${RESET}   ${RED}disabled${RESET} (mitigations=off set in GRUB)"
+    else
+        echo -e "  ${CYAN}CPU Mitigations${RESET}   ${GREEN}enabled${RESET} (default)"
+    fi
+
+    echo ""
     echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
 }
 
