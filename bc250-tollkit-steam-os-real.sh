@@ -265,6 +265,92 @@ run_revert_gpu_governor() {
 }
 
 # ==============================================================================
+# CPU MITIGATIONS
+# ==============================================================================
+
+GRUB_DEFAULT="/etc/default/grub"
+
+mitigations_currently_off() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*mitigations=off' "$GRUB_DEFAULT" >/dev/null 2>&1
+}
+
+run_disable_mitigations() {
+    print_step "T-1" "Disable CPU Mitigations"
+
+    if mitigations_currently_off; then
+        print_info "CPU mitigations are already disabled."
+        return 0
+    fi
+
+    if ! confirm "This will add 'mitigations=off' to the GRUB kernel command line and regenerate the bootloader. A reboot is required. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    if [[ ! -f "$GRUB_DEFAULT" ]]; then
+        print_error "$GRUB_DEFAULT not found."
+        return 1
+    fi
+
+    if ! command -v update-grub >/dev/null 2>&1; then
+        print_error "update-grub not found. Cannot regenerate GRUB config."
+        return 1
+    fi
+
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        if grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'mitigations=off'; then
+            :
+        else
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 mitigations=off\"/' \"$GRUB_DEFAULT\"
+        fi
+        update-grub
+    " || {
+        print_error "Failed to disable CPU mitigations."
+        return 1
+    }
+
+    print_success "CPU mitigations disabled. Reboot to apply."
+    print_info "Backup saved at $GRUB_DEFAULT.bak"
+}
+
+run_revert_mitigations() {
+    print_step "T-2" "Re-enable CPU Mitigations"
+
+    if ! mitigations_currently_off; then
+        print_info "CPU mitigations are already enabled."
+        return 0
+    fi
+
+    if ! confirm "This will remove 'mitigations=off' from the GRUB kernel command line and regenerate the bootloader. A reboot is required. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    if [[ ! -f "$GRUB_DEFAULT" ]]; then
+        print_error "$GRUB_DEFAULT not found."
+        return 1
+    fi
+
+    if ! command -v update-grub >/dev/null 2>&1; then
+        print_error "update-grub not found. Cannot regenerate GRUB config."
+        return 1
+    fi
+
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ mitigations=off//g; s/mitigations=off //g; s/mitigations=off//g' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        print_error "Failed to re-enable CPU mitigations."
+        return 1
+    }
+
+    print_success "CPU mitigations re-enabled. Reboot to apply."
+    print_info "Backup saved at $GRUB_DEFAULT.bak"
+}
+
+# ==============================================================================
 # OVERCLOCK / PERFORMANCE PROFILES
 # ==============================================================================
 
@@ -1158,6 +1244,10 @@ show_menu() {
     print_item  "4"  "Revert CPU Governor"     "Remove bc250-smu-oc service"
     print_item  "5"  "Revert GPU Governor"     "Remove cyan-skillfish-governor-smu"
     echo ""
+    print_section "Advanced"
+    print_item  "6"  "Disable CPU Mitigations" "Add mitigations=off to GRUB"
+    print_item  "7"  "Re-enable CPU Mitigations" "Remove mitigations=off from GRUB"
+    echo ""
     print_section "System"
     print_item  "S"  "Status"                "Current system summary"
     print_item  "0"  "Exit"                  ""
@@ -1175,6 +1265,8 @@ while true; do
         3) run_gpu_governor;       press_enter ;;
         4) run_revert_cpu_governor; press_enter ;;
         5) run_revert_gpu_governor; press_enter ;;
+        6) run_disable_mitigations; press_enter ;;
+        7) run_revert_mitigations;   press_enter ;;
         S) run_status;             press_enter ;;
         0)
             echo -e "\n  ${DIM}Goodbye.${RESET}\n"
