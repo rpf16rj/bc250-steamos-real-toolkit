@@ -67,21 +67,27 @@ sudo ./bc250-tollkit-steam-os-real.sh
   ║                                                                     ║
   ╚═════════════════════════════════════════════════════════════════════╝
 
-  Performance
+  Quick Start
   ─────────────────────────────────────────────────────────────────────
-  [ 1]  Performance Profiles       CPU & GPU performance profiles
+  [ 1]  Install All                Install CPU + GPU governor in one step
+  [ 2]  Uninstall All              Revert CPU + GPU governor in one step
 
   Governors & Tweaks
   ─────────────────────────────────────────────────────────────────────
-  [ 2]  Install CPU Governor       bc250-smu-oc CPU overclock service
-  [ 3]  Install GPU Governor       cyan-skillfish GPU governor service
-  [ 4]  Disable CPU Mitigations    Add mitigations=off to GRUB
+  [ 3]  Install CPU Governor       bc250-smu-oc CPU overclock service
+  [ 4]  Install GPU Governor       cyan-skillfish GPU governor service
+  [ 5]  Disable CPU Mitigations    Add mitigations=off to GRUB
+  [ 6]  Performance Profiles       CPU & GPU performance profiles
 
   Revert
   ─────────────────────────────────────────────────────────────────────
-  [ 5]  Re-enable CPU Mitigations  Remove mitigations=off from GRUB
-  [ 6]  Revert CPU Governor        Remove bc250-smu-oc service
-  [ 7]  Revert GPU Governor        Remove cyan-skillfish-governor-smu
+  [ 7]  Re-enable CPU Mitigations  Remove mitigations=off from GRUB
+  [ 8]  Revert CPU Governor        Remove bc250-smu-oc service
+  [ 9]  Revert GPU Governor        Remove cyan-skillfish-governor-smu
+
+  Tools
+  ─────────────────────────────────────────────────────────────────────
+  [ C]  CU Unlock Live             Open bc250-cu-live-manager.sh (WGP/CU live manager)
 
   System
   ─────────────────────────────────────────────────────────────────────
@@ -178,6 +184,18 @@ RADV_DEBUG=info vulkaninfo --summary 2>&1 | grep num_cu
 - High-risk GPU profiles (2100 MHz and above) require typing `OC` to confirm.
 - Unlocking CUs significantly increases power draw; verify your PSU and cooling.
 - Keep the original configs if you need to revert (`/etc/bc250-smu-oc.conf` and `/etc/cyan-skillfish-governor-smu/config.toml`).
+
+## Changelog
+
+### 2026-07-06
+
+- Added **Install All** / **Uninstall All** quick actions to the main menu (installs or reverts CPU + GPU governor in one step).
+- Added **CU Unlock Live** entry to the main menu, launching `bc250-cu-live-manager.sh` directly from the wizard.
+- Added a **reinstall confirmation** for "Install CPU Governor" / "Install GPU Governor": if already installed, prompts to reinstall (remove + reinstall) or skip straight to a configuration-only setup step.
+- Added **automatic pacman keyring repair**: detects keyring-related pacman failures (`chaveiro`/`keyring` errors), runs `pacman-key --init` + `--populate`, and retries the failed command automatically.
+- Added **error diagnostic logging**: on install failures, a log with system info, service status, journal, and pacman log is saved to the user's home directory, with instructions to share it with the community or attach it to a GitHub issue.
+- Added a new performance preset: **Mild (undervolt)** — GPU 1600 MHz with reduced safe-point voltages (1000MHz@750mV, 1175MHz@788mV, 1500MHz@848mV, 1600MHz@856mV).
+- Reordered the Performance Profiles menu so **Performance Profiles** now appears right after **Disable CPU Mitigations**.
 
 ## License
 
