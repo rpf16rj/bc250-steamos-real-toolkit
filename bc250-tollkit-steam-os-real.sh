@@ -1010,19 +1010,28 @@ run_revert_acpi_fix() {
     print_success "ACPI fix removed. Reboot to fully revert to stock C/P-state behavior."
 }
 
-# --- DisplayPort audio/video clock fix (patched amdgpu.ko) ------------------
-# fetch-sources.sh (upstream) hardcodes the "jupiter-main" repo channel for the
-# kernel-headers package it needs, but a system pinned to a versioned branch
-# (e.g. jupiter-3.8) can have a kernel/headers pair that only exists there --
-# jupiter-main 404s even though the exact package is one repo channel away.
-# Pre-stage the file it expects (it skips its own download if already present)
-# by trying this system's actual configured repo channels first.
-audio_fix_prefetch_headers() {
-    local fix_dir="$1" rel sha rest flavor mid pkgrel kver pkgver hdrpkg
-    rel="$(uname -r)"
+# --- shared kernel-headers-package helpers ----------------------------------
+# Several upstream community-fix scripts each derive "the headers package that
+# matches the running kernel" and download it from Valve's package mirror, but
+# get one or both of the following wrong for non-standard kernel flavors (e.g.
+# the "-drm-exec" experimental variant):
+#   1. repo channel: hardcode "jupiter-main", which 404s on a system pinned to
+#      a versioned branch (e.g. jupiter-3.8) even though the exact package is
+#      one repo channel away.
+#   2. pkgver derivation: a naive single-hyphen-to-dot substitution mishandles
+#      flavors whose own version string contains more than one hyphen (e.g.
+#      "drmexec7-valve24.3" needs to become "drmexec7.valve24.3", not just the
+#      first hyphen converted).
+# These helpers compute the correct package name once and fetch it from
+# whatever repo channel actually has it, for reuse by every fix that needs it.
+
+# Echoes the exact headers package filename for the running kernel, or returns
+# 1 if $REL doesn't look like a SteamOS neptune kernel release.
+bc250_headers_pkg_name() {
+    local rel="${1:-$(uname -r)}" sha rest flavor mid pkgrel kver pkgver
     case "$rel" in
         *-neptune-*-g*) ;;
-        *) return 0 ;;
+        *) return 1 ;;
     esac
     sha="${rel##*-g}"
     rest="${rel%-g"$sha"}"
@@ -1031,10 +1040,15 @@ audio_fix_prefetch_headers() {
     pkgrel="${mid##*-}"
     kver="${mid%-"$pkgrel"}"
     pkgver="${kver//-/.}"
-    hdrpkg="linux-neptune-$flavor-headers-$pkgver-$pkgrel-x86_64.pkg.tar.zst"
+    echo "linux-neptune-$flavor-headers-$pkgver-$pkgrel-x86_64.pkg.tar.zst"
+}
 
-    [[ -f "$fix_dir/$hdrpkg" ]] && return 0
-
+# Downloads $1 (a headers package filename) to $2 (destination path), trying
+# this system's actual configured repo channels (from /etc/pacman.conf) before
+# falling back to the channels upstream scripts hardcode. Returns 1 if no
+# candidate channel has it.
+bc250_fetch_headers_pkg() {
+    local hdrpkg="$1" dest="$2"
     local mirror="https://steamdeck-packages.steamos.cloud/archlinux-mirror"
     local -a candidates=()
     while IFS= read -r repo; do
@@ -1044,13 +1058,25 @@ audio_fix_prefetch_headers() {
 
     local repo
     for repo in "${candidates[@]}"; do
-        if curl -fsSL -o "$fix_dir/$hdrpkg" "$mirror/$repo/os/x86_64/$hdrpkg" 2>/dev/null; then
+        if curl -fsSL -o "$dest" "$mirror/$repo/os/x86_64/$hdrpkg" 2>/dev/null; then
             print_info "Headers package staged from repo '$repo' -> $hdrpkg"
             return 0
         fi
-        rm -f "$fix_dir/$hdrpkg"
+        rm -f "$dest"
     done
-    print_info "Could not pre-stage the headers package from any known repo channel; letting fetch-sources.sh try (and report) on its own."
+    return 1
+}
+
+# --- DisplayPort audio/video clock fix (patched amdgpu.ko) ------------------
+# See the shared helpers above: fetch-sources.sh hardcodes the "jupiter-main"
+# repo channel, so pre-stage the file it expects (it skips its own download
+# when the file is already present).
+audio_fix_prefetch_headers() {
+    local fix_dir="$1" hdrpkg
+    hdrpkg=$(bc250_headers_pkg_name) || return 0
+    [[ -f "$fix_dir/$hdrpkg" ]] && return 0
+    bc250_fetch_headers_pkg "$hdrpkg" "$fix_dir/$hdrpkg" \
+        || print_info "Could not pre-stage the headers package from any known repo channel; letting fetch-sources.sh try (and report) on its own."
 }
 
 # install.sh/rollback.sh (upstream) hardcode "mkinitcpio -p linux-neptune-616",
@@ -1149,6 +1175,32 @@ aic8800_installed() {
     [[ -d /sys/module/aic8800_fdrv || -f /etc/modprobe.d/aic8800.conf ]]
 }
 
+# The vendor Makefile's "steamos-headers" target hardcodes the "jupiter-main"
+# repo channel *and* derives pkgver with a single-hyphen-to-dot substitution
+# that mishandles flavors like "-drm-exec" (see the shared helpers above for
+# details) -- it 404s or fetches the wrong filename on this kernel. Its caller
+# (steamdeck-setup.sh) only invokes that target when
+# steamos-headers/usr/lib/modules/$KREL/build doesn't already exist, so
+# pre-extracting the correct package there makes it skip the broken step
+# entirely, with zero changes to the vendor tree.
+aic8800_prefetch_headers() {
+    local drv="$1" rel hdrpkg tmp
+    rel="$(uname -r)"
+    [[ -d "$drv/steamos-headers/usr/lib/modules/$rel/build" ]] && return 0
+    hdrpkg=$(bc250_headers_pkg_name "$rel") || return 0
+
+    tmp=$(mktemp -d)
+    if bc250_fetch_headers_pkg "$hdrpkg" "$tmp/$hdrpkg"; then
+        mkdir -p "$drv/steamos-headers"
+        tar --zstd -xf "$tmp/$hdrpkg" -C "$drv/steamos-headers"
+        chown -R "$REAL_USER":"$REAL_USER" "$drv/steamos-headers" 2>/dev/null || true
+        print_info "Headers pre-extracted into $drv/steamos-headers (vendor Makefile's own fetch is unreliable on this kernel flavor)."
+    else
+        print_info "Could not pre-stage AIC8800 kernel headers from any known repo channel; letting steamdeck-setup.sh try (and report) on its own."
+    fi
+    rm -rf "$tmp"
+}
+
 install_aic8800_wifi() {
     print_step "WIFI" "Installing AIC8800D80 USB WiFi/BT Driver"
     echo -e "  ${DIM}Only needed for an AIC8800D80-based USB WiFi/BT dongle${RESET}"
@@ -1165,6 +1217,8 @@ install_aic8800_wifi() {
         fail_with_log "steamdeck-setup.sh not found in the fixes repository." "AIC8800 WiFi — missing script"
         return 1
     fi
+
+    aic8800_prefetch_headers "$AIC8800_LINK/src/USB/driver_fw/drivers/aic8800"
 
     print_info "Running steamdeck-setup.sh (builds and installs the driver)..."
     if ! bash "$setup_script"; then
