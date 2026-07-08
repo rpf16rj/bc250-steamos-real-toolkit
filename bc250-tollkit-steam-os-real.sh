@@ -30,6 +30,8 @@ YELLOW="\e[33m"
 CYAN="\e[36m"
 WHITE="\e[97m"
 MAGENTA="\e[35m"
+ICON_OK="${GREEN}✓${RESET}"
+ICON_WARN="${YELLOW}⚠${RESET}"
 
 print_banner() {
     clear
@@ -473,6 +475,776 @@ run_revert_mitigations() {
 
     print_success "CPU mitigations re-enabled. Reboot to apply."
     print_info "Backup saved at $GRUB_DEFAULT.bak"
+}
+
+# ==============================================================================
+# SENSORS & FAN CONTROL (Nuvoton NCT6686D SuperIO)
+# ==============================================================================
+
+SENSORS_MODPROBE_CONF="/etc/modprobe.d/sensors.conf"
+SENSORS_MODULES_LOAD_CONF="/etc/modules-load.d/99-sensors.conf"
+NCT6687D_REPO="https://github.com/Fred78290/nct6687d.git"
+
+sensors_driver_loaded() {
+    [[ -d /sys/module/nct6683 || -d /sys/module/nct6687 ]]
+}
+
+sensors_active_driver() {
+    if [[ -d /sys/module/nct6687 ]]; then
+        echo "nct6687"
+    elif [[ -d /sys/module/nct6683 ]]; then
+        echo "nct6683"
+    else
+        echo "none"
+    fi
+}
+
+detect_kernel_headers_package() {
+    local kernel_pkg
+    kernel_pkg=$(pacman -Qoq "/usr/lib/modules/$(uname -r)" 2>/dev/null | head -1)
+    [[ -z "$kernel_pkg" ]] && return 1
+    echo "${kernel_pkg}-headers"
+}
+
+install_sensors_readonly() {
+    print_step "SENS" "Installing NCT6683 Read-Only Sensors Driver"
+
+    print_info "Loading nct6683 module..."
+    if ! modprobe nct6683 force=true; then
+        fail_with_log "Failed to load nct6683 module." "Sensors Install — modprobe nct6683"
+        return 1
+    fi
+
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        print_info "SteamOS detected: disabling read-only mode..."
+        if ! steamos-readonly disable; then
+            fail_with_log "Failed to disable SteamOS read-only mode." "Sensors Install — readonly disable"
+            return 1
+        fi
+    fi
+
+    echo "options nct6683 force=true" > "$SENSORS_MODPROBE_CONF"
+    echo "nct6683" > "$SENSORS_MODULES_LOAD_CONF"
+
+    if (( was_steamos )); then
+        print_info "Re-enabling SteamOS read-only mode..."
+        steamos-readonly enable || true
+    fi
+
+    print_success "NCT6683 read-only sensors driver installed!"
+    print_info "Sensors report as ${CYAN}nct6686-isa-0a20${RESET} (temperatures, voltages, fan speeds — no PWM control)."
+}
+
+install_sensors_pwm() {
+    print_step "PWM" "Installing NCT6687 Full PWM Fan Control Driver"
+
+    local headers_pkg
+    if ! headers_pkg="$(detect_kernel_headers_package)"; then
+        fail_with_log "Could not determine the running kernel package for header lookup." "PWM Sensors Install — kernel detection"
+        return 1
+    fi
+    print_info "Detected kernel headers package: $headers_pkg"
+
+    ensure_build_deps || return 1
+    steamos_writable "pacman -Syu --noconfirm '$headers_pkg'" || {
+        fail_with_log "Failed to install kernel headers ($headers_pkg). A matching headers package may not exist yet for this kernel." "PWM Sensors Install — headers"
+        return 1
+    }
+
+    if [[ ! -d "/usr/lib/modules/$(uname -r)/build" ]]; then
+        fail_with_log "Kernel build directory not found after installing headers." "PWM Sensors Install — build dir missing"
+        return 1
+    fi
+
+    local build_dir
+    build_dir="$(mktemp -d /tmp/nct6687d-XXXXXX)"
+
+    print_info "Cloning nct6687d driver..."
+    if ! git clone "$NCT6687D_REPO" "$build_dir"; then
+        fail_with_log "Failed to clone nct6687d repository." "PWM Sensors Install — git clone"
+        rm -rf "$build_dir"
+        return 1
+    fi
+
+    print_info "Building kernel module..."
+    if ! make -C "$build_dir"; then
+        fail_with_log "Failed to build nct6687 module." "PWM Sensors Install — make"
+        rm -rf "$build_dir"
+        return 1
+    fi
+
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        print_info "SteamOS detected: disabling read-only mode..."
+        if ! steamos-readonly disable; then
+            fail_with_log "Failed to disable SteamOS read-only mode." "PWM Sensors Install — readonly disable"
+            rm -rf "$build_dir"
+            return 1
+        fi
+    fi
+
+    print_info "Installing kernel module..."
+    local install_rc=0
+    make -C "$build_dir" install || install_rc=1
+
+    if [[ $install_rc -eq 0 ]]; then
+        print_info "Blacklisting nct6683 and enabling nct6687 autoload..."
+        {
+            echo "blacklist nct6683"
+            echo "options nct6687 force=true"
+        } > "$SENSORS_MODPROBE_CONF"
+        echo "nct6687" > "$SENSORS_MODULES_LOAD_CONF"
+    fi
+
+    if (( was_steamos )); then
+        print_info "Re-enabling SteamOS read-only mode..."
+        steamos-readonly enable || true
+    fi
+
+    rm -rf "$build_dir"
+
+    if [[ $install_rc -ne 0 ]]; then
+        fail_with_log "Failed to install nct6687 module." "PWM Sensors Install — make install"
+        return 1
+    fi
+
+    print_info "Unloading nct6683 (if loaded) and loading nct6687..."
+    modprobe -r nct6683 2>/dev/null || true
+    if ! modprobe nct6687 force=true; then
+        fail_with_log "Module built and installed, but failed to load. A reboot may be required." "PWM Sensors Install — modprobe nct6687"
+        return 1
+    fi
+
+    print_success "NCT6687 PWM fan control driver installed and loaded!"
+    print_info "Sensors report as ${CYAN}nct6686-isa-0a20${RESET}. Run 'sensors' to view readings."
+    print_info "PWM control: /sys/class/hwmon/*/pwmN and pwmN_enable (writable)."
+    print_info "${YELLOW}Note:${RESET} this module is rebuilt against the current kernel; a kernel update may require reinstalling it."
+}
+
+run_revert_sensors() {
+    print_step "R-S" "Revert Sensors Driver"
+
+    if ! sensors_driver_loaded && [[ ! -f "$SENSORS_MODPROBE_CONF" && ! -f "$SENSORS_MODULES_LOAD_CONF" ]]; then
+        print_info "No sensor driver configuration found — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will unload nct6683/nct6687 and remove sensor autoload config. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    modprobe -r nct6687 2>/dev/null || true
+    modprobe -r nct6683 2>/dev/null || true
+
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || true
+    fi
+
+    rm -f "$SENSORS_MODPROBE_CONF" "$SENSORS_MODULES_LOAD_CONF"
+    local installed_ko="/usr/lib/modules/$(uname -r)/kernel/drivers/hwmon/nct6687.ko"
+    if [[ -f "$installed_ko" ]]; then
+        rm -f "$installed_ko"
+        depmod
+    fi
+
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+
+    print_success "Sensor driver configuration removed."
+}
+
+run_sensors_menu() {
+    while true; do
+        print_banner
+        print_section "Sensors & Fan Control"
+        echo -e "  ${DIM}Nuvoton NCT6686D SuperIO — active driver: $(sensors_active_driver)${RESET}"
+        echo ""
+        print_item "1" "Read-Only Sensors (nct6683)"    "Monitoring only — temps, voltages, fan RPM"
+        print_item "2" "Full PWM Fan Control (nct6687)" "Recommended — builds module, adds writable PWM control"
+        print_item "3" "Revert / Remove Sensor Driver"  "Unload driver and remove autoload config"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" sens_choice
+
+        case "$sens_choice" in
+            1) install_sensors_readonly; press_enter ;;
+            2) install_sensors_pwm;      press_enter ;;
+            3) run_revert_sensors;       press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$sens_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# ==============================================================================
+# COOLERCONTROL
+# ==============================================================================
+
+coolercontrol_installed() {
+    pacman -Qq coolercontrold-bin &>/dev/null || pacman -Qq coolercontrold &>/dev/null || \
+        systemctl list-unit-files coolercontrold.service &>/dev/null
+}
+
+coolercontrol_gui_installed() {
+    pacman -Qq coolercontrol-bin &>/dev/null || pacman -Qq coolercontrol &>/dev/null
+}
+
+install_coolercontrol() {
+    print_step "CC" "Installing CoolerControl (fan & sensor control daemon)"
+
+    if coolercontrol_installed; then
+        if ! confirm "CoolerControl daemon is already installed. Reinstall it?"; then
+            print_info "Keeping existing installation — ensuring service is enabled..."
+            systemctl enable --now coolercontrold.service || {
+                fail_with_log "Failed to enable coolercontrold service." "CoolerControl Setup — enable service"
+                return 1
+            }
+            print_success "CoolerControl service is enabled and running!"
+            print_info "Web UI: ${CYAN}https://localhost:11987${RESET}"
+            return 0
+        fi
+        systemctl stop coolercontrold.service 2>/dev/null || true
+        systemctl disable coolercontrold.service 2>/dev/null || true
+    fi
+
+    print_info "Installing coolercontrold-bin via AUR helper..."
+    steamos_writable 'aur_install coolercontrold-bin' || {
+        fail_with_log "Failed to install coolercontrold-bin." "CoolerControl Install — aur_install"
+        return 1
+    }
+
+    if confirm "Also install the desktop GUI (coolercontrol-bin)? This pulls in Qt6 WebEngine (larger download)."; then
+        print_info "Installing coolercontrol-bin (GUI) via AUR helper..."
+        steamos_writable 'aur_install coolercontrol-bin' || {
+            fail_with_log "Failed to install coolercontrol-bin (GUI)." "CoolerControl Install — aur_install GUI"
+            return 1
+        }
+    fi
+
+    print_info "Enabling and starting coolercontrold service..."
+    systemctl enable --now coolercontrold.service || {
+        fail_with_log "Failed to enable coolercontrold service." "CoolerControl Install — enable service"
+        return 1
+    }
+
+    print_success "CoolerControl installed and running!"
+    print_info "Web UI: ${CYAN}https://localhost:11987${RESET}"
+    if coolercontrol_gui_installed; then
+        print_info "Desktop GUI installed — launch 'CoolerControl' from your app menu."
+    fi
+    print_info "${YELLOW}Tip:${RESET} install the NCT6687 PWM driver (menu ${CYAN}F${RESET}) first for full fan-curve control."
+}
+
+run_revert_coolercontrol() {
+    print_step "R-CC" "Revert CoolerControl"
+
+    if ! coolercontrol_installed && ! coolercontrol_gui_installed; then
+        print_info "CoolerControl does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will stop, disable, and remove CoolerControl. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    systemctl stop coolercontrold.service 2>/dev/null || true
+    systemctl disable coolercontrold.service 2>/dev/null || true
+    steamos_writable 'aur_remove coolercontrol-bin' || true
+    steamos_writable 'aur_remove coolercontrol' || true
+    steamos_writable 'aur_remove coolercontrold-bin' || true
+    steamos_writable 'aur_remove coolercontrold' || true
+
+    print_success "CoolerControl removed successfully."
+}
+
+coolercontrol_status_label() {
+    if systemctl is-active coolercontrold.service &>/dev/null; then
+        echo "running"
+    elif coolercontrol_installed; then
+        echo "installed (not running)"
+    else
+        echo "not installed"
+    fi
+}
+
+run_coolercontrol_menu() {
+    while true; do
+        print_banner
+        print_section "CoolerControl"
+        echo -e "  ${DIM}Fan curves & sensor dashboard — status: $(coolercontrol_status_label)${RESET}"
+        echo ""
+        print_item "1" "Install CoolerControl"   "Install coolercontrold (+ optional GUI) and enable service"
+        print_item "2" "Revert CoolerControl"    "Stop, disable, and remove CoolerControl"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" cc_choice
+
+        case "$cc_choice" in
+            1) install_coolercontrol;      press_enter ;;
+            2) run_revert_coolercontrol;   press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$cc_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# ==============================================================================
+# COMMUNITY FIXES (keyboardspecialist/bc250-steamos)
+# ==============================================================================
+
+FIXES_REPO_URL="https://github.com/keyboardspecialist/bc250-steamos.git"
+# NB: deliberately NOT under /var -- SteamOS's /var partition is tiny (~230 MB,
+# often already nearly full) and this repo's aic8800/ vendor tree alone is
+# tens of MB. $REAL_HOME lives on the large /home partition.
+FIXES_REPO_DIR="$REAL_HOME/.local/share/bc250-fixes/bc250-steamos"
+
+fixes_repo_sync() {
+    local avail_kb
+    avail_kb=$(df -Pk "$REAL_HOME" 2>/dev/null | awk 'NR==2{print $4}')
+    if [[ -n "$avail_kb" && "$avail_kb" -lt 512000 ]]; then
+        fail_with_log "Less than 500MB free at $REAL_HOME -- not enough space to clone the fixes repo." "Community Fixes — low disk space"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$FIXES_REPO_DIR")"
+    if [[ -d "$FIXES_REPO_DIR/.git" ]]; then
+        print_info "Updating community fixes repo..."
+        git -C "$FIXES_REPO_DIR" pull --ff-only || {
+            fail_with_log "Failed to update the community fixes repository." "Community Fixes — git pull"
+            return 1
+        }
+    else
+        print_info "Cloning community fixes repo (keyboardspecialist/bc250-steamos)..."
+        git clone --depth 1 "$FIXES_REPO_URL" "$FIXES_REPO_DIR" || {
+            rm -rf "$FIXES_REPO_DIR"
+            fail_with_log "Failed to clone the community fixes repository." "Community Fixes — git clone"
+            return 1
+        }
+    fi
+    chown -R "$REAL_USER":"$REAL_USER" "$FIXES_REPO_DIR" 2>/dev/null || true
+}
+
+# --- ACPI fix: CPU C-states/P-states (idle + cpufreq scaling) --------------
+ACPI_FIX_DIR="/var/lib/bc250-acpi-fix"
+ACPI_FIX_CPIO_MASTER="$ACPI_FIX_DIR/acpi_override.cpio"
+ACPI_FIX_CPIO_BOOT="/boot/acpi_override.cpio"
+ACPI_FIX_RAW_BASE="https://raw.githubusercontent.com/bc250-collective/bc250-acpi-fix/main"
+ACPI_FIX_HEAL_UNIT="/etc/systemd/system/bc250-acpi-heal.service"
+ACPI_FIX_CPUFREQ_UNIT="/etc/systemd/system/bc250-cpufreq.service"
+
+acpi_fix_installed() {
+    [[ -f "$ACPI_FIX_CPIO_BOOT" ]] || systemctl list-unit-files bc250-acpi-heal.service &>/dev/null
+}
+
+install_acpi_fix() {
+    print_step "ACPI" "Installing ACPI Fix (CPU C-states/P-states)"
+
+    if acpi_fix_installed; then
+        if ! confirm "ACPI fix is already installed. Reinstall it?"; then
+            print_info "Keeping existing installation."
+            return 0
+        fi
+    fi
+
+    mkdir -p "$ACPI_FIX_DIR"
+    if [[ ! -f "$ACPI_FIX_CPIO_MASTER" ]]; then
+        local work
+        work="$(mktemp -d /tmp/bc250-acpi-XXXXXX)"
+        mkdir -p "$work/kernel/firmware/acpi"
+
+        print_info "Fetching SSDT tables (bc250-collective/bc250-acpi-fix)..."
+        if ! curl -fL -o "$work/kernel/firmware/acpi/SSDT-CST.aml" "$ACPI_FIX_RAW_BASE/SSDT-CST.aml" || \
+           ! curl -fL -o "$work/kernel/firmware/acpi/SSDT-PST.aml" "$ACPI_FIX_RAW_BASE/SSDT-PST.aml"; then
+            fail_with_log "Failed to download SSDT tables." "ACPI Fix — download"
+            rm -rf "$work"
+            return 1
+        fi
+        cp "$work"/kernel/firmware/acpi/*.aml "$ACPI_FIX_DIR/"
+
+        if ! command -v cpio >/dev/null 2>&1; then
+            steamos_writable 'pacman -Sy --noconfirm cpio' || {
+                fail_with_log "Failed to install cpio." "ACPI Fix — cpio package"
+                rm -rf "$work"
+                return 1
+            }
+        fi
+
+        print_info "Building early-initrd ACPI override cpio..."
+        if ! (cd "$work" && find kernel | cpio -o -H newc > "$ACPI_FIX_CPIO_MASTER"); then
+            fail_with_log "Failed to build the ACPI override cpio." "ACPI Fix — cpio build"
+            rm -rf "$work"
+            return 1
+        fi
+        rm -rf "$work"
+    fi
+
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        print_info "SteamOS detected: disabling read-only mode..."
+        if ! steamos-readonly disable; then
+            fail_with_log "Failed to disable SteamOS read-only mode." "ACPI Fix — readonly disable"
+            return 1
+        fi
+    fi
+
+    cp -f "$ACPI_FIX_CPIO_MASTER" "$ACPI_FIX_CPIO_BOOT"
+
+    if grep -q '^GRUB_EARLY_INITRD_LINUX_CUSTOM=' "$GRUB_DEFAULT" 2>/dev/null; then
+        sed -i 's|^GRUB_EARLY_INITRD_LINUX_CUSTOM=.*|GRUB_EARLY_INITRD_LINUX_CUSTOM="acpi_override.cpio"|' "$GRUB_DEFAULT"
+    else
+        echo 'GRUB_EARLY_INITRD_LINUX_CUSTOM="acpi_override.cpio"' >> "$GRUB_DEFAULT"
+    fi
+
+    print_info "Regenerating GRUB config..."
+    local grub_rc=0
+    if command -v update-grub >/dev/null 2>&1; then
+        update-grub || grub_rc=1
+    else
+        grub-mkconfig -o /boot/grub/grub.cfg || grub_rc=1
+    fi
+    if [[ $grub_rc -ne 0 ]]; then
+        fail_with_log "Failed to regenerate GRUB config." "ACPI Fix — grub-mkconfig"
+        (( was_steamos )) && { steamos-readonly enable || true; }
+        return 1
+    fi
+
+    cat > "$ACPI_FIX_HEAL_UNIT" <<EOF
+[Unit]
+Description=BC-250 ACPI override self-heal (restore after SteamOS updates)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '\\
+  if [[ ! -f $ACPI_FIX_CPIO_BOOT ]] || ! cmp -s "$ACPI_FIX_CPIO_MASTER" "$ACPI_FIX_CPIO_BOOT"; then \\
+    steamos-readonly disable; \\
+    cp -f "$ACPI_FIX_CPIO_MASTER" "$ACPI_FIX_CPIO_BOOT"; \\
+    command -v update-grub >/dev/null && update-grub || grub-mkconfig -o /boot/grub/grub.cfg; \\
+    steamos-readonly enable; \\
+    echo "bc250: ACPI override restored after OS update; REBOOT to re-activate C/P-states" | systemd-cat -p warning; \\
+  fi'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat > "$ACPI_FIX_CPUFREQ_UNIT" <<'EOF'
+[Unit]
+Description=BC-250 set schedutil cpufreq governor (needs ACPI P-states)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '\
+  if compgen -G /sys/devices/system/cpu/cpu0/cpufreq >/dev/null; then \
+    echo schedutil | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null; \
+  else \
+    echo "bc250: cpufreq not present -- ACPI override not active this boot" | systemd-cat -p warning; \
+  fi'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable bc250-acpi-heal.service bc250-cpufreq.service
+
+    if (( was_steamos )); then
+        print_info "Re-enabling SteamOS read-only mode..."
+        steamos-readonly enable || true
+    fi
+
+    print_success "ACPI fix installed! Reboot required to activate CPU C-states/P-states."
+    print_info "After reboot verify: ${CYAN}ls /sys/devices/system/cpu/cpu0/cpuidle/${RESET} and ${CYAN}cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies${RESET}"
+}
+
+run_revert_acpi_fix() {
+    print_step "R-ACPI" "Revert ACPI Fix"
+
+    if ! acpi_fix_installed; then
+        print_info "ACPI fix does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will remove the ACPI override and self-heal services. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    systemctl disable --now bc250-acpi-heal.service bc250-cpufreq.service 2>/dev/null || true
+
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || true
+    fi
+
+    rm -f "$ACPI_FIX_CPIO_BOOT" "$ACPI_FIX_HEAL_UNIT" "$ACPI_FIX_CPUFREQ_UNIT"
+    sed -i '/^GRUB_EARLY_INITRD_LINUX_CUSTOM=/d' "$GRUB_DEFAULT" 2>/dev/null || true
+    if command -v update-grub >/dev/null 2>&1; then update-grub || true; else grub-mkconfig -o /boot/grub/grub.cfg || true; fi
+    systemctl daemon-reload
+
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+
+    print_success "ACPI fix removed. Reboot to fully revert to stock C/P-state behavior."
+}
+
+# --- DisplayPort audio/video clock fix (patched amdgpu.ko) ------------------
+# fetch-sources.sh (upstream) hardcodes the "jupiter-main" repo channel for the
+# kernel-headers package it needs, but a system pinned to a versioned branch
+# (e.g. jupiter-3.8) can have a kernel/headers pair that only exists there --
+# jupiter-main 404s even though the exact package is one repo channel away.
+# Pre-stage the file it expects (it skips its own download if already present)
+# by trying this system's actual configured repo channels first.
+audio_fix_prefetch_headers() {
+    local fix_dir="$1" rel sha rest flavor mid pkgrel kver pkgver hdrpkg
+    rel="$(uname -r)"
+    case "$rel" in
+        *-neptune-*-g*) ;;
+        *) return 0 ;;
+    esac
+    sha="${rel##*-g}"
+    rest="${rel%-g"$sha"}"
+    flavor="${rest##*-neptune-}"
+    mid="${rest%-neptune-"$flavor"}"
+    pkgrel="${mid##*-}"
+    kver="${mid%-"$pkgrel"}"
+    pkgver="${kver//-/.}"
+    hdrpkg="linux-neptune-$flavor-headers-$pkgver-$pkgrel-x86_64.pkg.tar.zst"
+
+    [[ -f "$fix_dir/$hdrpkg" ]] && return 0
+
+    local mirror="https://steamdeck-packages.steamos.cloud/archlinux-mirror"
+    local -a candidates=()
+    while IFS= read -r repo; do
+        [[ "$repo" == jupiter-* ]] && candidates+=("$repo")
+    done < <(sed -n 's/^\[\(.*\)\]$/\1/p' /etc/pacman.conf 2>/dev/null)
+    candidates+=(jupiter-main jupiter-beta jupiter-beta-staging)
+
+    local repo
+    for repo in "${candidates[@]}"; do
+        if curl -fsSL -o "$fix_dir/$hdrpkg" "$mirror/$repo/os/x86_64/$hdrpkg" 2>/dev/null; then
+            print_info "Headers package staged from repo '$repo' -> $hdrpkg"
+            return 0
+        fi
+        rm -f "$fix_dir/$hdrpkg"
+    done
+    print_info "Could not pre-stage the headers package from any known repo channel; letting fetch-sources.sh try (and report) on its own."
+}
+
+# install.sh/rollback.sh (upstream) hardcode "mkinitcpio -p linux-neptune-616",
+# which fails on non-standard kernel flavors whose preset has a suffix (e.g.
+# the "-drm-exec" experimental variant: linux-neptune-616-drm-exec.preset).
+# The module itself installs fine either way; only the initramfs rebuild at
+# the very end needs the right preset name. Symlink the expected name to
+# whatever preset actually exists so their hardcoded call works unmodified.
+audio_fix_ensure_mkinitcpio_preset() {
+    local expected="/etc/mkinitcpio.d/linux-neptune-616.preset"
+    [[ -e "$expected" ]] && return 0
+
+    local actual
+    actual=$(compgen -G "/etc/mkinitcpio.d/linux-neptune-616*.preset" | head -1)
+    [[ -n "$actual" ]] || return 0
+
+    print_info "mkinitcpio preset '$expected' missing; linking to '$(basename "$actual")' (non-standard kernel flavor)."
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || { print_info "Could not disable read-only mode; skipping preset symlink."; return 1; }
+    fi
+    ln -sf "$(basename "$actual")" "$expected"
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+}
+
+install_audio_fix() {
+    print_step "AUDIO" "Installing DisplayPort Audio/Video Clock Fix"
+
+    echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
+    echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
+    echo -e "  ${DIM}Only needed if DisplayPort video/audio play back at ~82% speed (pitched down).${RESET}"
+    echo ""
+    if ! confirm "Continue with the DisplayPort audio/video fix?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+
+    local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        fail_with_log "bc250-audio-fix directory not found in the fixes repository." "Audio Fix — missing directory"
+        return 1
+    fi
+
+    print_info "Running patch-driver.sh (fetch-sources.sh && build.sh && install.sh)..."
+    print_info "This clones the matching Valve kernel source tree and can take several minutes."
+    audio_fix_prefetch_headers "$fix_dir"
+    audio_fix_ensure_mkinitcpio_preset
+    # patch-driver.sh refuses to run as root (it calls sudo itself for the
+    # install step only) -- run it as the real user; you may be prompted for
+    # your sudo password when it reaches install.sh.
+    chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ./patch-driver.sh"; then
+        fail_with_log "DisplayPort audio/video fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Audio Fix — patch-driver.sh"
+        return 1
+    fi
+
+    print_success "DisplayPort audio/video fix installed! Reboot required."
+    print_info "After reboot, verify DisplayPort video/audio play back at normal speed."
+    print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
+}
+
+run_revert_audio_fix() {
+    print_step "R-AUDIO" "Revert DisplayPort Audio/Video Fix"
+
+    local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        print_info "Fixes repository not found locally — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will restore the stock amdgpu.ko module. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    audio_fix_ensure_mkinitcpio_preset
+
+    if ! (cd "$fix_dir" && ./rollback.sh); then
+        fail_with_log "Failed to roll back the DisplayPort audio/video fix." "Audio Fix — rollback.sh"
+        return 1
+    fi
+
+    print_success "DisplayPort audio/video fix reverted to stock amdgpu.ko. Reboot to apply."
+}
+
+# --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
+AIC8800_TOOLS_DIR="/home/deck/tools/bc250"
+AIC8800_LINK="$AIC8800_TOOLS_DIR/aic8800"
+
+aic8800_installed() {
+    [[ -d /sys/module/aic8800_fdrv || -f /etc/modprobe.d/aic8800.conf ]]
+}
+
+install_aic8800_wifi() {
+    print_step "WIFI" "Installing AIC8800D80 USB WiFi/BT Driver"
+    echo -e "  ${DIM}Only needed for an AIC8800D80-based USB WiFi/BT dongle${RESET}"
+    echo -e "  ${DIM}(enumerates as a fake 1111:1111 mass-storage device before setup).${RESET}"
+    echo ""
+
+    fixes_repo_sync || return 1
+
+    mkdir -p "$AIC8800_TOOLS_DIR"
+    ln -sfn "$FIXES_REPO_DIR/aic8800" "$AIC8800_LINK"
+
+    local setup_script="$AIC8800_LINK/steamdeck-setup.sh"
+    if [[ ! -f "$setup_script" ]]; then
+        fail_with_log "steamdeck-setup.sh not found in the fixes repository." "AIC8800 WiFi — missing script"
+        return 1
+    fi
+
+    print_info "Running steamdeck-setup.sh (builds and installs the driver)..."
+    if ! bash "$setup_script"; then
+        fail_with_log "AIC8800 driver setup failed." "AIC8800 WiFi — steamdeck-setup.sh"
+        return 1
+    fi
+
+    print_success "AIC8800 WiFi/BT driver installed!"
+    print_info "Check with: ${CYAN}ip link${RESET} (WiFi) and ${CYAN}bluetoothctl${RESET} (Bluetooth)."
+    print_info "${YELLOW}Note:${RESET} rebuild after each SteamOS update — safe to re-run this option any time."
+}
+
+run_revert_aic8800_wifi() {
+    print_step "R-WIFI" "Revert AIC8800 WiFi/BT Driver"
+
+    if ! aic8800_installed; then
+        print_info "AIC8800 driver does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will unload the driver and remove its configuration. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    modprobe -r aic8800_fdrv aic_load_fw 2>/dev/null || true
+
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || true
+    fi
+
+    rm -f /etc/modprobe.d/aic8800.conf /etc/udev/rules.d/40-aic8800-modeswitch.rules '/etc/usb_modeswitch.d/1111:1111'
+    local mod_dir="/usr/lib/modules/$(uname -r)/updates/aic8800"
+    if [[ -d "$mod_dir" ]]; then
+        rm -rf "$mod_dir"
+        depmod
+    fi
+    udevadm control --reload 2>/dev/null || true
+
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+
+    print_success "AIC8800 driver configuration removed."
+}
+
+run_fixes_menu() {
+    while true; do
+        print_banner
+        print_section "Community Fixes"
+        echo -e "  ${DIM}From keyboardspecialist/bc250-steamos — ACPI power states, DP audio/video, AIC8800 WiFi${RESET}"
+        echo ""
+        print_item "1" "Install ACPI Fix (C/P-states)"     "CPU idle states + cpufreq scaling (800-3200 MHz)"
+        print_item "2" "Install DP Audio/Video Fix"        "⚠  Patched amdgpu.ko — fixes ~82% speed DP audio/video"
+        print_item "3" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
+        echo ""
+        print_item "4" "Revert ACPI Fix"                   ""
+        print_item "5" "Revert DP Audio/Video Fix"         ""
+        print_item "6" "Revert AIC8800 WiFi/BT Driver"     ""
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" fix_choice
+
+        case "$fix_choice" in
+            1) install_acpi_fix;        press_enter ;;
+            2) install_audio_fix;       press_enter ;;
+            3) install_aic8800_wifi;    press_enter ;;
+            4) run_revert_acpi_fix;     press_enter ;;
+            5) run_revert_audio_fix;    press_enter ;;
+            6) run_revert_aic8800_wifi; press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$fix_choice'"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 # ==============================================================================
@@ -1387,23 +2159,72 @@ run_status() {
     cpu_svc_result=$(systemctl show bc250-smu-oc.service --property=ExecMainStatus --value 2>/dev/null || echo "unknown")
     gpu_svc_state=$(systemctl is-active cyan-skillfish-governor-smu.service 2>/dev/null || echo "unknown")
 
-    local cpu_color gpu_color cpu_label
+    local cpu_icon gpu_icon cpu_label
     if [[ "$cpu_svc_enabled" == "enabled" && "$cpu_svc_result" == "0" ]]; then
-        cpu_color="$GREEN"; cpu_label="enabled (applied successfully)"
+        cpu_icon="$ICON_OK"; cpu_label="${GREEN}enabled (applied successfully)${RESET}"
     elif [[ "$cpu_svc_enabled" == "enabled" ]]; then
-        cpu_color="$YELLOW"; cpu_label="enabled (exit code: ${cpu_svc_result})"
+        cpu_icon="$ICON_WARN"; cpu_label="${YELLOW}enabled (exit code: ${cpu_svc_result})${RESET}"
     else
-        cpu_color="$RED"; cpu_label="disabled"
+        cpu_icon="$ICON_WARN"; cpu_label="${YELLOW}disabled${RESET}"
     fi
-    [[ "$gpu_svc_state" == "active" ]] && gpu_color="$GREEN" || gpu_color="$RED"
-    echo -e "  ${CYAN}CPU Service${RESET}       ${cpu_color}${cpu_label}${RESET}"
-    echo -e "  ${CYAN}GPU Service${RESET}       ${gpu_color}${gpu_svc_state}${RESET}"
+    if [[ "$gpu_svc_state" == "active" ]]; then gpu_icon="$ICON_OK"; else gpu_icon="$ICON_WARN"; fi
+    echo -e "  ${CYAN}CPU Service${RESET}       ${cpu_icon} ${cpu_label}"
+    echo -e "  ${CYAN}GPU Service${RESET}       ${gpu_icon} $([[ "$gpu_svc_state" == "active" ]] && echo -e "${GREEN}${gpu_svc_state}${RESET}" || echo -e "${YELLOW}${gpu_svc_state}${RESET}")"
 
     if mitigations_currently_off; then
-        echo -e "  ${CYAN}CPU Mitigations${RESET}   ${RED}disabled${RESET} (mitigations=off set in GRUB)"
+        echo -e "  ${CYAN}CPU Mitigations${RESET}   ${ICON_OK} ${GREEN}disabled${RESET} (mitigations=off set in GRUB)"
     else
-        echo -e "  ${CYAN}CPU Mitigations${RESET}   ${GREEN}enabled${RESET} (default)"
+        echo -e "  ${CYAN}CPU Mitigations${RESET}   ${ICON_WARN} ${YELLOW}enabled${RESET} (default — disable for max performance)"
     fi
+
+    echo ""
+    print_section "Sensors & Fan Control"
+
+    local sens_driver sens_icon sens_color
+    sens_driver="$(sensors_active_driver)"
+    case "$sens_driver" in
+        nct6687) sens_icon="$ICON_OK";   sens_color="$GREEN";  sens_driver="nct6687 (loaded — full PWM control)" ;;
+        nct6683) sens_icon="$ICON_WARN"; sens_color="$YELLOW"; sens_driver="nct6683 (loaded — read-only)" ;;
+        *)       sens_icon="$ICON_WARN"; sens_color="$YELLOW"; sens_driver="not loaded" ;;
+    esac
+    echo -e "  ${CYAN}Sensor Driver${RESET}     ${sens_icon} ${sens_color}${sens_driver}${RESET}"
+
+    local cc_svc_state cc_icon cc_color
+    cc_svc_state=$(systemctl is-active coolercontrold.service 2>/dev/null || echo "not installed")
+    if [[ "$cc_svc_state" == "active" ]]; then cc_icon="$ICON_OK"; cc_color="$GREEN"; else cc_icon="$ICON_WARN"; cc_color="$YELLOW"; fi
+    echo -e "  ${CYAN}CoolerControl${RESET}     ${cc_icon} ${cc_color}${cc_svc_state}${RESET}"
+
+    echo ""
+    print_section "Community Fixes"
+
+    local acpi_icon acpi_color acpi_label
+    if acpi_fix_installed; then
+        if compgen -G /sys/devices/system/cpu/cpu0/cpufreq >/dev/null; then
+            acpi_icon="$ICON_OK"; acpi_color="$GREEN"; acpi_label="active (C/P-states present)"
+        else
+            acpi_icon="$ICON_WARN"; acpi_color="$YELLOW"; acpi_label="installed — reboot pending"
+        fi
+    else
+        acpi_icon="$DIM"; acpi_color="$DIM"; acpi_label="not installed"
+    fi
+    echo -e "  ${CYAN}ACPI Fix${RESET}          ${acpi_icon} ${acpi_color}${acpi_label}${RESET}"
+
+    local audio_icon audio_color audio_label resolved_amdgpu
+    resolved_amdgpu=$(modinfo -F filename amdgpu 2>/dev/null || echo "")
+    if [[ "$resolved_amdgpu" == *"/updates/"* ]]; then
+        audio_icon="$ICON_OK"; audio_color="$GREEN"; audio_label="patched module active"
+    else
+        audio_icon="$DIM"; audio_color="$DIM"; audio_label="stock amdgpu.ko"
+    fi
+    echo -e "  ${CYAN}DP Audio/Video Fix${RESET} ${audio_icon} ${audio_color}${audio_label}${RESET}"
+
+    local wifi_icon wifi_color wifi_label
+    if aic8800_installed; then
+        wifi_icon="$ICON_OK"; wifi_color="$GREEN"; wifi_label="installed"
+    else
+        wifi_icon="$DIM"; wifi_color="$DIM"; wifi_label="not installed"
+    fi
+    echo -e "  ${CYAN}AIC8800 WiFi Driver${RESET} ${wifi_icon} ${wifi_color}${wifi_label}${RESET}"
 
     echo ""
     echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -1414,17 +2235,29 @@ run_status() {
 # ==============================================================================
 
 run_install_all() {
-    print_step "00" "Install All — CPU Governor + GPU Governor"
+    print_step "00" "Install All — CPU Governor + GPU Governor + Community Fixes"
     run_cpu_governor
     echo ""
     run_gpu_governor
+    echo ""
+    install_acpi_fix
+    echo ""
+    install_audio_fix
+    echo ""
+    install_aic8800_wifi
 }
 
 run_uninstall_all() {
-    print_step "00-U" "Uninstall All — CPU Governor + GPU Governor"
+    print_step "00-U" "Uninstall All — CPU Governor + GPU Governor + Community Fixes"
     run_revert_cpu_governor
     echo ""
     run_revert_gpu_governor
+    echo ""
+    run_revert_acpi_fix
+    echo ""
+    run_revert_audio_fix
+    echo ""
+    run_revert_aic8800_wifi
 }
 
 run_cu_live_manager() {
@@ -1455,6 +2288,9 @@ show_menu() {
     echo ""
     print_section "Tools"
     print_item  "C"  "CU Unlock Live"        "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
+    print_item  "F"  "Sensors & Fan Control" "NCT6686D sensors / NCT6687 PWM fan control"
+    print_item  "K"  "CoolerControl"         "Install/revert CoolerControl fan-curve daemon + GUI"
+    print_item  "X"  "Community Fixes"       "ACPI power states, DP audio/video, AIC8800 WiFi"
     echo ""
     print_section "System"
     print_item  "S"  "Status"                "Current system summary"
@@ -1478,6 +2314,9 @@ while true; do
         8) run_revert_cpu_governor; press_enter ;;
         9) run_revert_gpu_governor; press_enter ;;
         C) run_cu_live_manager;    press_enter ;;
+        F) run_sensors_menu ;;
+        K) run_coolercontrol_menu ;;
+        X) run_fixes_menu ;;
         S) run_status;             press_enter ;;
         0)
             echo -e "\n  ${DIM}Goodbye.${RESET}\n"
