@@ -16,7 +16,13 @@ REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 [[ -z "$REAL_HOME" || ! -d "$REAL_HOME" ]] && REAL_HOME="/root"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
+
+TOOLKIT_VERSION="v2026-07-09"
+REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
+CHANGELOG_URL="${REPO_URL}#changelog"
+TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/bc250-tollkit-steam-os-real.sh"
 
 # ==============================================================================
 # COLORS & FORMATTING
@@ -38,8 +44,8 @@ print_banner() {
     echo -e "${BOLD}${CYAN}"
     echo "  ╔═════════════════════════════════════════════════════════════════════╗"
     echo "  ║                                                                     ║"
-    echo "  ║                 BC-250 SteamOS Real Toolkit                         ║"
-    echo "  ║           CPU/GPU Governors & Performance Profiles                  ║"
+    echo "  ║               BC-250 SteamOS Real Toolkit ${TOOLKIT_VERSION}               ║"
+    echo "  ║               CPU/GPU Governors & Performance Profiles              ║"
     echo "  ║                                                                     ║"
     echo "  ╚═════════════════════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
@@ -74,6 +80,94 @@ confirm() {
     echo -e "\n  ${YELLOW}${prompt}${RESET} ${DIM}[y/N]${RESET} "
     read -rp "  → " ans
     [[ "$ans" =~ ^[Yy]$ ]]
+}
+
+open_url() {
+    local url="$1"
+    if command -v xdg-open >/dev/null 2>&1; then
+        sudo -u "$REAL_USER" xdg-open "$url" >/dev/null 2>&1 &
+    fi
+    print_info "URL: ${CYAN}${url}${RESET}"
+}
+
+run_help() {
+    print_step "HLP" "Help"
+    print_info "Full documentation, usage instructions and troubleshooting live in the repo README:"
+    open_url "$REPO_URL"
+}
+
+run_changelog() {
+    print_step "LOG" "Changelog"
+    print_info "Full list of changes/updates (README changelog section on GitHub):"
+    open_url "$CHANGELOG_URL"
+}
+
+run_update_script() {
+    print_step "UPD" "Update Script"
+    print_info "Current version: ${TOOLKIT_VERSION}"
+    print_info "Downloading latest version from GitHub..."
+
+    local tmp
+    tmp="$(mktemp /tmp/bc250-toolkit-update.XXXXXX)"
+    if ! curl -fsSL "$TOOLKIT_RAW_URL" -o "$tmp"; then
+        print_error "Failed to download the latest script. Check your internet connection."
+        rm -f "$tmp"
+        return 1
+    fi
+
+    if ! bash -n "$tmp"; then
+        print_error "Downloaded script failed a syntax check — aborting update to avoid breaking the toolkit."
+        rm -f "$tmp"
+        return 1
+    fi
+
+    if cmp -s "$tmp" "$SCRIPT_PATH"; then
+        print_info "Already up to date."
+        rm -f "$tmp"
+        return 0
+    fi
+
+    if ! confirm "A new version is available. Replace $SCRIPT_PATH and restart the toolkit now?"; then
+        print_info "Cancelled."
+        rm -f "$tmp"
+        return 0
+    fi
+
+    cp "$SCRIPT_PATH" "${SCRIPT_PATH}.bak"
+    mv "$tmp" "$SCRIPT_PATH"
+    chmod +x "$SCRIPT_PATH"
+    chown "$REAL_USER":"$REAL_USER" "$SCRIPT_PATH" 2>/dev/null || true
+
+    print_success "Updated! Backup of the previous version saved at ${SCRIPT_PATH}.bak"
+    print_info "Relaunching..."
+    sleep 1
+    exec bash "$SCRIPT_PATH"
+}
+
+ensure_desktop_shortcut() {
+    local desktop_dir
+    desktop_dir="$(sudo -u "$REAL_USER" xdg-user-dir DESKTOP 2>/dev/null || echo "")"
+    [[ -n "$desktop_dir" ]] || desktop_dir="$REAL_HOME/Desktop"
+    [[ -d "$desktop_dir" ]] || mkdir -p "$desktop_dir" 2>/dev/null || return 0
+
+    local shortcut="$desktop_dir/BC-250 Toolkit.desktop"
+    [[ -f "$shortcut" ]] && return 0
+
+    cat > "$shortcut" <<SHORTCUT_EOF
+[Desktop Entry]
+Type=Application
+Name=BC-250 SteamOS Real Toolkit
+Comment=CPU/GPU governors, swap/zswap, sensors and community fixes for the BC-250
+Exec=konsole -e sudo bash "$SCRIPT_PATH"
+Icon=utilities-terminal
+Terminal=false
+Categories=System;
+SHORTCUT_EOF
+
+    chmod +x "$shortcut"
+    chown "$REAL_USER":"$REAL_USER" "$shortcut" 2>/dev/null || true
+    sudo -u "$REAL_USER" gio set "$shortcut" metadata::trusted true >/dev/null 2>&1 || true
+    print_info "Desktop shortcut created: $shortcut"
 }
 
 # ==============================================================================
@@ -315,6 +409,13 @@ gpu_governor_installed() {
 
 gpu_governor_setup() {
     print_step "02-S" "GPU Governor — Configuration Setup"
+    # The AUR package's default-config.toml ships with dbus.enabled unset
+    # (defaults to false) -- the governor needs it true to expose its D-Bus
+    # interface. See: https://github.com/filippor/cyan-skillfish-governor
+    if [[ -f "$GPU_DEST" ]] && ! grep -q '^\[dbus\]' "$GPU_DEST"; then
+        print_info "Enabling dbus.enabled in $GPU_DEST..."
+        printf '[dbus]\nenabled = true\n' | cat - "$GPU_DEST" > "${GPU_DEST}.tmp" && mv "${GPU_DEST}.tmp" "$GPU_DEST"
+    fi
     print_info "Enabling and starting systemd service..."
     systemctl enable --now cyan-skillfish-governor-smu.service || {
         fail_with_log "Failed to enable GPU governor service." "GPU Governor Setup — enable service"
@@ -402,6 +503,7 @@ mitigations_currently_off() {
 }
 
 run_disable_mitigations() {
+    local auto="${1:-}"
     print_step "T-1" "Disable CPU Mitigations"
 
     if mitigations_currently_off; then
@@ -409,7 +511,7 @@ run_disable_mitigations() {
         return 0
     fi
 
-    if ! confirm "This will add 'mitigations=off' to the GRUB kernel command line and regenerate the bootloader. A reboot is required. Proceed?"; then
+    if [[ "$auto" != "auto" ]] && ! confirm "This will add 'mitigations=off' to the GRUB kernel command line and regenerate the bootloader. A reboot is required. Proceed?"; then
         print_info "Cancelled."
         return 0
     fi
@@ -442,6 +544,7 @@ run_disable_mitigations() {
 }
 
 run_revert_mitigations() {
+    local auto="${1:-}"
     print_step "T-2" "Re-enable CPU Mitigations"
 
     if ! mitigations_currently_off; then
@@ -449,7 +552,7 @@ run_revert_mitigations() {
         return 0
     fi
 
-    if ! confirm "This will remove 'mitigations=off' from the GRUB kernel command line and regenerate the bootloader. A reboot is required. Proceed?"; then
+    if [[ "$auto" != "auto" ]] && ! confirm "This will remove 'mitigations=off' from the GRUB kernel command line and regenerate the bootloader. A reboot is required. Proceed?"; then
         print_info "Cancelled."
         return 0
     fi
@@ -474,6 +577,230 @@ run_revert_mitigations() {
     }
 
     print_success "CPU mitigations re-enabled. Reboot to apply."
+    print_info "Backup saved at $GRUB_DEFAULT.bak"
+}
+
+# ==============================================================================
+# SWAP & ZRAM/ZSWAP
+# ==============================================================================
+# Adapted from redbeard1083/bc250-toolkit's "Enable Swap" / "ZRAM -> ZSWAP"
+# steps. That toolkit targets CachyOS+Limine with a dedicated Btrfs
+# /var/swap subvolume; SteamOS already ships its own swapfile mechanism
+# (swapfile.service + home-swapfile.swap, 1024M at /home/swapfile on ext4)
+# and zram via zram-generator, so this reuses those instead of creating a
+# parallel setup: we resize SteamOS's own swapfile in place, and gate ZRAM
+# off / ZSWAP on via the systemd.zram=/zswap.* kernel command-line options
+# (GRUB) exactly like the upstream repo, since zram-generator itself
+# honors systemd.zram=0 to suppress the zram0 device regardless of its
+# config file.
+
+SWAPFILE_PATH="/home/swapfile"
+SWAPFILE_STOCK_SIZE_MB=1024   # SteamOS's own swapfile.service default
+SWAPPINESS_CONF="/etc/sysctl.d/99-bc250-swappiness.conf"
+MKINITCPIO_CONF="/etc/mkinitcpio.conf"
+
+swapfile_size_mb() {
+    [[ -f "$SWAPFILE_PATH" ]] || { echo 0; return; }
+    echo $(( $(stat -c %s "$SWAPFILE_PATH") / 1024 / 1024 ))
+}
+
+zswap_currently_on() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*zswap\.enabled=1' "$GRUB_DEFAULT" >/dev/null 2>&1
+}
+
+zram_currently_disabled() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*systemd\.zram=0' "$GRUB_DEFAULT" >/dev/null 2>&1
+}
+
+run_configure_swap() {
+    local auto="${1:-}"
+    print_step "SW-1" "Configure Swap"
+    echo -e "  ${DIM}Resizes SteamOS's own swapfile ($SWAPFILE_PATH) and sets vm.swappiness.${RESET}"
+    echo ""
+
+    local swap_size swappiness
+    if [[ "$auto" == "auto" ]]; then
+        swap_size="16"
+        swappiness="60"
+        print_info "Install All: using defaults (16G, swappiness=60). Use 'Configure Swap' from the menu to customize."
+    else
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Swap size in GB (default: 16):${RESET} ")" swap_size_input
+        if [[ -z "$swap_size_input" ]]; then
+            swap_size="16"
+        elif [[ "$swap_size_input" =~ ^[0-9]+$ ]] && (( swap_size_input > 0 )); then
+            swap_size="$swap_size_input"
+        else
+            print_error "Invalid size '$swap_size_input' — must be a positive integer. Using default 16G."
+            swap_size="16"
+        fi
+
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Swappiness value (default: 60):${RESET} ")" swappiness_input
+        if [[ -z "$swappiness_input" ]]; then
+            swappiness="60"
+        elif [[ "$swappiness_input" =~ ^[0-9]+$ ]]; then
+            swappiness="$swappiness_input"
+        else
+            print_error "Invalid swappiness '$swappiness_input' — must be a number. Using default 60."
+            swappiness="60"
+        fi
+    fi
+
+    local free_home_gb
+    free_home_gb=$(df --output=avail -BG "$(dirname "$SWAPFILE_PATH")" | tail -1 | tr -dc '0-9')
+    if [[ "$auto" != "auto" ]] && ! confirm "This will replace $SWAPFILE_PATH with a ${swap_size}G swapfile and set vm.swappiness=${swappiness} (${free_home_gb}G free on $(dirname "$SWAPFILE_PATH")). Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    print_info "Disabling and removing existing swapfile..."
+    swapoff "$SWAPFILE_PATH" 2>/dev/null || true
+    rm -f "$SWAPFILE_PATH"
+
+    print_info "Creating ${swap_size}G swapfile at $SWAPFILE_PATH..."
+    if findmnt -no FSTYPE "$(dirname "$SWAPFILE_PATH")" 2>/dev/null | grep -q btrfs; then
+        btrfs filesystem mkswapfile --size "${swap_size}G" "$SWAPFILE_PATH" || {
+            fail_with_log "Failed to create Btrfs swapfile." "Configure Swap — mkswapfile"
+            return 1
+        }
+    else
+        fallocate -l "${swap_size}G" "$SWAPFILE_PATH" 2>/dev/null || dd if=/dev/zero of="$SWAPFILE_PATH" bs=1M count=$(( swap_size * 1024 )) status=none
+        chmod 600 "$SWAPFILE_PATH"
+        mkswap "$SWAPFILE_PATH" || {
+            fail_with_log "Failed to format swapfile." "Configure Swap — mkswap"
+            return 1
+        }
+    fi
+
+    print_info "Enabling swapfile..."
+    swapon "$SWAPFILE_PATH" || {
+        fail_with_log "Failed to enable swap." "Configure Swap — swapon"
+        return 1
+    }
+
+    print_info "Setting swappiness to ${swappiness}..."
+    echo "vm.swappiness = ${swappiness}" > "$SWAPPINESS_CONF"
+    sysctl -p "$SWAPPINESS_CONF" >/dev/null
+
+    print_success "Swap configured! Current swap:"
+    echo ""
+    swapon --show | sed 's/^/    /'
+}
+
+run_revert_swap() {
+    local auto="${1:-}"
+    print_step "R-SW" "Revert Swap to SteamOS Default"
+
+    if (( $(swapfile_size_mb) <= SWAPFILE_STOCK_SIZE_MB )) && [[ ! -f "$SWAPPINESS_CONF" ]]; then
+        print_info "Swap already appears to be at SteamOS defaults — nothing to revert."
+        return 0
+    fi
+
+    if [[ "$auto" != "auto" ]] && ! confirm "This will shrink $SWAPFILE_PATH back to the stock ${SWAPFILE_STOCK_SIZE_MB}M and remove the custom swappiness override. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    print_info "Disabling and removing current swapfile..."
+    swapoff "$SWAPFILE_PATH" 2>/dev/null || true
+    rm -f "$SWAPFILE_PATH"
+
+    print_info "Recreating stock ${SWAPFILE_STOCK_SIZE_MB}M swapfile (matching swapfile.service)..."
+    mkswap --file "$SWAPFILE_PATH" --size "${SWAPFILE_STOCK_SIZE_MB}M" || {
+        fail_with_log "Failed to recreate stock swapfile." "Revert Swap — mkswap"
+        return 1
+    }
+    swapon "$SWAPFILE_PATH" || true
+
+    print_info "Removing swappiness override (default: 60)..."
+    rm -f "$SWAPPINESS_CONF"
+    sysctl vm.swappiness=60 >/dev/null 2>&1 || true
+
+    print_success "Swap reverted to SteamOS default (${SWAPFILE_STOCK_SIZE_MB}M, swappiness=60)."
+}
+
+run_zram_zswap_toggle() {
+    local auto="${1:-}"
+    print_step "SW-2" "Disable ZRAM & Enable ZSWAP"
+
+    if zram_currently_disabled && zswap_currently_on; then
+        print_info "ZRAM is already disabled and ZSWAP is already enabled."
+        return 0
+    fi
+
+    if [[ "$auto" != "auto" ]] && ! confirm "This will disable ZRAM, enable ZSWAP (lz4, 25% pool) via GRUB kernel parameters, add lz4 modules to the initramfs, and regenerate the bootloader. A reboot is required. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    if [[ ! -f "$GRUB_DEFAULT" ]]; then
+        print_error "$GRUB_DEFAULT not found."
+        return 1
+    fi
+    if ! command -v update-grub >/dev/null 2>&1; then
+        print_error "update-grub not found. Cannot regenerate GRUB config."
+        return 1
+    fi
+
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'systemd.zram=0'; then
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 systemd.zram=0\"/' \"$GRUB_DEFAULT\"
+        fi
+        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'zswap.enabled=1'; then
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 zswap.enabled=1 zswap.max_pool_percent=25 zswap.compressor=lz4\"/' \"$GRUB_DEFAULT\"
+        fi
+        if ! grep -q 'lz4' \"$MKINITCPIO_CONF\" 2>/dev/null; then
+            sed -i 's/^MODULES=(\\(.*\\))/MODULES=(\\1 lz4 lz4_compress)/' \"$MKINITCPIO_CONF\"
+            mkinitcpio -P
+        fi
+        update-grub
+    " || {
+        fail_with_log "Failed to disable ZRAM / enable ZSWAP." "ZRAM->ZSWAP — grub/mkinitcpio"
+        return 1
+    }
+
+    print_success "ZRAM disabled and ZSWAP enabled. Reboot to apply."
+    print_info "After reboot, verify with: cat /sys/module/zswap/parameters/enabled"
+    print_info "Backup saved at $GRUB_DEFAULT.bak"
+}
+
+run_revert_zram_zswap() {
+    local auto="${1:-}"
+    print_step "R-SW2" "Revert ZRAM/ZSWAP to SteamOS Default"
+
+    if ! zram_currently_disabled && ! zswap_currently_on; then
+        print_info "ZRAM/ZSWAP already at SteamOS defaults — nothing to revert."
+        return 0
+    fi
+
+    if [[ "$auto" != "auto" ]] && ! confirm "This will remove systemd.zram=0 / zswap.* from GRUB, remove lz4 modules from the initramfs, and regenerate the bootloader. A reboot is required. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    if [[ ! -f "$GRUB_DEFAULT" ]]; then
+        print_error "$GRUB_DEFAULT not found."
+        return 1
+    fi
+    if ! command -v update-grub >/dev/null 2>&1; then
+        print_error "update-grub not found. Cannot regenerate GRUB config."
+        return 1
+    fi
+
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ systemd\\.zram=0//g; s/systemd\\.zram=0 //g; s/systemd\\.zram=0//g' \"$GRUB_DEFAULT\"
+        sed -i 's/ zswap\\.enabled=1 zswap\\.max_pool_percent=25 zswap\\.compressor=lz4//g' \"$GRUB_DEFAULT\"
+        sed -i 's/ zswap\\.[a-z_]*=[a-zA-Z0-9]*//g' \"$GRUB_DEFAULT\"
+        sed -i 's/ lz4_compress//g; s/ lz4\\b//g' \"$MKINITCPIO_CONF\" 2>/dev/null || true
+        mkinitcpio -P 2>/dev/null || true
+        update-grub
+    " || {
+        fail_with_log "Failed to revert ZRAM/ZSWAP." "Revert ZRAM/ZSWAP — grub/mkinitcpio"
+        return 1
+    }
+
+    print_success "ZRAM/ZSWAP reverted to SteamOS default. Reboot to apply."
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
 
@@ -1267,6 +1594,39 @@ run_revert_aic8800_wifi() {
     print_success "AIC8800 driver configuration removed."
 }
 
+# --- HDMI-CEC / TV Control (bc250-cec.sh) -----------------------------------
+# Self-contained upstream TUI (same pattern as bc250-cu-live-manager.sh): TV
+# and AVR/receiver control via cecd + CEC-over-DP-AUX tunneling (wake/standby
+# following the console, volume, input switching, multi-device etiquette,
+# diagnostics). Opens its own guided menu; every action is also a CLI verb
+# ("bc250-cec.sh help" for the full list). It manages its own install state
+# under $HOME (toggles, systemd user units) plus one root-owned poweroff unit
+# it installs itself with its own sudo prompt, so this is just a launcher.
+cec_control_installed() {
+    [[ -f "$REAL_HOME/.config/cecd/config.d/50-bc250.toml" ]]
+}
+
+run_cec_control() {
+    print_step "CEC" "HDMI-CEC / TV Control"
+    echo -e "  ${DIM}Wraps the upstream bc250-cec.sh — TV/receiver control via cecd + CEC-over-DP-AUX.${RESET}"
+    echo -e "  ${DIM}Opens its own guided menu (setup, tv-on/off, receiver follow, diagnostics, etc).${RESET}"
+    echo ""
+
+    fixes_repo_sync || return 1
+
+    local cec_script="$FIXES_REPO_DIR/bc250-cec.sh"
+    if [[ ! -f "$cec_script" ]]; then
+        fail_with_log "bc250-cec.sh not found in the fixes repository." "HDMI-CEC — missing script"
+        return 1
+    fi
+    chmod +x "$cec_script" 2>/dev/null || true
+
+    # Must run as the real (deck) user, not root: cecd lives on the user
+    # D-Bus session, and the script itself refuses to run as root (only its
+    # own "shutdown-standby install" step escalates, via its own sudo prompt).
+    runuser -u "$REAL_USER" -- bash "$cec_script"
+}
+
 run_fixes_menu() {
     while true; do
         print_banner
@@ -1339,6 +1699,8 @@ EOF
 }
 
 write_gpu_overclock_1500mhz() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1381,6 +1743,8 @@ EOF
 }
 
 write_gpu_overclock_1600mhz() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1426,6 +1790,8 @@ EOF
 }
 
 write_gpu_overclock_1600mhz_undervolt() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1471,6 +1837,8 @@ EOF
 }
 
 write_gpu_overclock_1750mhz() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1522,6 +1890,8 @@ EOF
 }
 
 write_gpu_overclock_1850mhz() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1573,6 +1943,8 @@ EOF
 }
 
 write_gpu_overclock_2000mhz() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1627,6 +1999,8 @@ EOF
 }
 
 write_gpu_overclock_2100mhz() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1687,6 +2061,8 @@ EOF
 }
 
 write_gpu_overclock_2300mhz() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1762,6 +2138,8 @@ EOF
 }
 
 write_gpu_overclock_2350mhz() { cat > "$GPU_TMPFILE" <<'EOF'
+[dbus]
+enabled = true
 [timing.intervals]
 sample = 250
 adjust = 100_000
@@ -1853,6 +2231,11 @@ install_cpu() {
 install_gpu() {
     if [[ -f "${1:-}" ]]; then
         cp "$1" "$GPU_DEST"
+    fi
+    # Safety net: dbus.enabled must be true for the governor's D-Bus
+    # interface to come up (community-reported default was left unset).
+    if [[ -f "$GPU_DEST" ]] && ! grep -q '^\[dbus\]' "$GPU_DEST"; then
+        printf '[dbus]\nenabled = true\n' | cat - "$GPU_DEST" > "${GPU_DEST}.tmp" && mv "${GPU_DEST}.tmp" "$GPU_DEST"
     fi
     systemctl restart "$GPU_SERVICE"
     if systemctl is-active --quiet "$GPU_SERVICE"; then
@@ -2232,6 +2615,22 @@ run_status() {
     fi
 
     echo ""
+    print_section "Swap & ZRAM/ZSWAP"
+
+    local swap_mb; swap_mb=$(swapfile_size_mb)
+    if (( swap_mb > SWAPFILE_STOCK_SIZE_MB )); then
+        echo -e "  ${CYAN}Swapfile${RESET}          ${ICON_OK} ${GREEN}$(( swap_mb / 1024 ))G${RESET} at $SWAPFILE_PATH"
+    else
+        echo -e "  ${CYAN}Swapfile${RESET}          ${DIM}${swap_mb}M (SteamOS default) at $SWAPFILE_PATH${RESET}"
+    fi
+
+    if zram_currently_disabled && zswap_currently_on; then
+        echo -e "  ${CYAN}ZRAM/ZSWAP${RESET}        ${ICON_OK} ${GREEN}ZRAM off / ZSWAP on${RESET} (lz4)"
+    else
+        echo -e "  ${CYAN}ZRAM/ZSWAP${RESET}        ${DIM}ZRAM on / ZSWAP off (SteamOS default)${RESET}"
+    fi
+
+    echo ""
     print_section "Sensors & Fan Control"
 
     local sens_driver sens_icon sens_color
@@ -2280,6 +2679,14 @@ run_status() {
     fi
     echo -e "  ${CYAN}AIC8800 WiFi Driver${RESET} ${wifi_icon} ${wifi_color}${wifi_label}${RESET}"
 
+    local cec_icon cec_color cec_label
+    if cec_control_installed; then
+        cec_icon="$ICON_OK"; cec_color="$GREEN"; cec_label="configured"
+    else
+        cec_icon="$DIM"; cec_color="$DIM"; cec_label="not configured"
+    fi
+    echo -e "  ${CYAN}HDMI-CEC / TV Control${RESET} ${cec_icon} ${cec_color}${cec_label}${RESET}"
+
     echo ""
     echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
 }
@@ -2289,29 +2696,116 @@ run_status() {
 # ==============================================================================
 
 run_install_all() {
-    print_step "00" "Install All — CPU Governor + GPU Governor + Community Fixes"
+    print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock"
     run_cpu_governor
     echo ""
     run_gpu_governor
+    echo ""
+    run_disable_mitigations auto
+    echo ""
+    run_configure_swap auto
+    echo ""
+    run_zram_zswap_toggle auto
     echo ""
     install_acpi_fix
     echo ""
     install_audio_fix
     echo ""
     install_aic8800_wifi
+    echo ""
+    run_cu_live_manager
 }
 
-run_uninstall_all() {
-    print_step "00-U" "Uninstall All — CPU Governor + GPU Governor + Community Fixes"
+run_revert_all() {
+    print_step "00-U" "Revert All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes"
     run_revert_cpu_governor
     echo ""
     run_revert_gpu_governor
+    echo ""
+    run_revert_mitigations auto
+    echo ""
+    run_revert_swap auto
+    echo ""
+    run_revert_zram_zswap auto
     echo ""
     run_revert_acpi_fix
     echo ""
     run_revert_audio_fix
     echo ""
     run_revert_aic8800_wifi
+}
+
+run_install_manual() {
+    while true; do
+        print_banner
+        print_section "Install Manual"
+        echo -e "  ${DIM}Same components as Install All — pick them one at a time.${RESET}"
+        echo ""
+        print_item "1" "Install CPU Governor"          "bc250-smu-oc CPU overclock service"
+        print_item "2" "Install GPU Governor"          "cyan-skillfish GPU governor service"
+        print_item "3" "Disable CPU Mitigations"        "Add mitigations=off to GRUB"
+        print_item "4" "Configure Swap"                "Resize swapfile, set vm.swappiness"
+        print_item "5" "Disable ZRAM & Enable ZSWAP"    "lz4, 25% pool — needs reboot"
+        print_item "6" "Install ACPI Fix"               "CPU C-/P-states"
+        print_item "7" "Install DP Audio/Video Fix"     "⚠  Patched amdgpu.ko clock fix"
+        print_item "8" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB dongles"
+        print_item "9" "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" manual_choice
+
+        case "$manual_choice" in
+            1) run_cpu_governor;        press_enter ;;
+            2) run_gpu_governor;        press_enter ;;
+            3) run_disable_mitigations; press_enter ;;
+            4) run_configure_swap;      press_enter ;;
+            5) run_zram_zswap_toggle;   press_enter ;;
+            6) install_acpi_fix;        press_enter ;;
+            7) install_audio_fix;       press_enter ;;
+            8) install_aic8800_wifi;    press_enter ;;
+            9) run_cu_live_manager;     press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$manual_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+run_swap_menu() {
+    while true; do
+        print_banner
+        print_section "Swap & ZRAM/ZSWAP"
+        echo -e "  ${DIM}Adapted from redbeard1083/bc250-toolkit — swapfile size/swappiness, ZRAM -> ZSWAP${RESET}"
+        echo ""
+        echo -e "  ${CYAN}Swapfile${RESET}   $SWAPFILE_PATH — $(( $(swapfile_size_mb) )) MB"
+        echo -e "  ${CYAN}ZRAM${RESET}       $(zram_currently_disabled && echo "disabled (systemd.zram=0 in GRUB)" || echo "enabled (SteamOS default)")"
+        echo -e "  ${CYAN}ZSWAP${RESET}      $(zswap_currently_on && echo "enabled in GRUB" || echo "disabled (SteamOS default)")"
+        echo ""
+        print_item "1" "Configure Swap"            "Resize $SWAPFILE_PATH and set vm.swappiness"
+        print_item "2" "Disable ZRAM & Enable ZSWAP" "lz4, 25% pool — needs reboot"
+        echo ""
+        print_item "3" "Revert Swap to Default"     "Back to stock ${SWAPFILE_STOCK_SIZE_MB}M / swappiness=60"
+        print_item "4" "Revert ZRAM/ZSWAP to Default" "Back to stock ZRAM — needs reboot"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" swap_choice
+
+        case "$swap_choice" in
+            1) run_configure_swap;      press_enter ;;
+            2) run_zram_zswap_toggle;   press_enter ;;
+            3) run_revert_swap;         press_enter ;;
+            4) run_revert_zram_zswap;   press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$swap_choice'"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 run_cu_live_manager() {
@@ -2323,35 +2817,53 @@ run_cu_live_manager() {
     bash "$CU_LIVE_MANAGER"
 }
 
+run_extras_menu() {
+    while true; do
+        print_banner
+        print_section "Extras"
+        echo ""
+        print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
+        print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
+        print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" extras_choice
+
+        case "${extras_choice^^}" in
+            F) run_sensors_menu ;;
+            K) run_coolercontrol_menu ;;
+            H) run_cec_control;         press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$extras_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 show_menu() {
     print_banner
     print_section "Quick Start"
-    print_item  "1"  "Install All"           "Install CPU + GPU governor in one step"
-    print_item  "2"  "Uninstall All"         "Revert CPU + GPU governor in one step"
-    echo ""
-    print_section "Governors & Tweaks"
-    print_item  "3"  "Install CPU Governor"  "bc250-smu-oc CPU overclock service"
-    print_item  "4"  "Install GPU Governor"  "cyan-skillfish GPU governor service"
-    print_item  "5"  "Disable CPU Mitigations" "Add mitigations=off to GRUB"
-    print_item  "6"  "Performance Profiles"  "CPU & GPU performance profiles"
-    echo ""
-    print_section "Revert"
-    print_item  "7"  "Re-enable CPU Mitigations" "Remove mitigations=off from GRUB"
-    print_item  "8"  "Revert CPU Governor"     "Remove bc250-smu-oc service"
-    print_item  "9"  "Revert GPU Governor"     "Remove cyan-skillfish-governor-smu"
-    echo ""
-    print_section "Tools"
-    print_item  "C"  "CU Unlock Live"        "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
-    print_item  "F"  "Sensors & Fan Control" "NCT6686D sensors / NCT6687 PWM fan control"
-    print_item  "K"  "CoolerControl"         "Install/revert CoolerControl fan-curve daemon + GUI"
-    print_item  "X"  "Community Fixes"       "ACPI power states, DP audio/video, AIC8800 WiFi"
+    print_item  "1"  "Install All"           "Everything: CPU/GPU governor, Mitigations, Swap/ZSWAP, Fixes, CU Unlock"
+    print_item  "2"  "Install Manual"        "Same as Install All, one component at a time"
+    print_item  "3"  "Performance Profiles"  "CPU & GPU performance profiles"
+    print_item  "4"  "Revert / Uninstall All" "Undo everything back to SteamOS defaults"
+    print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC / TV control"
     echo ""
     print_section "System"
-    print_item  "S"  "Status"                "Current system summary"
+    print_item  "V"  "Verify My Setup"       "Current system summary"
+    print_item  "G"  "Changelog"             "Open the README changelog on GitHub"
+    print_item  "U"  "Update Script"         "Download the latest version from GitHub"
+    print_item  "I"  "Help"                  "Open the repository (usage & troubleshooting)"
     print_item  "0"  "Exit"                  ""
     echo ""
+    echo -e "  ${DIM}${TOOLKIT_VERSION} — ${REPO_URL}${RESET}"
     echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
 }
+
+ensure_desktop_shortcut || true
 
 while true; do
     show_menu
@@ -2359,19 +2871,14 @@ while true; do
 
     case "${choice^^}" in
         1) run_install_all;       press_enter ;;
-        2) run_uninstall_all;     press_enter ;;
-        3) run_cpu_governor;       press_enter ;;
-        4) run_gpu_governor;       press_enter ;;
-        5) run_disable_mitigations; press_enter ;;
-        6) run_overclock_menu ;;
-        7) run_revert_mitigations;   press_enter ;;
-        8) run_revert_cpu_governor; press_enter ;;
-        9) run_revert_gpu_governor; press_enter ;;
-        C) run_cu_live_manager;    press_enter ;;
-        F) run_sensors_menu ;;
-        K) run_coolercontrol_menu ;;
-        X) run_fixes_menu ;;
-        S) run_status;             press_enter ;;
+        2) run_install_manual ;;
+        3) run_overclock_menu ;;
+        4) run_revert_all;        press_enter ;;
+        5) run_extras_menu ;;
+        V) run_status;            press_enter ;;
+        G) run_changelog;         press_enter ;;
+        U) run_update_script;     press_enter ;;
+        I) run_help;              press_enter ;;
         0)
             echo -e "\n  ${DIM}Goodbye.${RESET}\n"
             exit 0
