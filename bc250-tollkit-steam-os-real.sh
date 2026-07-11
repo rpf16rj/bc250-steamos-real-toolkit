@@ -1280,6 +1280,11 @@ fixes_repo_sync() {
     mkdir -p "$(dirname "$FIXES_REPO_DIR")"
     if [[ -d "$FIXES_REPO_DIR/.git" ]]; then
         print_info "Updating community fixes repo..."
+        # This checkout is a build workspace (build.sh writes artifacts like
+        # amdgpu.ko.zst into it) — discard any local modifications before
+        # pulling so a previous build never blocks future updates.
+        git -C "$FIXES_REPO_DIR" reset --hard HEAD >/dev/null 2>&1 || true
+        git -C "$FIXES_REPO_DIR" clean -fd >/dev/null 2>&1 || true
         git -C "$FIXES_REPO_DIR" pull --ff-only || {
             fail_with_log "Failed to update the community fixes repository." "Community Fixes — git pull"
             return 1
