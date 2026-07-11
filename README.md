@@ -51,6 +51,10 @@ Without their work, none of this would be possible. 🙏
 
 ## Changelog
 
+### 2026-07-11 (2)
+
+- **`game-save-sync`** has been extracted into its own standalone repository: [nonsteam-save-sync](https://github.com/rpf16rj/nonsteam-save-sync). It is no longer part of this toolkit. See that repo for installation and usage instructions.
+
 ### 2026-07-11
 
 - Added an Xbox Wireless Adapter driver installer to **Extras**: installs `dkms`, `xone-dkms`, and `xone-dongle-firmware` via the AUR helper, blacklists conflicting drivers (`xpad`, `mt76x2u`), and loads `xone` automatically.

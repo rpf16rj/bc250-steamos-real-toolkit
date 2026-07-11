@@ -1,3 +1,6 @@
 bc250_smu_oc/
 bc250-steamos-real-toolkit.code-workspace
 .devin/workflows/clear.md
+game-save-sync/.venv/
+game-save-sync/__pycache__/
+game-save-sync/*.pyc
