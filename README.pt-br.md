@@ -51,6 +51,10 @@ Sem o trabalho deles, nada disso seria possível. 🙏
 
 ## Changelog
 
+### 2026-07-11
+
+- Adicionado instalador do driver do Adaptador Xbox Wireless em **Extras**: instala `dkms`, `xone-dkms` e `xone-dongle-firmware` via AUR helper, bloqueia drivers conflitantes (`xpad`, `mt76x2u`) e carrega o `xone` automaticamente.
+
 ### 2026-07-09
 
 - Menu totalmente simplificado e reorganizado: **Install All**, **Install Manual**, **Performance Profiles**, **Revert/Uninstall All** e **Extras** (sensores, CoolerControl, HDMI-CEC), além de acesso rápido a **Verify My Setup**, **Changelog**, **Update Script** e **Help**.

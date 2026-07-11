@@ -1132,6 +1132,134 @@ run_coolercontrol_menu() {
 }
 
 # ==============================================================================
+# XBOX WIRELESS ADAPTER (xone driver)
+# ==============================================================================
+
+XONE_MODPROBE_CONF="/etc/modprobe.d/xone-blacklist.conf"
+
+xone_installed() {
+    pacman -Qq xone-dkms &>/dev/null
+}
+
+install_xbox_adapter() {
+    print_step "XBOX" "Installing Xbox Wireless Adapter driver (xone)"
+
+    if xone_installed; then
+        if ! confirm "xone-dkms is already installed. Reinstall it?"; then
+            print_info "Keeping existing installation."
+            return 0
+        fi
+    fi
+
+    print_info "Installing dkms (required to build xone against your kernel)..."
+    steamos_writable 'pacman -Syu --noconfirm dkms' || {
+        fail_with_log "Failed to install dkms." "Xbox Adapter Install — dkms"
+        return 1
+    }
+
+    ensure_build_deps || return 1
+
+    print_info "Installing xone-dkms via AUR helper..."
+    steamos_writable 'aur_install xone-dkms' || {
+        fail_with_log "Failed to install xone-dkms." "Xbox Adapter Install — xone-dkms"
+        return 1
+    }
+
+    print_info "Installing xone-dongle-firmware via AUR helper..."
+    steamos_writable 'aur_install xone-dongle-firmware' || {
+        fail_with_log "Failed to install xone-dongle-firmware." "Xbox Adapter Install — xone-dongle-firmware"
+        return 1
+    }
+
+    print_info "Blacklisting conflicting drivers (xpad, mt76x2u)..."
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || true
+    fi
+    {
+        echo "blacklist xpad"
+        echo "blacklist mt76x2u"
+    } > "$XONE_MODPROBE_CONF"
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+
+    print_info "Unloading conflicting drivers (if loaded) and loading xone..."
+    modprobe -r mt76x2u 2>/dev/null || true
+    modprobe -r xpad 2>/dev/null || true
+    modprobe xone 2>/dev/null || true
+
+    print_success "Xbox Wireless Adapter driver installed!"
+    print_info "Unplug and replug the adapter if the controller doesn't pair right away."
+}
+
+run_revert_xbox_adapter() {
+    print_step "R-XBOX" "Revert Xbox Wireless Adapter driver"
+
+    if ! xone_installed; then
+        print_info "xone-dkms does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will remove xone-dkms, xone-dongle-firmware, and the driver blacklist. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    modprobe -r xone 2>/dev/null || true
+    steamos_writable 'aur_remove xone-dongle-firmware' || true
+    steamos_writable 'aur_remove xone-dkms' || true
+
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || true
+    fi
+    rm -f "$XONE_MODPROBE_CONF"
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+
+    print_success "Xbox Wireless Adapter driver removed."
+}
+
+xbox_adapter_status_label() {
+    if lsmod | grep -q '^xone'; then
+        echo "loaded"
+    elif xone_installed; then
+        echo "installed (not loaded)"
+    else
+        echo "not installed"
+    fi
+}
+
+run_xbox_adapter_menu() {
+    while true; do
+        print_banner
+        print_section "Xbox Wireless Adapter"
+        echo -e "  ${DIM}xone driver for Xbox One / Series X|S wireless adapter — status: $(xbox_adapter_status_label)${RESET}"
+        echo ""
+        print_item "1" "Install Xbox Adapter Driver"  "Install dkms + xone-dkms + firmware, blacklist xpad/mt76x2u"
+        print_item "2" "Revert Xbox Adapter Driver"    "Remove xone driver and undo blacklist"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" xbox_choice
+
+        case "$xbox_choice" in
+            1) install_xbox_adapter;      press_enter ;;
+            2) run_revert_xbox_adapter;   press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$xbox_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# ==============================================================================
 # COMMUNITY FIXES (keyboardspecialist/bc250-steamos)
 # ==============================================================================
 
@@ -2647,6 +2775,15 @@ run_status() {
     if [[ "$cc_svc_state" == "active" ]]; then cc_icon="$ICON_OK"; cc_color="$GREEN"; else cc_icon="$ICON_WARN"; cc_color="$YELLOW"; fi
     echo -e "  ${CYAN}CoolerControl${RESET}     ${cc_icon} ${cc_color}${cc_svc_state}${RESET}"
 
+    local xbox_icon xbox_color xbox_label
+    xbox_label="$(xbox_adapter_status_label)"
+    case "$xbox_label" in
+        loaded) xbox_icon="$ICON_OK"; xbox_color="$GREEN" ;;
+        "installed (not loaded)") xbox_icon="$ICON_WARN"; xbox_color="$YELLOW" ;;
+        *) xbox_icon="$DIM"; xbox_color="$DIM" ;;
+    esac
+    echo -e "  ${CYAN}Xbox Wireless Adapter${RESET} ${xbox_icon} ${xbox_color}${xbox_label}${RESET}"
+
     echo ""
     print_section "Community Fixes"
 
@@ -2824,6 +2961,7 @@ run_extras_menu() {
         echo ""
         print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
+        print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
         print_item "0" "Back" ""
         echo ""
@@ -2833,6 +2971,7 @@ run_extras_menu() {
         case "${extras_choice^^}" in
             F) run_sensors_menu ;;
             K) run_coolercontrol_menu ;;
+            X) run_xbox_adapter_menu ;;
             H) run_cec_control;         press_enter ;;
             0) return 0 ;;
             *)
