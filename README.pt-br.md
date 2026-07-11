@@ -54,6 +54,7 @@ Sem o trabalho deles, nada disso seria possível. 🙏
 ### 2026-07-11
 
 - Adicionado instalador do driver do Adaptador Xbox Wireless em **Extras**: instala `dkms`, `xone-dkms` e `xone-dongle-firmware` via AUR helper, bloqueia drivers conflitantes (`xpad`, `mt76x2u`) e carrega o `xone` automaticamente.
+- Corrigida a atualização do repositório de Correções da Comunidade, que abortava quando um build anterior deixava artefatos locais (ex.: `amdgpu.ko.zst`) no checkout.
 
 ### 2026-07-09
 
