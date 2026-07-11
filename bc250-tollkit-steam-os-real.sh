@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 
-TOOLKIT_VERSION="v2026-07-09"
+TOOLKIT_VERSION="v2026-07-11"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/bc250-tollkit-steam-os-real.sh"
@@ -2880,34 +2880,50 @@ run_revert_all() {
 run_install_manual() {
     while true; do
         print_banner
-        print_section "Install Manual"
-        echo -e "  ${DIM}Same components as Install All — pick them one at a time.${RESET}"
+        print_section "Install / Revert Manual"
+        echo -e "  ${DIM}Same components as Install All / Revert All — pick them one at a time.${RESET}"
         echo ""
-        print_item "1" "Install CPU Governor"          "bc250-smu-oc CPU overclock service"
-        print_item "2" "Install GPU Governor"          "cyan-skillfish GPU governor service"
-        print_item "3" "Disable CPU Mitigations"        "Add mitigations=off to GRUB"
-        print_item "4" "Configure Swap"                "Resize swapfile, set vm.swappiness"
-        print_item "5" "Disable ZRAM & Enable ZSWAP"    "lz4, 25% pool — needs reboot"
-        print_item "6" "Install ACPI Fix"               "CPU C-/P-states"
-        print_item "7" "Install DP Audio/Video Fix"     "⚠  Patched amdgpu.ko clock fix"
-        print_item "8" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB dongles"
-        print_item "9" "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
-        print_item "0" "Back" ""
+        print_item "1"  "Install CPU Governor"          "bc250-smu-oc CPU overclock service"
+        print_item "1R" "Revert CPU Governor"           "Remove bc250-smu-oc"
+        print_item "2"  "Install GPU Governor"          "cyan-skillfish GPU governor service"
+        print_item "2R" "Revert GPU Governor"           "Remove cyan-skillfish-governor-smu"
+        print_item "3"  "Disable CPU Mitigations"        "Add mitigations=off to GRUB"
+        print_item "3R" "Re-enable CPU Mitigations"      "Remove mitigations=off from GRUB"
+        print_item "4"  "Configure Swap"                "Resize swapfile, set vm.swappiness"
+        print_item "4R" "Revert Swap to Default"         "Back to stock ${SWAPFILE_STOCK_SIZE_MB}M / swappiness=60"
+        print_item "5"  "Disable ZRAM & Enable ZSWAP"    "lz4, 25% pool — needs reboot"
+        print_item "5R" "Revert ZRAM/ZSWAP to Default"   "Back to stock ZRAM — needs reboot"
+        print_item "6"  "Install ACPI Fix"               "CPU C-/P-states"
+        print_item "6R" "Revert ACPI Fix"                 "Remove ACPI fix"
+        print_item "7"  "Install DP Audio/Video Fix"     "⚠  Patched amdgpu.ko clock fix"
+        print_item "7R" "Revert DP Audio/Video Fix"      "Restore stock amdgpu.ko"
+        print_item "8"  "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB dongles"
+        print_item "8R" "Revert AIC8800 WiFi/BT Driver"  "Remove AIC8800 driver"
+        print_item "9"  "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
+        print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
         read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" manual_choice
 
-        case "$manual_choice" in
-            1) run_cpu_governor;        press_enter ;;
-            2) run_gpu_governor;        press_enter ;;
-            3) run_disable_mitigations; press_enter ;;
-            4) run_configure_swap;      press_enter ;;
-            5) run_zram_zswap_toggle;   press_enter ;;
-            6) install_acpi_fix;        press_enter ;;
-            7) install_audio_fix;       press_enter ;;
-            8) install_aic8800_wifi;    press_enter ;;
-            9) run_cu_live_manager;     press_enter ;;
-            0) return 0 ;;
+        case "${manual_choice^^}" in
+            1)  run_cpu_governor;        press_enter ;;
+            1R) run_revert_cpu_governor; press_enter ;;
+            2)  run_gpu_governor;        press_enter ;;
+            2R) run_revert_gpu_governor; press_enter ;;
+            3)  run_disable_mitigations; press_enter ;;
+            3R) run_revert_mitigations;  press_enter ;;
+            4)  run_configure_swap;      press_enter ;;
+            4R) run_revert_swap;         press_enter ;;
+            5)  run_zram_zswap_toggle;   press_enter ;;
+            5R) run_revert_zram_zswap;   press_enter ;;
+            6)  install_acpi_fix;        press_enter ;;
+            6R) run_revert_acpi_fix;     press_enter ;;
+            7)  install_audio_fix;       press_enter ;;
+            7R) run_revert_audio_fix;    press_enter ;;
+            8)  install_aic8800_wifi;    press_enter ;;
+            8R) run_revert_aic8800_wifi; press_enter ;;
+            9)  run_cu_live_manager;     press_enter ;;
+            0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
                 sleep 1
@@ -2991,7 +3007,7 @@ show_menu() {
     print_banner
     print_section "Quick Start"
     print_item  "1"  "Install All"           "Everything: CPU/GPU governor, Mitigations, Swap/ZSWAP, Fixes, CU Unlock"
-    print_item  "2"  "Install Manual"        "Same as Install All, one component at a time"
+    print_item  "2"  "Install / Revert Manual" "Same as Install All, one component at a time"
     print_item  "3"  "Performance Profiles"  "CPU & GPU performance profiles"
     print_item  "4"  "Revert / Uninstall All" "Undo everything back to SteamOS defaults"
     print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC / TV control"
