@@ -2972,7 +2972,8 @@ run_cu_live_manager() {
         print_error "bc250-cu-live-manager.sh not found at $CU_LIVE_MANAGER"
         return 1
     fi
-    bash "$CU_LIVE_MANAGER"
+    ( bash "$CU_LIVE_MANAGER" )
+    return 0
 }
 
 run_extras_menu() {
