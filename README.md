@@ -30,7 +30,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 Open a terminal on your SteamOS machine (Desktop Mode → Konsole) and run:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/bc250-tollkit-steam-os-real.sh -o bc250-tollkit-steam-os-real.sh && chmod +x bc250-tollkit-steam-os-real.sh && sudo ./bc250-tollkit-steam-os-real.sh
+curl -sSL https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh -o start.sh && chmod +x start.sh && sudo ./start.sh
 ```
 
 That's it — the script asks for `sudo` if needed, creates a desktop shortcut on first run, and guides you through everything else from its menu.
@@ -50,6 +50,10 @@ This toolkit builds on top of great work from the BC-250 community. Huge thanks 
 Without their work, none of this would be possible. 🙏
 
 ## Changelog
+
+### 2026-07-14
+
+- **Renamed** main script from `bc250-tollkit-steam-os-real.sh` (typo) to `start.sh`. Updated `TOOLKIT_RAW_URL` (self-updater) and install commands in both READMEs accordingly.
 
 ### 2026-07-12
 

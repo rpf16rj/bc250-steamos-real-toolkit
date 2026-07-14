@@ -30,7 +30,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 Abra um terminal na sua máquina SteamOS (Modo Desktop → Konsole) e execute:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/bc250-tollkit-steam-os-real.sh -o bc250-tollkit-steam-os-real.sh && chmod +x bc250-tollkit-steam-os-real.sh && sudo ./bc250-tollkit-steam-os-real.sh
+curl -sSL https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh -o start.sh && chmod +x start.sh && sudo ./start.sh
 ```
 
 É só isso — o script pede `sudo` se necessário, cria um atalho na área de trabalho no primeiro uso, e guia você pelo resto a partir do próprio menu.

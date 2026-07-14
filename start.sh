@@ -22,7 +22,7 @@ CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 TOOLKIT_VERSION="v2026-07-11"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
-TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/bc250-tollkit-steam-os-real.sh"
+TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
 
 # ==============================================================================
 # COLORS & FORMATTING
