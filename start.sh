@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 
-TOOLKIT_VERSION="v2026-07-11"
+TOOLKIT_VERSION="v2026-07-14"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
