@@ -54,6 +54,7 @@ Without their work, none of this would be possible. 🙏
 ### 2026-07-14
 
 - **Renamed** main script from `bc250-tollkit-steam-os-real.sh` (typo) to `start.sh`. Updated `TOOLKIT_RAW_URL` (self-updater) and install commands in both READMEs accordingly.
+- **Fixed:** `[ERR] failed to read cyan_skillfish.gfx1013.mmSPI_PG_ENABLE_STATIC_WGP_MASK with umr` reported by users. `select_asic()` now tries to auto-detect the correct ASIC selector via `umr -lb` before giving up, covering boards where the default `cyan_skillfish.gfx1013` selector doesn't match.
 
 ### 2026-07-12
 

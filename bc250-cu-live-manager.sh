@@ -722,10 +722,24 @@ uninstall_service() {
 }
 
 select_asic() {
-	local out value
+	local out value candidate
 	out="$("$UMR" "${UMR_INSTANCE_ARGS[@]}" -r "$ASIC.$REG_SPI" 2>&1 || true)"
 	value="$(printf '%s\n' "$out" | parse_hex)"
 	[ -n "$value" ] && return 0
+
+	# Default selector failed — try to auto-detect via umr -lb
+	warn "default ASIC selector '$ASIC' did not respond; trying auto-detect..."
+	while IFS= read -r candidate; do
+		[[ "$candidate" =~ (cyan_skillfish|gfx1013) ]] || continue
+		out="$("$UMR" "${UMR_INSTANCE_ARGS[@]}" -r "$candidate.$REG_SPI" 2>&1 || true)"
+		value="$(printf '%s\n' "$out" | parse_hex)"
+		if [ -n "$value" ]; then
+			info "auto-detected ASIC selector: $candidate"
+			ASIC="$candidate"
+			return 0
+		fi
+	done < <("$UMR" "${UMR_INSTANCE_ARGS[@]}" -lb 2>/dev/null | awk '/^[[:space:]]*[a-z]/{print $1}' || true)
+
 	die "failed to read $ASIC.$REG_SPI with umr. Set UMR_ASIC to the exact selector if your board differs."
 }
 
