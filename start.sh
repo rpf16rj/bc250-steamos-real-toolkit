@@ -333,6 +333,11 @@ cpu_governor_installed() {
 cpu_governor_setup() {
     print_step "01-S" "CPU Governor — Configuration Setup"
 
+    # Ensure pipx-installed binaries are on PATH regardless of install path
+    export PATH="$PATH:/root/.local/bin:/home/deck/.local/bin"
+    # Also pick up pipx ensurepath output if available
+    command -v pipx &>/dev/null && eval "$(pipx ensurepath --shell 2>/dev/null || true)" || true
+
     if [[ -d "bc250_smu_oc" ]]; then
         cd bc250_smu_oc
         print_info "Running bc250-detect..."

@@ -55,6 +55,7 @@ Without their work, none of this would be possible. 🙏
 
 - **Renamed** main script from `bc250-tollkit-steam-os-real.sh` (typo) to `start.sh`. Updated `TOOLKIT_RAW_URL` (self-updater) and install commands in both READMEs accordingly.
 - **Fixed:** `[ERR] failed to read cyan_skillfish.gfx1013.mmSPI_PG_ENABLE_STATIC_WGP_MASK with umr` reported by users. `select_asic()` now tries to auto-detect the correct ASIC selector via `umr -lb` before giving up, covering boards where the default `cyan_skillfish.gfx1013` selector doesn't match.
+- **Fixed:** `bc250-detect: command not found` when user already had CPU governor installed and chose not to reinstall (answered `n`). The script went straight to `cpu_governor_setup()` without adding the pipx bin dir to `PATH`. Fixed by always prepending `/root/.local/bin` and `/home/deck/.local/bin` at the top of `cpu_governor_setup()`.
 
 ### 2026-07-12
 
