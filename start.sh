@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 
-TOOLKIT_VERSION="v2026-07-14"
+TOOLKIT_VERSION="v2026-07-15"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -1544,6 +1544,16 @@ audio_fix_prefetch_headers() {
         || print_info "Could not pre-stage the headers package from any known repo channel; letting fetch-sources.sh try (and report) on its own."
 }
 
+audio_fix_resolve_fullsha() {
+    local rel="${1:-$(uname -r)}" short fullsha
+    short="${rel##*-g}"
+    [[ "$short" =~ ^[0-9a-fA-F]{7,40}$ ]] || return 1
+    fullsha=$(git ls-remote https://github.com/Evlav/linux-integration.git 2>/dev/null \
+        | awk -v prefix="$short" '$1 ~ "^" prefix { print $1; exit }')
+    [[ "$fullsha" =~ ^[0-9a-fA-F]{40}$ ]] || return 1
+    printf '%s\n' "$fullsha"
+}
+
 # install.sh/rollback.sh (upstream) hardcode "mkinitcpio -p linux-neptune-616",
 # which fails on non-standard kernel flavors whose preset has a suffix (e.g.
 # the "-drm-exec" experimental variant: linux-neptune-616-drm-exec.preset).
@@ -1598,7 +1608,15 @@ install_audio_fix() {
     # install step only) -- run it as the real user; you may be prompted for
     # your sudo password when it reaches install.sh.
     chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ./patch-driver.sh"; then
+    local fullsha patch_env=""
+    fullsha=$(audio_fix_resolve_fullsha || true)
+    if [[ -n "$fullsha" ]]; then
+        print_info "Resolved kernel commit ${fullsha:0:12}; passing full SHA to patch-driver.sh."
+        patch_env="export FULLSHA='$fullsha';"
+    else
+        print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
+    fi
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh"; then
         fail_with_log "DisplayPort audio/video fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Audio Fix — patch-driver.sh"
         return 1
     fi
