@@ -59,6 +59,7 @@ Without their work, none of this would be possible. 🙏
 - **Fixed:** DisplayPort Audio/Video Clock Fix stopping during dependency extraction because the upstream `tar | sed | awk` pipeline exited early under `pipefail`. The toolkit now patches that compatibility issue before running the build.
 - **Added:** A SteamOS update warning is shown on every launch and documented in both READMEs. Users are instructed to check toolkit status after every update and be prepared to reinstall components, especially on the Beta channel.
 - **Improved:** Desktop-launched sessions now use `konsole --hold`, unhandled errors generate diagnostic logs, and error logs are copied to the Desktop when available.
+- **Improved:** `sudo` is authenticated once at startup and its timestamp is refreshed during the session, so nested installers should not repeatedly ask for the password.
 
 ### 2026-07-14
 

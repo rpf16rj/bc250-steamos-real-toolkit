@@ -8,12 +8,26 @@ set -euo pipefail
 
 # Re-launch with sudo if not already root
 if [[ $EUID -ne 0 ]]; then
+    sudo -v
     exec sudo "$0" "$@"
 fi
 
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || whoami)}"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 [[ -z "$REAL_HOME" || ! -d "$REAL_HOME" ]] && REAL_HOME="/root"
+
+SUDO_KEEPALIVE_PID=""
+if [[ "$REAL_USER" != "root" ]] && id "$REAL_USER" >/dev/null 2>&1; then
+    sudo -u "$REAL_USER" -H bash -c 'sudo -n -v' >/dev/null 2>&1 || true
+    sudo -u "$REAL_USER" -H bash -c 'while sleep 60; do sudo -n -v || exit 0; done' \
+        >/dev/null 2>&1 &
+    SUDO_KEEPALIVE_PID=$!
+fi
+
+cleanup_sudo_keepalive() {
+    [[ -n "$SUDO_KEEPALIVE_PID" ]] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+}
+trap cleanup_sudo_keepalive EXIT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
