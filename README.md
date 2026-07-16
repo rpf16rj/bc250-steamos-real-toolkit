@@ -2,6 +2,8 @@
 
 > ⚠️ **Disclaimer:** This toolkit changes low-level system settings (bootloader, kernel modules, power and overclock profiles) on unofficial BC-250 hardware. Use it at your own risk — the author and contributors are not responsible for any damage, data loss, or hardware failure. Always make sure your PSU, cabling, and cooling can handle overclocked profiles before applying them, and keep backups when possible.
 
+> ⚠️ **SteamOS updates:** an OS update can replace the kernel, modules, headers, boot configuration, or installed services. After **every SteamOS update**, check the toolkit status and be prepared to reinstall the affected components. This is especially important when the **Beta channel** is enabled. If an operation fails, the toolkit saves a diagnostic log in your home directory and copies it to the Desktop when available. The Desktop shortcut keeps the terminal open after the script exits so the error remains visible.
+
 🇧🇷 Prefere português? Leia o [README.pt-br.md](./README.pt-br.md).
 
 ## What is this?
@@ -55,6 +57,8 @@ Without their work, none of this would be possible. 🙏
 
 - **Fixed:** DisplayPort Audio/Video Clock Fix failing when the SteamOS kernel release contains only a short commit SHA. The toolkit now resolves the full commit through `git ls-remote` and passes it as `FULLSHA` to the community driver patch script, avoiding the GitHub API HTTP 422 error.
 - **Fixed:** DisplayPort Audio/Video Clock Fix stopping during dependency extraction because the upstream `tar | sed | awk` pipeline exited early under `pipefail`. The toolkit now patches that compatibility issue before running the build.
+- **Added:** A SteamOS update warning is shown on every launch and documented in both READMEs. Users are instructed to check toolkit status after every update and be prepared to reinstall components, especially on the Beta channel.
+- **Improved:** Desktop-launched sessions now use `konsole --hold`, unhandled errors generate diagnostic logs, and error logs are copied to the Desktop when available.
 
 ### 2026-07-14
 

@@ -49,6 +49,10 @@ print_banner() {
     echo "  ║                                                                     ║"
     echo "  ╚═════════════════════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
+    echo -e "  ${BOLD}${YELLOW}⚠  SteamOS update notice:${RESET}"
+    echo -e "  ${YELLOW}SteamOS updates may require reinstalling toolkit components. Check the toolkit status${RESET}"
+    echo -e "  ${YELLOW}after every update, especially when using the Beta channel.${RESET}"
+    echo ""
 }
 
 print_section() {
@@ -151,14 +155,16 @@ ensure_desktop_shortcut() {
     [[ -d "$desktop_dir" ]] || mkdir -p "$desktop_dir" 2>/dev/null || return 0
 
     local shortcut="$desktop_dir/BC-250 Toolkit.desktop"
-    [[ -f "$shortcut" ]] && return 0
+    if [[ -f "$shortcut" ]] && grep -q '^Exec=konsole --hold -e sudo bash ' "$shortcut"; then
+        return 0
+    fi
 
     cat > "$shortcut" <<SHORTCUT_EOF
 [Desktop Entry]
 Type=Application
 Name=BC-250 SteamOS Real Toolkit
 Comment=CPU/GPU governors, swap/zswap, sensors and community fixes for the BC-250
-Exec=konsole -e sudo bash "$SCRIPT_PATH"
+Exec=konsole --hold -e sudo bash "$SCRIPT_PATH"
 Icon=utilities-terminal
 Terminal=false
 Categories=System;
@@ -219,6 +225,17 @@ save_error_log() {
     } > "$logfile" 2>/dev/null
     chown "$REAL_USER":"$REAL_USER" "$logfile" 2>/dev/null || true
 
+    local desktop_dir
+    desktop_dir="$(sudo -u "$REAL_USER" xdg-user-dir DESKTOP 2>/dev/null || echo "")"
+    [[ -n "$desktop_dir" ]] || desktop_dir="${REAL_HOME}/Desktop"
+    if [[ -d "$desktop_dir" ]]; then
+        local desktop_log="$desktop_dir/$(basename "$logfile")"
+        if cp -f "$logfile" "$desktop_log" 2>/dev/null; then
+            chown "$REAL_USER":"$REAL_USER" "$desktop_log" 2>/dev/null || true
+            print_info "A copy of the diagnostic log was copied to the Desktop: ${BOLD}${desktop_log}${RESET}"
+        fi
+    fi
+
     print_info "A diagnostic log was saved to: ${BOLD}${logfile}${RESET}"
     print_info "Please attach this log when asking for help:"
     print_info "  • SteamOS/BC-250 community (Discord/forums)"
@@ -230,6 +247,14 @@ fail_with_log() {
     print_error "$msg"
     save_error_log "$context"
 }
+
+toolkit_unhandled_error() {
+    local failed_command="${1:-unknown command}" rc="${2:-1}"
+    print_error "Unexpected error (exit code $rc): $failed_command"
+    save_error_log "Unhandled error — $failed_command (exit $rc)"
+}
+
+trap 'toolkit_unhandled_error "$BASH_COMMAND" "$?"' ERR
 
 repair_pacman_keyring() {
     print_info "Detected a pacman keyring problem — attempting automatic repair..."
