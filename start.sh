@@ -1560,6 +1560,19 @@ audio_fix_resolve_fullsha() {
 # The module itself installs fine either way; only the initramfs rebuild at
 # the very end needs the right preset name. Symlink the expected name to
 # whatever preset actually exists so their hardcoded call works unmodified.
+audio_fix_patch_fetch_sources() {
+    local fetch_script="$1"
+    [[ -f "$fetch_script" ]] || return 1
+
+    # The upstream dependency scan uses tar | sed | awk and exits from awk
+    # after the first exact match. With pipefail, that makes tar receive
+    # SIGPIPE and aborts fetch-sources.sh before any dependency is extracted.
+    if grep -q 'if (n==p) { print; exit }' "$fetch_script"; then
+        print_info "Patching dependency scan to avoid tar SIGPIPE under pipefail."
+        sed -i 's/if (n==p) { print; exit }/if (n==p) { print }/' "$fetch_script"
+    fi
+}
+
 audio_fix_ensure_mkinitcpio_preset() {
     local expected="/etc/mkinitcpio.d/linux-neptune-616.preset"
     [[ -e "$expected" ]] && return 0
@@ -1603,6 +1616,10 @@ install_audio_fix() {
     print_info "Running patch-driver.sh (fetch-sources.sh && build.sh && install.sh)..."
     print_info "This clones the matching Valve kernel source tree and can take several minutes."
     audio_fix_prefetch_headers "$fix_dir"
+    audio_fix_patch_fetch_sources "$fix_dir/fetch-sources.sh" || {
+        fail_with_log "Could not prepare the DisplayPort fix dependency fetch script." "Audio Fix — fetch-sources compatibility patch"
+        return 1
+    }
     audio_fix_ensure_mkinitcpio_preset
     # patch-driver.sh refuses to run as root (it calls sudo itself for the
     # install step only) -- run it as the real user; you may be prompted for
