@@ -66,6 +66,26 @@ persist_state_has() {
     [[ -f "$PERSIST_STATE_FILE" ]] && grep -Fxq "$1" "$PERSIST_STATE_FILE" 2>/dev/null
 }
 
+# Scan the current system and retroactively record any toolkit components that
+# are already installed, so enabling persistence does not lose them.
+persist_detect_and_record_installed() {
+    cpu_governor_installed 2>/dev/null && persist_state_add "cpu"
+    gpu_governor_installed 2>/dev/null && persist_state_add "gpu"
+    mitigations_currently_off && persist_state_add "mitigations"
+    [[ -f /etc/sysctl.d/99-swappiness.conf || -f /home/swapfile || -f /swapfile ]] && persist_state_add "swap"
+    [[ -f /etc/default/grub.zram.bak ]] && persist_state_add "zswap"
+    acpi_fix_installed 2>/dev/null && persist_state_add "acpi"
+    aic8800_installed 2>/dev/null && persist_state_add "aic8800"
+    lsmod 2>/dev/null | grep -qE 'nct6687|nct6686' && persist_state_add "sensors"
+    coolercontrol_installed 2>/dev/null && persist_state_add "coolercontrol"
+    xone_installed 2>/dev/null && persist_state_add "xbox"
+    cec_control_installed 2>/dev/null && persist_state_add "cec"
+    [[ -f /etc/bc250-cu-live-manager.conf ]] && persist_state_add "cu"
+    if find "/lib/modules/$(uname -r)/updates" -name 'amdgpu.ko*' 2>/dev/null | grep -q .; then
+        persist_state_add "audio"
+    fi
+}
+
 # Snapshots of /etc configuration files (custom CoolerControl curves, CPU/GPU
 # overclock configs, etc.) so they survive a SteamOS atomic update.
 persist_snapshot_configs() {
@@ -3297,17 +3317,40 @@ run_cu_live_manager() {
     return 0
 }
 
+run_aic8800_menu() {
+    while true; do
+        print_banner
+        print_section "AIC8800 WiFi/BT Driver"
+        echo ""
+        print_item "I" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "R" "Revert AIC8800 WiFi/BT Driver"  "Remove AIC8800 driver"
+        print_item "0" "Back"                           ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" aic_choice
+
+        case "${aic_choice^^}" in
+            I) install_aic8800_wifi;     press_enter ;;
+            R) run_revert_aic8800_wifi;  press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$aic_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 run_extras_menu() {
     while true; do
         print_banner
         print_section "Extras"
         echo ""
-        print_item "A" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "A" "AIC8800 WiFi/BT Driver"      "Install/revert AIC8800D80 USB WiFi/BT dongles"
         print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
         print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
         print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
-        print_item "R" "Revert AIC8800 WiFi/BT Driver" "Remove AIC8800 driver"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "0" "Back" ""
         echo ""
@@ -3315,12 +3358,11 @@ run_extras_menu() {
         read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" extras_choice
 
         case "${extras_choice^^}" in
-            A) install_aic8800_wifi;    press_enter ;;
+            A) run_aic8800_menu ;;
             F) run_sensors_menu ;;
             H) run_cec_control;           press_enter ;;
             K) run_coolercontrol_menu ;;
             P) install_persistence;       press_enter ;;
-            R) run_revert_aic8800_wifi; press_enter ;;
             X) run_xbox_adapter_menu ;;
             0) return 0 ;;
             *)
@@ -3381,6 +3423,7 @@ install_persistence() {
     fi
 
     mkdir -p "$PERSIST_STATE_DIR"
+    persist_detect_and_record_installed
 
     local reapply_script="$PERSIST_STATE_DIR/bc250-toolkit-reattach.sh"
     cat > "$reapply_script" <<EOF
@@ -3476,6 +3519,56 @@ EOF
     print_success "SteamOS update persistence enabled. Toolkit settings will be re-applied after system updates."
 }
 
+run_show_persistence_list() {
+    print_banner
+    print_section "Persistence List"
+    persist_detect_and_record_installed
+    if [[ ! -f "$PERSIST_STATE_FILE" ]]; then
+        print_info "No persisted components recorded yet."
+        echo ""
+        return 0
+    fi
+    echo -e "  ${DIM}Components recorded in $PERSIST_STATE_FILE:${RESET}"
+    while IFS= read -r component; do
+        [[ -n "$component" ]] && echo -e "    - ${CYAN}${component}${RESET}"
+    done < "$PERSIST_STATE_FILE"
+    echo ""
+    if [[ -d "$PERSIST_STATE_DIR/config-snapshots" ]]; then
+        echo -e "  ${DIM}Saved config snapshots:${RESET}"
+        for snapshot in "$PERSIST_STATE_DIR/config-snapshots"/*; do
+            [[ -e "$snapshot" ]] || continue
+            echo -e "    - $(basename "$snapshot")"
+        done
+    else
+        echo -e "  ${DIM}No saved config snapshots yet.${RESET}"
+    fi
+    echo ""
+}
+
+run_persistence_menu() {
+    while true; do
+        print_banner
+        print_section "SteamOS Update Persistence"
+        echo ""
+        print_item "E" "Enable / Update Persistence" "Track & re-apply toolkit settings after SteamOS updates"
+        print_item "V" "View Persistence List"       "Show installed components and saved config snapshots"
+        print_item "0" "Back"                      ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" persist_choice
+
+        case "${persist_choice^^}" in
+            E) install_persistence;       press_enter ;;
+            V) run_show_persistence_list; press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$persist_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 show_menu() {
     print_banner
     print_section "Quick Start"
@@ -3490,6 +3583,7 @@ show_menu() {
     print_item  "G"  "Changelog"             "Open the README changelog on GitHub"
     print_item  "U"  "Update Script"         "Download the latest version from GitHub"
     print_item  "I"  "Help"                  "Open the repository (usage & troubleshooting)"
+    print_item  "P"  "SteamOS Update Persistence" "Track, view and re-apply after any SteamOS update (recommended)"
     print_item  "0"  "Exit"                  ""
     echo ""
     echo -e "  ${DIM}${TOOLKIT_VERSION} — ${REPO_URL}${RESET}"
@@ -3519,6 +3613,7 @@ while true; do
         G) run_changelog;         press_enter ;;
         U) run_update_script;     press_enter ;;
         I) run_help;              press_enter ;;
+        P) run_persistence_menu;  press_enter ;;
         0)
             echo -e "\n  ${DIM}Goodbye.${RESET}\n"
             echo -e "  ${DIM}Press Enter to close...${RESET}"

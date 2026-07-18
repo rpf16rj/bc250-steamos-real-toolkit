@@ -67,6 +67,10 @@ Sem o trabalho deles, nada disso seria possível. 🙏
 - **Corrigido:** Instalação da persistência não inicia mais o `bc250-toolkit-persist.service` imediatamente (`enable` somente), evitando um travamento recursivo do re-apply.
 - **Corrigido:** Instalação do WiFi/BT AIC8800 falhava com `Update persistence helper missing: /home/deck/tools/bc250/bc250-update-persistence.sh`. O toolkit agora cria o link do helper a partir do repositório de correções no local esperado antes de executar `steamdeck-setup.sh`.
 
+- **Alterado:** Opções de instalar e reverter o driver AIC8800 no menu `Extras` foram agrupadas em um submenu dedicado.
+- **Alterado:** Opções de habilitar e visualizar a persistência do SteamOS no menu principal foram agrupadas em um submenu (`E` / `V`).
+- **Corrigido:** Lista de persistência agora detecta e registra automaticamente os componentes do toolkit já instalados, para não perder nada ao habilitar a persistência depois.
+
 ### 2026-07-17
 
 - **Corrigido:** Menu de status do ZSWAP mostrava "ZRAM off / ZSWAP on" mesmo quando `/sys/module/zswap/parameters/enabled` estava `N` após reiniciar. O toolkit agora habilita o ZSWAP em runtime imediatamente e só reporta ON quando o parâmetro runtime é `Y`.
