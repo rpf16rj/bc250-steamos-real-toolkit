@@ -53,6 +53,11 @@ Without their work, none of this would be possible. 🙏
 
 ## Changelog
 
+### 2026-07-20
+
+- **Changed:** AIC8800D80 USB WiFi/BT Driver option in `Extras` now uses `A` (install) and `R` (revert) instead of the previous numeric `8`/`8R`.
+- **Added:** SteamOS update persistence. Installed toolkit components are tracked in `${REAL_HOME}/.bc250-toolkit/installed-components`; enabling persistence in `Extras` (`P`) installs `bc250-toolkit-persist.service` and an `atomic-update` keep list, so the toolkit re-applies itself after a SteamOS update.
+
 ### 2026-07-19
 
 - **Changed:** Community fixes repository is now cloned into `$SCRIPT_DIR/external/` (inside the toolkit tree) instead of `~/.local/share/`, keeping scripts/assets local and cached.

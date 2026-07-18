@@ -34,6 +34,38 @@ SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 EXTERNAL_DIR="$SCRIPT_DIR/external"
 
+# Set to 1 when the toolkit is running unattended after a SteamOS update
+# re-apply pass. In AUTO mode all confirmations/pauses are skipped.
+AUTO="${AUTO:-0}"
+
+# State used to re-apply installed components after a SteamOS atomic update.
+PERSIST_STATE_DIR="${REAL_HOME}/.bc250-toolkit"
+PERSIST_STATE_FILE="$PERSIST_STATE_DIR/installed-components"
+PERSIST_KEEP_FILE="$PERSIST_STATE_DIR/bc250-toolkit-keep.conf"
+
+persist_state_add() {
+    local c="$1"
+    mkdir -p "$PERSIST_STATE_DIR"
+    if [[ -f "$PERSIST_STATE_FILE" ]]; then
+        grep -Fxq "$c" "$PERSIST_STATE_FILE" 2>/dev/null && return 0
+    fi
+    printf '%s\n' "$c" >> "$PERSIST_STATE_FILE"
+    chown "$REAL_USER":"$REAL_USER" "$PERSIST_STATE_FILE" 2>/dev/null || true
+}
+
+persist_state_remove() {
+    local c="$1" tmp
+    [[ -f "$PERSIST_STATE_FILE" ]] || return 0
+    tmp=$(mktemp)
+    grep -Fxv "$c" "$PERSIST_STATE_FILE" > "$tmp" || true
+    mv -f "$tmp" "$PERSIST_STATE_FILE"
+    chown "$REAL_USER":"$REAL_USER" "$PERSIST_STATE_FILE" 2>/dev/null || true
+}
+
+persist_state_has() {
+    [[ -f "$PERSIST_STATE_FILE" ]] && grep -Fxq "$1" "$PERSIST_STATE_FILE" 2>/dev/null
+}
+
 # ==============================================================================
 # EXECUTION LOGGING
 # ==============================================================================
@@ -52,7 +84,7 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-07-19"
+TOOLKIT_VERSION="v2026-07-20"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -108,11 +140,17 @@ print_info()    { echo -e "  ${CYAN}→${RESET}  $1"; }
 print_step()    { echo -e "\n  ${BOLD}${MAGENTA}[$1]${RESET}  $2"; }
 
 press_enter() {
+    if [[ "$AUTO" == "1" ]]; then
+        return 0
+    fi
     echo -e "\n  ${DIM}Press Enter to return to the menu...${RESET}"
     read -r
 }
 
 confirm() {
+    if [[ "$AUTO" == "1" ]]; then
+        return 0
+    fi
     local prompt="${1:-Are you sure?}"
     echo -e "\n  ${YELLOW}${prompt}${RESET} ${DIM}[y/N]${RESET} "
     read -rp "  → " ans
@@ -512,6 +550,7 @@ run_cpu_governor() {
 
     cpu_governor_setup || return 1
     print_success "CPU Governor installed successfully!"
+    persist_state_add "cpu"
 }
 
 gpu_governor_installed() {
@@ -561,6 +600,7 @@ run_gpu_governor() {
 
     gpu_governor_setup || return 1
     print_success "GPU Governor installed and started successfully!"
+    persist_state_add "gpu"
 }
 
 run_revert_cpu_governor() {
@@ -582,6 +622,7 @@ run_revert_cpu_governor() {
     pipx uninstall bc250-smu-oc 2>/dev/null || true
     [[ -f /etc/bc250-smu-oc.conf ]] && rm -f /etc/bc250-smu-oc.conf
     print_success "CPU governor removed successfully."
+    persist_state_remove "cpu"
 }
 
 run_revert_gpu_governor() {
@@ -602,6 +643,7 @@ run_revert_gpu_governor() {
     systemctl disable cyan-skillfish-governor-smu.service 2>/dev/null || true
     steamos_writable 'aur_remove cyan-skillfish-governor-smu' || true
     print_success "GPU governor removed successfully."
+    persist_state_remove "gpu"
 }
 
 # ==============================================================================
@@ -652,6 +694,7 @@ run_disable_mitigations() {
     }
 
     print_success "CPU mitigations disabled. Reboot to apply."
+    persist_state_add "mitigations"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
 
@@ -689,6 +732,7 @@ run_revert_mitigations() {
     }
 
     print_success "CPU mitigations re-enabled. Reboot to apply."
+    persist_state_remove "mitigations"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
 
@@ -808,6 +852,7 @@ run_configure_swap() {
     sysctl -p "$SWAPPINESS_CONF" >/dev/null
 
     print_success "Swap configured! Current swap:"
+    persist_state_add "swap"
     echo ""
     swapon --show | sed 's/^/    /'
 }
@@ -842,6 +887,7 @@ run_revert_swap() {
     sysctl vm.swappiness=60 >/dev/null 2>&1 || true
 
     print_success "Swap reverted to SteamOS default (${SWAPFILE_STOCK_SIZE_MB}M, swappiness=60)."
+    persist_state_remove "swap"
 }
 
 run_zram_zswap_toggle() {
@@ -890,6 +936,7 @@ run_zram_zswap_toggle() {
     zswap_enable_runtime
 
     print_success "ZRAM disabled and ZSWAP enabled."
+    persist_state_add "zswap"
     print_info "Verify with: sudo cat /sys/module/zswap/parameters/enabled"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
@@ -931,6 +978,7 @@ run_revert_zram_zswap() {
     }
 
     print_success "ZRAM/ZSWAP reverted to SteamOS default. Reboot to apply."
+    persist_state_remove "zswap"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
 
@@ -1068,6 +1116,7 @@ install_sensors_pwm() {
     fi
 
     print_success "NCT6687 PWM fan control driver installed and loaded!"
+    persist_state_add "sensors"
     print_info "Sensors report as ${CYAN}nct6686-isa-0a20${RESET}. Run 'sensors' to view readings."
     print_info "PWM control: /sys/class/hwmon/*/pwmN and pwmN_enable (writable)."
     print_info "${YELLOW}Note:${RESET} this module is rebuilt against the current kernel; a kernel update may require reinstalling it."
@@ -1107,6 +1156,7 @@ run_revert_sensors() {
     fi
 
     print_success "Sensor driver configuration removed."
+    persist_state_remove "sensors"
 }
 
 run_sensors_menu() {
@@ -1188,6 +1238,7 @@ install_coolercontrol() {
     }
 
     print_success "CoolerControl installed and running!"
+    persist_state_add "coolercontrol"
     print_info "Web UI: ${CYAN}https://localhost:11987${RESET}"
     if coolercontrol_gui_installed; then
         print_info "Desktop GUI installed — launch 'CoolerControl' from your app menu."
@@ -1216,6 +1267,7 @@ run_revert_coolercontrol() {
     steamos_writable 'aur_remove coolercontrold' || true
 
     print_success "CoolerControl removed successfully."
+    persist_state_remove "coolercontrol"
 }
 
 coolercontrol_status_label() {
@@ -1313,6 +1365,7 @@ install_xbox_adapter() {
     modprobe xone 2>/dev/null || true
 
     print_success "Xbox Wireless Adapter driver installed!"
+    persist_state_add "xbox"
     print_info "Unplug and replug the adapter if the controller doesn't pair right away."
 }
 
@@ -1344,6 +1397,7 @@ run_revert_xbox_adapter() {
     fi
 
     print_success "Xbox Wireless Adapter driver removed."
+    persist_state_remove "xbox"
 }
 
 xbox_adapter_status_label() {
@@ -1533,6 +1587,7 @@ EOF
     fi
 
     print_success "ACPI fix installed! Reboot required to activate CPU C-states/P-states."
+    persist_state_add "acpi"
     print_info "After reboot verify: ${CYAN}ls /sys/devices/system/cpu/cpu0/cpuidle/${RESET} and ${CYAN}cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies${RESET}"
 }
 
@@ -1567,6 +1622,7 @@ run_revert_acpi_fix() {
     fi
 
     print_success "ACPI fix removed. Reboot to fully revert to stock C/P-state behavior."
+    persist_state_remove "acpi"
 }
 
 # --- shared kernel-headers-package helpers ----------------------------------
@@ -1733,6 +1789,7 @@ install_audio_fix() {
     fi
 
     print_success "DisplayPort audio/video fix installed! Reboot required."
+    persist_state_add "audio"
     print_info "After reboot, verify DisplayPort video/audio play back at normal speed."
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
 }
@@ -1759,6 +1816,7 @@ run_revert_audio_fix() {
     fi
 
     print_success "DisplayPort audio/video fix reverted to stock amdgpu.ko. Reboot to apply."
+    persist_state_remove "audio"
 }
 
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
@@ -1876,6 +1934,7 @@ EOF
     fi
 
     print_success "AIC8800 WiFi/BT driver installed!"
+    persist_state_add "aic8800"
     print_info "Check with: ${CYAN}ip link${RESET} (WiFi) and ${CYAN}bluetoothctl${RESET} (Bluetooth)."
     print_info "${YELLOW}Note:${RESET} rebuild after each SteamOS update — safe to re-run this option any time."
 }
@@ -1914,6 +1973,7 @@ run_revert_aic8800_wifi() {
     fi
 
     print_success "AIC8800 driver configuration removed."
+    persist_state_remove "aic8800"
 }
 
 # --- HDMI-CEC / TV Control (bc250-cec.sh) -----------------------------------
@@ -3191,8 +3251,9 @@ run_extras_menu() {
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
-        print_item "8" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB WiFi/BT dongles"
-        print_item "8R" "Revert AIC8800 WiFi/BT Driver" "Remove AIC8800 driver"
+        print_item "A" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "R" "Revert AIC8800 WiFi/BT Driver" "Remove AIC8800 driver"
+        print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3203,8 +3264,9 @@ run_extras_menu() {
             K) run_coolercontrol_menu ;;
             X) run_xbox_adapter_menu ;;
             H) run_cec_control;         press_enter ;;
-            8) install_aic8800_wifi;    press_enter ;;
-            8R) run_revert_aic8800_wifi; press_enter ;;
+            A) install_aic8800_wifi;    press_enter ;;
+            R) run_revert_aic8800_wifi; press_enter ;;
+            P) install_persistence;     press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$extras_choice'"
@@ -3214,6 +3276,132 @@ run_extras_menu() {
     done
 }
 
+# ==============================================================================
+# STEAMOS UPDATE PERSISTENCE
+# ==============================================================================
+# Track which components have been installed and automatically re-apply them
+# after a SteamOS atomic update wipes /etc and /usr/lib/modules.
+
+reapply_installed_components() {
+    print_step "RAP" "Re-applying toolkit settings after SteamOS update"
+    local component
+    if [[ ! -f "$PERSIST_STATE_FILE" ]]; then
+        print_info "No persisted toolkit state to re-apply."
+        return 0
+    fi
+    while IFS= read -r component; do
+        [[ -n "$component" ]] || continue
+        print_info "Re-applying component: $component"
+        case "$component" in
+            cpu)        run_cpu_governor || print_error "CPU governor reapply failed" ;;
+            gpu)        run_gpu_governor || print_error "GPU governor reapply failed" ;;
+            mitigations) run_disable_mitigations auto || print_error "Mitigations reapply failed" ;;
+            swap)       run_configure_swap auto || print_error "Swap reapply failed" ;;
+            zswap)      run_zram_zswap_toggle auto || print_error "ZSWAP reapply failed" ;;
+            acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
+            audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
+            cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;
+            aic8800)    install_aic8800_wifi || print_error "AIC8800 WiFi reapply failed" ;;
+            sensors)    install_sensors_pwm || print_error "Sensors PWM reapply failed" ;;
+            coolercontrol) install_coolercontrol || print_error "CoolerControl reapply failed" ;;
+            xbox)       install_xbox_adapter || print_error "Xbox adapter reapply failed" ;;
+            persistence) install_persistence || print_error "Persistence reapply failed" ;;
+            *)          print_info "Unknown persisted component: $component" ;;
+        esac
+        echo ""
+    done < "$PERSIST_STATE_FILE"
+    install_all_progress_clear 2>/dev/null || true
+    print_success "Toolkit re-apply completed."
+}
+
+install_persistence() {
+    print_step "PST" "Enable SteamOS update persistence"
+
+    if ! is_steamos; then
+        print_info "Persistence is only meaningful on SteamOS; nothing to do."
+        return 0
+    fi
+
+    mkdir -p "$PERSIST_STATE_DIR"
+
+    local reapply_script="$PERSIST_STATE_DIR/bc250-toolkit-reattach.sh"
+    cat > "$reapply_script" <<EOF
+#!/usr/bin/env bash
+# Auto-generated by bc250-steamos-real-toolkit
+set -euo pipefail
+export AUTO=1
+exec "$SCRIPT_PATH" --reapply-all
+EOF
+    chmod +x "$reapply_script"
+    chown "$REAL_USER":"$REAL_USER" "$reapply_script" 2>/dev/null || true
+
+    local tmp_unit="$PERSIST_STATE_DIR/bc250-toolkit-persist.service"
+    cat > "$tmp_unit" <<EOF
+[Unit]
+Description=Re-apply BC-250 SteamOS Real Toolkit settings after updates
+After=network-online.target multi-user.target
+Wants=network-online.target
+ConditionKernelCommandLine=!steamos-recovery
+
+[Service]
+Type=oneshot
+ExecStart=$reapply_script
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chown "$REAL_USER":"$REAL_USER" "$tmp_unit" 2>/dev/null || true
+
+    cat > "$PERSIST_KEEP_FILE" <<'EOF'
+# Toolkit state preserved across SteamOS atomic updates
+# generated by bc250-steamos-real-toolkit
+/etc/default/grub
+/etc/modprobe.d/aic8800.conf
+/etc/modprobe.d/sensors.conf
+/etc/modules-load.d/99-sensors.conf
+/etc/sysctl.d/99-swappiness.conf
+/etc/udev/rules.d/40-aic8800-modeswitch.rules
+/etc/usb_modeswitch.d/1111:1111
+/etc/bc250-smu-oc.conf
+/etc/cyan-skillfish-governor-smu
+/etc/cyan-skillfish-governor-smu/config.toml
+/etc/dbus-1/system.d/com.cyan.SkillFishGovernor.conf
+/etc/bc250-cu-live-manager.conf
+/etc/bc250-control
+/etc/systemd/system/bc250-smu-oc.service
+/etc/systemd/system/cyan-skillfish-governor-smu.service
+/etc/systemd/system/bc250-acpi-heal.service
+/etc/systemd/system/bc250-cpufreq.service
+/etc/systemd/system/bc250-gpu-freq-restore.service
+/etc/systemd/system/bc250-cu-live-manager.service
+/etc/systemd/system/aic8800-modules.service
+/etc/systemd/system/bc250-toolkit-persist.service
+/etc/systemd/system/multi-user.target.wants/bc250-smu-oc.service
+/etc/systemd/system/multi-user.target.wants/cyan-skillfish-governor-smu.service
+/etc/systemd/system/multi-user.target.wants/bc250-acpi-heal.service
+/etc/systemd/system/multi-user.target.wants/bc250-cpufreq.service
+/etc/systemd/system/multi-user.target.wants/bc250-gpu-freq-restore.service
+/etc/systemd/system/multi-user.target.wants/bc250-cu-live-manager.service
+/etc/systemd/system/multi-user.target.wants/aic8800-modules.service
+/etc/systemd/system/multi-user.target.wants/bc250-toolkit-persist.service
+/etc/systemd/system-sleep/bc250-cec-amp.sh
+/etc/systemd/system/bc250-cec-poweroff-standby.service
+/etc/systemd/system/multi-user.target.wants/bc250-cec-poweroff-standby.service
+/etc/atomic-update.conf.d/bc250-toolkit.conf
+EOF
+    chown "$REAL_USER":"$REAL_USER" "$PERSIST_KEEP_FILE" 2>/dev/null || true
+
+    local keep=/etc/atomic-update.conf.d/bc250-toolkit.conf
+    steamos_writable "install -D -m 644 -o root -g root '$PERSIST_KEEP_FILE' '$keep' && install -D -m 644 -o root -g root '$tmp_unit' '/etc/systemd/system/bc250-toolkit-persist.service' && install -D -m 755 -o root -g root '$reapply_script' '/usr/local/bin/bc250-toolkit-reattach.sh' && systemctl daemon-reload && systemctl enable --now bc250-toolkit-persist.service" || {
+        fail_with_log "Failed to install SteamOS update persistence files." "Persistence Install"
+        return 1
+    }
+
+    persist_state_add "persistence"
+    print_success "SteamOS update persistence enabled. Toolkit settings will be re-applied after system updates."
+}
+
 show_menu() {
     print_banner
     print_section "Quick Start"
@@ -3221,7 +3409,7 @@ show_menu() {
     print_item  "2"  "Install / Revert Manual" "Same as Install All, one component at a time"
     print_item  "3"  "Performance Profiles"  "CPU & GPU performance profiles"
     print_item  "4"  "Revert / Uninstall All" "Undo everything back to SteamOS defaults"
-    print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC, AIC8800 WiFi adapter"
+    print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC, AIC8800 WiFi, persistence"
     echo ""
     print_section "System"
     print_item  "V"  "Verify My Setup"       "Current system summary"
@@ -3235,6 +3423,13 @@ show_menu() {
 }
 
 ensure_desktop_shortcut || true
+
+# Non-interactive re-apply mode used by the persistence service after SteamOS updates.
+if [[ "${1:-}" == "--reapply-all" ]]; then
+    AUTO=1
+    reapply_installed_components
+    exit 0
+fi
 
 while true; do
     show_menu
