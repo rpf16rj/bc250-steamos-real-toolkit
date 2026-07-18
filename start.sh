@@ -3062,7 +3062,6 @@ run_install_all() {
     run_install_all_step run_zram_zswap_toggle auto || return 1
     run_install_all_step install_acpi_fix || return 1
     run_install_all_step install_audio_fix || return 1
-    run_install_all_step install_aic8800_wifi || return 1
     run_install_all_step run_cu_live_manager || return 1
 
     install_all_progress_clear
@@ -3108,9 +3107,7 @@ run_install_manual() {
         print_item "6R" "Revert ACPI Fix"                 "Remove ACPI fix"
         print_item "7"  "Install DP Audio/Video Fix"     "⚠  Patched amdgpu.ko clock fix"
         print_item "7R" "Revert DP Audio/Video Fix"      "Restore stock amdgpu.ko"
-        print_item "8"  "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB dongles"
-        print_item "8R" "Revert AIC8800 WiFi/BT Driver"  "Remove AIC8800 driver"
-        print_item "9"  "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
+        print_item "8"  "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3131,9 +3128,7 @@ run_install_manual() {
             6R) run_revert_acpi_fix;     press_enter ;;
             7)  install_audio_fix;       press_enter ;;
             7R) run_revert_audio_fix;    press_enter ;;
-            8)  install_aic8800_wifi;    press_enter ;;
-            8R) run_revert_aic8800_wifi; press_enter ;;
-            9)  run_cu_live_manager;     press_enter ;;
+            8)  run_cu_live_manager;     press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
@@ -3196,6 +3191,8 @@ run_extras_menu() {
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
+        print_item "8" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "8R" "Revert AIC8800 WiFi/BT Driver" "Remove AIC8800 driver"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3206,6 +3203,8 @@ run_extras_menu() {
             K) run_coolercontrol_menu ;;
             X) run_xbox_adapter_menu ;;
             H) run_cec_control;         press_enter ;;
+            8) install_aic8800_wifi;    press_enter ;;
+            8R) run_revert_aic8800_wifi; press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$extras_choice'"
@@ -3222,7 +3221,7 @@ show_menu() {
     print_item  "2"  "Install / Revert Manual" "Same as Install All, one component at a time"
     print_item  "3"  "Performance Profiles"  "CPU & GPU performance profiles"
     print_item  "4"  "Revert / Uninstall All" "Undo everything back to SteamOS defaults"
-    print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC / TV control"
+    print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC, AIC8800 WiFi adapter"
     echo ""
     print_section "System"
     print_item  "V"  "Verify My Setup"       "Current system summary"

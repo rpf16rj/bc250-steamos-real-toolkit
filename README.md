@@ -59,6 +59,7 @@ Without their work, none of this would be possible. 🙏
 - **Changed:** AIC8800 WiFi/BT install no longer uses the vendor `steamdeck-setup.sh` (which pulled in `bc250-storage.sh` and `bc250-update-persistence.sh`); it now builds and installs the AIC8800 modules, firmware, udev rule and usb_modeswitch data directly, WiFi-only.
 - **Changed:** `bc250_smu_oc` and `nct6687d` are now vendored under `$SCRIPT_DIR/external/`. `start.sh` no longer performs `git clone` at runtime for these repositories; it uses the local vendored copies.
 - **Changed:** `.gitignore` now excludes generated kernel build artifacts inside the vendored `external/` directories (e.g., `steamos-headers`, `*.o`, `*.ko`, `*-drmexec*/`).
+- **Changed:** AIC8800D80 USB WiFi/BT Driver option moved from "Install / Revert Manual" and `Install All` to the `Extras` menu (options `8` / `8R`), so it is no longer treated as a default optimization.
 
 ### 2026-07-18
 
