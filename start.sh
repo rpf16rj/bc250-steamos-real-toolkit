@@ -42,6 +42,7 @@ LOG_DIR="${REAL_HOME}/.bc250-toolkit/logs"
 mkdir -p "$LOG_DIR"
 TOOLKIT_RUN_LOG="${LOG_DIR}/bc250-toolkit-run-$(date +%Y%m%d-%H%M%S)-$$.log"
 TOOLKIT_TRACE_LOG="${LOG_DIR}/bc250-toolkit-trace-$(date +%Y%m%d-%H%M%S)-$$.log"
+INSTALL_ALL_PROGRESS="${LOG_DIR}/install-all-progress"
 # Trace goes to fd 5 so it does not clutter the terminal.
 exec 5>>"$TOOLKIT_TRACE_LOG"
 BASH_XTRACEFD=5
@@ -144,11 +145,11 @@ run_update_script() {
 
     local tmp
     tmp="$(mktemp /tmp/bc250-toolkit-update.XXXXXX)"
-    if ! curl -fsSL "$TOOLKIT_RAW_URL" -o "$tmp"; then
+    run_with_retry "curl -fsSL \"$TOOLKIT_RAW_URL\" -o \"$tmp\"" "download latest script" || {
         print_error "Failed to download the latest script. Check your internet connection."
         rm -f "$tmp"
         return 1
-    fi
+    }
 
     if ! bash -n "$tmp"; then
         print_error "Downloaded script failed a syntax check — aborting update to avoid breaking the toolkit."
@@ -315,19 +316,48 @@ repair_pacman_keyring() {
     pacman-key --populate archlinux holo 2>/dev/null || pacman-key --populate
 }
 
-run_with_keyring_retry() {
-    local cmd="$1" output rc
-    output="$(eval "$cmd" 2>&1)"
-    rc=$?
-    echo "$output"
-    if [[ $rc -ne 0 ]] && echo "$output" | grep -qiE "keyring|chaveiro|invalid or corrupted package|assinatura|signature"; then
-        repair_pacman_keyring
-        print_info "Retrying the failed command..."
+is_network_error() {
+    local output="$1"
+    grep -qiE "operation too slow|timeout|timed out|connection refused|connection reset|could not resolve|network is unreachable|temporary failure in name resolution|failed to download|failed to retrieve|erro.*baixar|erro.*obter|download.*failed|http.*error|curl.*error|git.*unable to access|git.*failed to connect|socket timed out|transfer closed" <<< "$output"
+}
+
+prompt_retry_or_abort() {
+    local context="$1"
+    while true; do
+        echo -e "\n  ${YELLOW}Network/download failure detected in:${RESET} ${context}"
+        echo -e "  ${DIM}[R]etry / [A]bort${RESET}"
+        read -rp "  → " ans
+        case "${ans,,}" in
+            r|retry|"") return 0 ;;
+            a|abort|*) return 1 ;;
+        esac
+    done
+}
+
+run_with_retry() {
+    local cmd="$1" context="${2:-command}"
+    local output rc
+    while true; do
         output="$(eval "$cmd" 2>&1)"
         rc=$?
         echo "$output"
-    fi
-    return $rc
+        if [[ $rc -eq 0 ]]; then
+            return 0
+        fi
+        # First try the known pacman keyring error path once.
+        if echo "$output" | grep -qiE "keyring|chaveiro|invalid or corrupted package|assinatura|signature"; then
+            repair_pacman_keyring
+            print_info "Retrying the failed command after keyring repair..."
+            continue
+        fi
+        # If it looks like a transient network/download error, ask the user.
+        if is_network_error "$output"; then
+            prompt_retry_or_abort "$context" || return 1
+            print_info "Retrying ${context}..."
+            continue
+        fi
+        return $rc
+    done
 }
 
 steamos_writable() {
@@ -338,13 +368,13 @@ steamos_writable() {
             print_error "Failed to disable SteamOS read-only mode."
             return 1
         fi
-        run_with_keyring_retry "$cmd"
+        run_with_retry "$cmd" "steamos_writable: $cmd"
         local rc=$?
         print_info "Re-enabling SteamOS read-only mode..."
         steamos-readonly enable || true
         return $rc
     else
-        run_with_keyring_retry "$cmd"
+        run_with_retry "$cmd" "steamos_writable: $cmd"
     fi
 }
 
@@ -469,13 +499,13 @@ run_cpu_governor() {
     print_info "Cloning bc250_smu_oc repository..."
     if [[ -d "bc250_smu_oc" ]]; then
         print_info "Directory already exists — pulling latest changes..."
-        git -C bc250_smu_oc pull || { fail_with_log "Failed to pull repository." "CPU Governor Install — git pull"; return 1; }
+        run_with_retry "git -C bc250_smu_oc pull" "git pull bc250_smu_oc" || { fail_with_log "Failed to pull repository." "CPU Governor Install — git pull"; return 1; }
     else
-        git clone https://github.com/bc250-collective/bc250_smu_oc.git || { fail_with_log "Failed to clone repository." "CPU Governor Install — git clone"; return 1; }
+        run_with_retry "git clone https://github.com/bc250-collective/bc250_smu_oc.git" "git clone bc250_smu_oc" || { fail_with_log "Failed to clone repository." "CPU Governor Install — git clone"; return 1; }
     fi
     cd bc250_smu_oc
     print_info "Installing via pipx..."
-    pipx install . || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; cd ..; return 1; }
+    run_with_retry "pipx install ." "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; cd ..; return 1; }
     pipx ensurepath || true
     export PATH="$PATH:/root/.local/bin"
     cd ..
@@ -989,11 +1019,11 @@ install_sensors_pwm() {
     build_dir="$(mktemp -d /tmp/nct6687d-XXXXXX)"
 
     print_info "Cloning nct6687d driver..."
-    if ! git clone "$NCT6687D_REPO" "$build_dir"; then
+    run_with_retry "git clone \"$NCT6687D_REPO\" \"$build_dir\"" "git clone nct6687d" || {
         fail_with_log "Failed to clone nct6687d repository." "PWM Sensors Install — git clone"
         rm -rf "$build_dir"
         return 1
-    fi
+    }
 
     print_info "Building kernel module..."
     if ! make -C "$build_dir"; then
@@ -1391,7 +1421,7 @@ fixes_repo_sync() {
         }
     else
         print_info "Cloning community fixes repo (keyboardspecialist/bc250-steamos)..."
-        git clone --depth 1 "$FIXES_REPO_URL" "$FIXES_REPO_DIR" || {
+        run_with_retry "git clone --depth 1 \"$FIXES_REPO_URL\" \"$FIXES_REPO_DIR\"" "git clone community fixes" || {
             rm -rf "$FIXES_REPO_DIR"
             fail_with_log "Failed to clone the community fixes repository." "Community Fixes — git clone"
             return 1
@@ -1429,8 +1459,8 @@ install_acpi_fix() {
         mkdir -p "$work/kernel/firmware/acpi"
 
         print_info "Fetching SSDT tables (bc250-collective/bc250-acpi-fix)..."
-        if ! curl -fL -o "$work/kernel/firmware/acpi/SSDT-CST.aml" "$ACPI_FIX_RAW_BASE/SSDT-CST.aml" || \
-           ! curl -fL -o "$work/kernel/firmware/acpi/SSDT-PST.aml" "$ACPI_FIX_RAW_BASE/SSDT-PST.aml"; then
+        if ! run_with_retry "curl -fL -o \"$work/kernel/firmware/acpi/SSDT-CST.aml\" \"$ACPI_FIX_RAW_BASE/SSDT-CST.aml\"" "ACPI Fix SSDT-CST download" || \
+           ! run_with_retry "curl -fL -o \"$work/kernel/firmware/acpi/SSDT-PST.aml\" \"$ACPI_FIX_RAW_BASE/SSDT-PST.aml\"" "ACPI Fix SSDT-PST download"; then
             fail_with_log "Failed to download SSDT tables." "ACPI Fix — download"
             rm -rf "$work"
             return 1
@@ -2972,25 +3002,47 @@ run_status() {
 # MAIN MENU
 # ==============================================================================
 
+install_all_progress_init() { : > "$INSTALL_ALL_PROGRESS"; }
+install_all_progress_done() { echo "$1" >> "$INSTALL_ALL_PROGRESS"; }
+install_all_progress_is_done() { [[ -f "$INSTALL_ALL_PROGRESS" ]] && grep -Fxq "$1" "$INSTALL_ALL_PROGRESS"; }
+install_all_progress_clear() { rm -f "$INSTALL_ALL_PROGRESS"; }
+
+run_install_all_step() {
+    local step="$1"; shift
+    if install_all_progress_is_done "$step"; then
+        print_info "Skipping already completed step: $step"
+        return 0
+    fi
+    "$step" "$@" || { print_error "Step $step failed — saved progress so you can resume later."; return 1; }
+    install_all_progress_done "$step"
+    echo ""
+}
+
 run_install_all() {
     print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock"
-    run_cpu_governor
-    echo ""
-    run_gpu_governor
-    echo ""
-    run_disable_mitigations auto
-    echo ""
-    run_configure_swap auto
-    echo ""
-    run_zram_zswap_toggle auto
-    echo ""
-    install_acpi_fix
-    echo ""
-    install_audio_fix
-    echo ""
-    install_aic8800_wifi
-    echo ""
-    run_cu_live_manager
+    if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
+        if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
+            print_info "Resuming previous Install All..."
+        else
+            print_info "Starting a fresh Install All."
+            install_all_progress_init
+        fi
+    else
+        install_all_progress_init
+    fi
+
+    run_install_all_step run_cpu_governor || return 1
+    run_install_all_step run_gpu_governor || return 1
+    run_install_all_step run_disable_mitigations auto || return 1
+    run_install_all_step run_configure_swap auto || return 1
+    run_install_all_step run_zram_zswap_toggle auto || return 1
+    run_install_all_step install_acpi_fix || return 1
+    run_install_all_step install_audio_fix || return 1
+    run_install_all_step install_aic8800_wifi || return 1
+    run_install_all_step run_cu_live_manager || return 1
+
+    install_all_progress_clear
+    print_success "Install All completed!"
 }
 
 run_revert_all() {
