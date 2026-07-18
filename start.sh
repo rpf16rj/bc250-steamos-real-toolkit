@@ -33,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 
-TOOLKIT_VERSION="v2026-07-15"
+TOOLKIT_VERSION="v2026-07-17"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -649,7 +649,21 @@ swapfile_size_mb() {
 }
 
 zswap_currently_on() {
-    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*zswap\.enabled=1' "$GRUB_DEFAULT" >/dev/null 2>&1
+    # GRUB cmdline is the persistent config, but some SteamOS kernels do not
+    # honor zswap.enabled=1 at boot and leave the runtime parameter at N.
+    # Treat ZSWAP as ON only when it is configured in GRUB AND enabled now.
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*zswap\.enabled=' "$GRUB_DEFAULT" >/dev/null 2>&1 || return 1
+    [[ -r /sys/module/zswap/parameters/enabled ]] || return 1
+    grep -qx 'Y' /sys/module/zswap/parameters/enabled 2>/dev/null
+}
+
+zswap_enable_runtime() {
+    if [[ -w /sys/module/zswap/parameters/enabled ]]; then
+        if ! grep -qx 'Y' /sys/module/zswap/parameters/enabled 2>/dev/null; then
+            echo Y > /sys/module/zswap/parameters/enabled
+            print_info "ZSWAP enabled at runtime immediately."
+        fi
+    fi
 }
 
 zram_currently_disabled() {
@@ -803,8 +817,12 @@ run_zram_zswap_toggle() {
         return 1
     }
 
-    print_success "ZRAM disabled and ZSWAP enabled. Reboot to apply."
-    print_info "After reboot, verify with: cat /sys/module/zswap/parameters/enabled"
+    # Some SteamOS kernels do not enable the runtime toggle from GRUB alone.
+    # Force it on now so the user does not need another reboot.
+    zswap_enable_runtime
+
+    print_success "ZRAM disabled and ZSWAP enabled."
+    print_info "Verify with: sudo cat /sys/module/zswap/parameters/enabled"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
 
