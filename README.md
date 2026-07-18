@@ -53,24 +53,18 @@ Without their work, none of this would be possible. 🙏
 
 ## Changelog
 
-### 2026-07-20
-
-- **Changed:** AIC8800D80 USB WiFi/BT Driver option in `Extras` now uses `A` (install) and `R` (revert) instead of the previous numeric `8`/`8R`.
-- **Added:** SteamOS update persistence. Installed toolkit components are tracked in `${REAL_HOME}/.bc250-toolkit/installed-components`; enabling persistence in `Extras` (`P`) installs `bc250-toolkit-persist.service` and an `atomic-update` keep list, so the toolkit re-applies itself after a SteamOS update.
-
-### 2026-07-19
-
-- **Changed:** Community fixes repository is now cloned into `$SCRIPT_DIR/external/` (inside the toolkit tree) instead of `~/.local/share/`, keeping scripts/assets local and cached.
-- **Changed:** AIC8800 WiFi/BT install no longer uses the vendor `steamdeck-setup.sh` (which pulled in `bc250-storage.sh` and `bc250-update-persistence.sh`); it now builds and installs the AIC8800 modules, firmware, udev rule and usb_modeswitch data directly, WiFi-only.
-- **Changed:** `bc250_smu_oc` and `nct6687d` are now vendored under `$SCRIPT_DIR/external/`. `start.sh` no longer performs `git clone` at runtime for these repositories; it uses the local vendored copies.
-- **Changed:** `.gitignore` now excludes generated kernel build artifacts inside the vendored `external/` directories (e.g., `steamos-headers`, `*.o`, `*.ko`, `*-drmexec*/`).
-- **Changed:** AIC8800D80 USB WiFi/BT Driver option moved from "Install / Revert Manual" and `Install All` to the `Extras` menu (options `8` / `8R`), so it is no longer treated as a default optimization.
-
 ### 2026-07-18
 
-- **Improved:** Diagnostic error logs now include a full `set -x` command trace (saved to a hidden fd) and the last lines of the captured script output, so failures show exactly which command failed and the surrounding verbose output.
-- **Improved:** Network/download failures (slow SteamOS mirrors, git/clone timeouts, etc.) now prompt to `[R]etry` or `[A]bort` instead of immediately failing the whole script.
+- **Changed:** AIC8800D80 USB WiFi/BT Driver moved from "Install All" / "Install Manual" to the `Extras` menu and now uses `A` (install) and `R` (revert). The driver no longer uses the vendor `steamdeck-setup.sh`; it builds and installs the AIC8800 modules, firmware, udev rule and usb_modeswitch data directly, WiFi-only.
+- **Changed:** Community fixes repositories (`bc250_smu_oc`, `nct6687d`) and the main fixes repo are now vendored/cloned into `$SCRIPT_DIR/external/` instead of `~/.local/share/`, keeping assets local and cached. `.gitignore` now excludes generated kernel build artifacts inside `external/`.
+- **Changed:** `Extras` menu option letters reordered alphabetically (`A`, `F`, `H`, `K`, `P`, `R`, `X`, `0`).
+- **Added:** SteamOS update persistence. Toolkit tracks installed components in `${REAL_HOME}/.bc250-toolkit/installed-components`; enabling persistence in `Extras` (`P`) installs `bc250-toolkit-persist.service` and an `atomic-update` keep list. After a SteamOS update the toolkit re-installs lost components and restores saved configs.
+- **Added:** Config snapshots for CPU/GPU overclock (`/etc/bc250-smu-oc.conf`, `/etc/cyan-skillfish-governor-smu/config.toml`) and CoolerControl (`/etc/coolercontrol`) that are restored automatically after re-apply.
+- **Improved:** Runtime command visibility with concise `[context] starting...` / `[context] completed.` progress messages in `run_with_retry()` and `steamos_writable()` without cluttering output.
+- **Improved:** Diagnostic error logs now include a full `set -x` trace and recent captured output.
+- **Improved:** Network/download failures now prompt to `[R]etry` or `[A]bort`; prompts are skipped in unattended re-apply (`AUTO=1`) mode.
 - **Improved:** `Install All` tracks completed steps and offers to resume from the last unfinished step on the next run.
+- **Fixed:** Persistence install no longer starts `bc250-toolkit-persist.service` immediately (`enable` only), preventing a recursive re-apply hang.
 - **Fixed:** AIC8800 WiFi/BT install failed with `Update persistence helper missing: /home/deck/tools/bc250/bc250-update-persistence.sh`. The toolkit now links the helper from the fixes repository into the expected location before running `steamdeck-setup.sh`.
 
 ### 2026-07-17

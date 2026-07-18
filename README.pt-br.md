@@ -53,6 +53,49 @@ Sem o trabalho deles, nada disso seria possível. 🙏
 
 ## Changelog
 
+### 2026-07-18
+
+- **Alterado:** Driver WiFi/BT AIC8800D80 USB movido de "Install All" / "Install Manual" para o menu `Extras` e agora usa `A` (instalar) e `R` (reverter). O driver não usa mais o `steamdeck-setup.sh` da vendor; ele compila e instala os módulos AIC8800, firmware, regra udev e dados usb_modeswitch diretamente, somente WiFi.
+- **Alterado:** Repositórios de correções da comunidade (`bc250_smu_oc`, `nct6687d`) e o repositório principal de correções agora são clonados/vendored em `$SCRIPT_DIR/external/` em vez de `~/.local/share/`, mantendo os scripts ativos locais e em cache. O `.gitignore` agora exclui artefatos gerados de build de kernel dentro de `external/`.
+- **Alterado:** Letras do menu `Extras` reorganizadas alfabeticamente (`A`, `F`, `H`, `K`, `P`, `R`, `X`, `0`).
+- **Adicionado:** Persistência de atualização do SteamOS. O toolkit registra os componentes instalados em `${REAL_HOME}/.bc250-toolkit/installed-components`; habilitar a persistência em `Extras` (`P`) instala o `bc250-toolkit-persist.service` e uma keep list do `atomic-update`. Após uma atualização do SteamOS, o toolkit reinstala os componentes perdidos e restaura as configs salvas.
+- **Adicionado:** Snapshots de config para overclock de CPU/GPU (`/etc/bc250-smu-oc.conf`, `/etc/cyan-skillfish-governor-smu/config.toml`) e CoolerControl (`/etc/coolercontrol`), restaurados automaticamente após o re-apply.
+- **Melhorado:** Visibilidade dos comandos em execução com mensagens curtas `[context] starting...` / `[context] completed.` em `run_with_retry()` e `steamos_writable()` sem poluir a saída.
+- **Melhorado:** Logs de erro de diagnóstico agora incluem um trace completo `set -x` e as últimas linhas da saída capturada.
+- **Melhorado:** Falhas de rede/download agora perguntam `[R]etry` ou `[A]bort`; as perguntas são puladas no modo de re-apply desatendido (`AUTO=1`).
+- **Melhorado:** `Install All` registra as etapas concluídas e oferece retomar a partir da última etapa inacabada na próxima execução.
+- **Corrigido:** Instalação da persistência não inicia mais o `bc250-toolkit-persist.service` imediatamente (`enable` somente), evitando um travamento recursivo do re-apply.
+- **Corrigido:** Instalação do WiFi/BT AIC8800 falhava com `Update persistence helper missing: /home/deck/tools/bc250/bc250-update-persistence.sh`. O toolkit agora cria o link do helper a partir do repositório de correções no local esperado antes de executar `steamdeck-setup.sh`.
+
+### 2026-07-17
+
+- **Corrigido:** Menu de status do ZSWAP mostrava "ZRAM off / ZSWAP on" mesmo quando `/sys/module/zswap/parameters/enabled` estava `N` após reiniciar. O toolkit agora habilita o ZSWAP em runtime imediatamente e só reporta ON quando o parâmetro runtime é `Y`.
+- **Alterado:** Tamanho padrão do swapfile aumentado para 32G e swappiness padrão para 120 tanto no "Configure Swap" manual quanto no fluxo "Install All".
+- **Alterado:** Opção 1 do menu principal agora descreve "Instalar todas as otimizações necessárias".
+- **Melhorado:** Selecionar `0` para sair agora espera Enter antes de fechar, mantendo a janela do Konsole visível.
+
+### 2026-07-15
+
+- **Corrigido:** Correção de áudio/vídeo do DisplayPort falhava quando o release do kernel SteamOS continha apenas um SHA curto. O toolkit agora resolve o commit completo via `git ls-remote` e passa como `FULLSHA` para o script de patch do driver da comunidade, evitando o erro HTTP 422 da API do GitHub.
+- **Corrigido:** Correção de áudio/vídeo do DisplayPort parava durante a extração de dependências porque o pipeline upstream `tar | sed | awk` saía cedo sob `pipefail`. O toolkit agora aplica um patch de compatibilidade antes de executar o build.
+- **Adicionado:** Um aviso de atualização do SteamOS é mostrado a cada inicialização e documentado em ambos os READMEs. Os usuários são instruídos a verificar o status do toolkit após cada atualização e a estar preparados para reinstalar componentes, especialmente no canal Beta.
+- **Melhorado:** Sessões iniciadas da área de trabalho agora usam `konsole --hold`, erros não tratados geram logs de diagnóstico, e os logs são copiados para a Área de Trabalho quando disponível.
+- **Melhorado:** `sudo` é autenticado uma vez na inicialização e seu timestamp é renovado durante a sessão, então instaladores aninhados não devem pedir a senha repetidamente.
+
+### 2026-07-14
+
+- **Renomeado** o script principal de `bc250-tollkit-steam-os-real.sh` (erro de digitação) para `start.sh`. `TOOLKIT_RAW_URL` (auto-atualizador) e comandos de instalação em ambos os READMEs foram atualizados.
+- **Corrigido:** `[ERR] failed to read cyan_skillfish.gfx1013.mmSPI_PG_ENABLE_STATIC_WGP_MASK with umr` reportado por usuários. `select_asic()` agora tenta detectar automaticamente o seletor ASIC correto via `umr -lb` antes de desistir, cobrindo placas onde o seletor padrão `cyan_skillfish.gfx1013` não corresponde.
+- **Corrigido:** `bc250-detect: command not found` quando o usuário já tinha o governor de CPU instalado e escolheu não reinstalar (respondeu `n`). O script ia direto para `cpu_governor_setup()` sem adicionar o diretório pipx ao `PATH`. Corrigido prepondo `/root/.local/bin` e `/home/deck/.local/bin` no topo de `cpu_governor_setup()`.
+
+### 2026-07-12
+
+- **Corrigido:** Menu 2 → opção 9 (CU Unlock Live) estava fechando o toolkit inteiro quando o usuário pressionava `q` para sair do gerenciador de CU. Causa raiz: `bc250-cu-live-manager.sh` chama `exit 0` ao sair, que se propagava para o script pai. Corrigido executando o sub-script em subshell: `( bash "$CU_LIVE_MANAGER" )`.
+
+### 2026-07-11 (2)
+
+- **`game-save-sync`** foi extraído para seu próprio repositório standalone: [nonsteam-save-sync](https://github.com/rpf16rj/nonsteam-save-sync). Não faz mais parte deste toolkit. Veja aquele repositório para instruções de instalação e uso.
+
 ### 2026-07-11
 
 - Adicionado instalador do driver do Adaptador Xbox Wireless em **Extras**: instala `dkms`, `xone-dkms` e `xone-dongle-firmware` via AUR helper, bloqueia drivers conflitantes (`xpad`, `mt76x2u`) e carrega o `xone` automaticamente.

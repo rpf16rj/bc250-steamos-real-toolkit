@@ -66,6 +66,44 @@ persist_state_has() {
     [[ -f "$PERSIST_STATE_FILE" ]] && grep -Fxq "$1" "$PERSIST_STATE_FILE" 2>/dev/null
 }
 
+# Snapshots of /etc configuration files (custom CoolerControl curves, CPU/GPU
+# overclock configs, etc.) so they survive a SteamOS atomic update.
+persist_snapshot_configs() {
+    local component="$1"
+    shift
+    local src relpath dest="$PERSIST_STATE_DIR/config-snapshots/$component"
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    for src in "$@"; do
+        if [[ -e "$src" ]]; then
+            relpath="${src#/}"
+            mkdir -p "$(dirname "$dest/$relpath")"
+            cp -a "$src" "$dest/$relpath"
+        fi
+    done
+    chown -R "$REAL_USER":"$REAL_USER" "$PERSIST_STATE_DIR/config-snapshots" 2>/dev/null || true
+}
+
+persist_restore_all_configs() {
+    local snapshot_dir="$PERSIST_STATE_DIR/config-snapshots"
+    [[ -d "$snapshot_dir" ]] || return 0
+    local component_dir top base
+    for component_dir in "$snapshot_dir"/*; do
+        [[ -d "$component_dir" ]] || continue
+        for top in "$component_dir"/*; do
+            [[ -e "$top" ]] || continue
+            base="${top##*/}"
+            if [[ -d "$top" ]]; then
+                mkdir -p "/$base"
+                cp -aT "$top" "/$base" 2>/dev/null || true
+            else
+                cp -a "$top" "/$base" 2>/dev/null || true
+            fi
+        done
+    done
+    chown -R "$REAL_USER":"$REAL_USER" "$PERSIST_STATE_DIR/config-snapshots" 2>/dev/null || true
+}
+
 # ==============================================================================
 # EXECUTION LOGGING
 # ==============================================================================
@@ -84,7 +122,7 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-07-20"
+TOOLKIT_VERSION="v2026-07-18"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -362,6 +400,10 @@ is_network_error() {
 
 prompt_retry_or_abort() {
     local context="$1"
+    if [[ "$AUTO" == "1" ]]; then
+        print_info "[${context}] unattended mode: network failure, skipping retry."
+        return 1
+    fi
     while true; do
         echo -e "\n  ${YELLOW}Network/download failure detected in:${RESET} ${context}"
         echo -e "  ${DIM}[R]etry / [A]bort${RESET}"
@@ -376,11 +418,13 @@ prompt_retry_or_abort() {
 run_with_retry() {
     local cmd="$1" context="${2:-command}"
     local output rc
+    print_info "[${context}] starting..."
     while true; do
         output="$(eval "$cmd" 2>&1)"
         rc=$?
         echo "$output"
         if [[ $rc -eq 0 ]]; then
+            print_info "[${context}] completed."
             return 0
         fi
         # First try the known pacman keyring error path once.
@@ -401,19 +445,23 @@ run_with_retry() {
 
 steamos_writable() {
     local cmd="$1"
+    local first_word="${cmd%% *}"
+    first_word="${first_word#\"}"
+    first_word="${first_word#\'}"
+    local label="steamos: ${first_word}"
     if is_steamos; then
         print_info "SteamOS detected: disabling read-only mode..."
         if ! steamos-readonly disable; then
             print_error "Failed to disable SteamOS read-only mode."
             return 1
         fi
-        run_with_retry "$cmd" "steamos_writable: $cmd"
+        run_with_retry "$cmd" "$label"
         local rc=$?
         print_info "Re-enabling SteamOS read-only mode..."
         steamos-readonly enable || true
         return $rc
     else
-        run_with_retry "$cmd" "steamos_writable: $cmd"
+        run_with_retry "$cmd" "$label"
     fi
 }
 
@@ -1239,6 +1287,9 @@ install_coolercontrol() {
 
     print_success "CoolerControl installed and running!"
     persist_state_add "coolercontrol"
+    if [[ "$AUTO" != "1" ]]; then
+        persist_snapshot_configs "coolercontrol" /etc/coolercontrol /etc/coolercontrold
+    fi
     print_info "Web UI: ${CYAN}https://localhost:11987${RESET}"
     if coolercontrol_gui_installed; then
         print_info "Desktop GUI installed — launch 'CoolerControl' from your app menu."
@@ -2639,6 +2690,7 @@ oc_edit_cpu_config_nano() {
         systemctl restart "$CPU_SERVICE"
         if systemctl is-active --quiet "$CPU_SERVICE"; then
             print_success "CPU service restarted successfully."
+            persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
         else
             print_error "CPU service failed to start! Check: journalctl -u $CPU_SERVICE"
         fi
@@ -2656,6 +2708,7 @@ oc_edit_gpu_config_nano() {
         systemctl restart "$GPU_SERVICE"
         if systemctl is-active --quiet "$GPU_SERVICE"; then
             print_success "GPU service restarted successfully."
+            persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
         else
             print_error "GPU service failed to start! Check: journalctl -u $GPU_SERVICE"
         fi
@@ -2802,6 +2855,7 @@ oc_apply_preset() {
 
     echo ""
     print_success "Preset '${name}' applied!"
+    persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
     echo -e "  ${CYAN}CPU${RESET}  $(awk -F'= ' '/^frequency/{print $2}' "$CPU_DEST" | tr -d ' ')MHz"
     echo -e "  ${CYAN}GPU${RESET}  $(awk -F'= ' '/^frequency/{print $2}' "$GPU_DEST" | tr -d ' ' | tail -1)MHz"
     echo -e "  ${CYAN}TMP${RESET}  $(awk -F'= ' '/^max_temperature/{print $2}' "$CPU_DEST" | tr -d ' ')°C"
@@ -2886,6 +2940,7 @@ oc_apply_custom() {
 
     echo ""
     print_success "Custom profile applied!"
+    persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
     echo -e "  ${CYAN}CPU${RESET}  $(awk -F'= ' '/^frequency/{print $2}' "$CPU_DEST" | tr -d ' ')MHz  /  max $(awk -F'= ' '/^max_temperature/{print $2}' "$CPU_DEST" | tr -d ' ')°C"
     echo -e "  ${CYAN}GPU${RESET}  $(awk -F'= ' '/^frequency/{print $2}' "$GPU_DEST" | tr -d ' ' | tail -1)MHz  /  throttle $(awk -F'= ' '/^throttling /{print $2}' "$GPU_DEST" | tr -d ' ')°C"
     echo ""
@@ -3247,26 +3302,26 @@ run_extras_menu() {
         print_banner
         print_section "Extras"
         echo ""
-        print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
-        print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
-        print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
-        print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
         print_item "A" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB WiFi/BT dongles"
-        print_item "R" "Revert AIC8800 WiFi/BT Driver" "Remove AIC8800 driver"
+        print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
+        print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
+        print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
         print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
+        print_item "R" "Revert AIC8800 WiFi/BT Driver" "Remove AIC8800 driver"
+        print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
         read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" extras_choice
 
         case "${extras_choice^^}" in
-            F) run_sensors_menu ;;
-            K) run_coolercontrol_menu ;;
-            X) run_xbox_adapter_menu ;;
-            H) run_cec_control;         press_enter ;;
             A) install_aic8800_wifi;    press_enter ;;
+            F) run_sensors_menu ;;
+            H) run_cec_control;           press_enter ;;
+            K) run_coolercontrol_menu ;;
+            P) install_persistence;       press_enter ;;
             R) run_revert_aic8800_wifi; press_enter ;;
-            P) install_persistence;     press_enter ;;
+            X) run_xbox_adapter_menu ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$extras_choice'"
@@ -3310,6 +3365,9 @@ reapply_installed_components() {
         esac
         echo ""
     done < "$PERSIST_STATE_FILE"
+    persist_restore_all_configs
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl restart bc250-smu-oc.service cyan-skillfish-governor-smu.service coolercontrold.service 2>/dev/null || true
     install_all_progress_clear 2>/dev/null || true
     print_success "Toolkit re-apply completed."
 }
@@ -3369,6 +3427,8 @@ EOF
 /etc/dbus-1/system.d/com.cyan.SkillFishGovernor.conf
 /etc/bc250-cu-live-manager.conf
 /etc/bc250-control
+/etc/coolercontrol
+/etc/coolercontrold
 /etc/systemd/system/bc250-smu-oc.service
 /etc/systemd/system/cyan-skillfish-governor-smu.service
 /etc/systemd/system/bc250-acpi-heal.service
@@ -3393,11 +3453,25 @@ EOF
     chown "$REAL_USER":"$REAL_USER" "$PERSIST_KEEP_FILE" 2>/dev/null || true
 
     local keep=/etc/atomic-update.conf.d/bc250-toolkit.conf
-    steamos_writable "install -D -m 644 -o root -g root '$PERSIST_KEEP_FILE' '$keep' && install -D -m 644 -o root -g root '$tmp_unit' '/etc/systemd/system/bc250-toolkit-persist.service' && install -D -m 755 -o root -g root '$reapply_script' '/usr/local/bin/bc250-toolkit-reattach.sh' && systemctl daemon-reload && systemctl enable --now bc250-toolkit-persist.service" || {
+    steamos_writable "install -D -m 644 -o root -g root '$PERSIST_KEEP_FILE' '$keep' && install -D -m 644 -o root -g root '$tmp_unit' '/etc/systemd/system/bc250-toolkit-persist.service' && install -D -m 755 -o root -g root '$reapply_script' '/usr/local/bin/bc250-toolkit-reattach.sh' && systemctl daemon-reload && systemctl enable bc250-toolkit-persist.service" || {
         fail_with_log "Failed to install SteamOS update persistence files." "Persistence Install"
         return 1
     }
 
+    if [[ "$AUTO" != "1" ]]; then
+        persist_snapshot_configs "global" \
+            /etc/bc250-smu-oc.conf \
+            /etc/cyan-skillfish-governor-smu/config.toml \
+            /etc/cyan-skillfish-governor-smu/freq-state \
+            /etc/coolercontrol \
+            /etc/coolercontrold \
+            /etc/modprobe.d/aic8800.conf \
+            /etc/modprobe.d/sensors.conf \
+            /etc/modules-load.d/99-sensors.conf \
+            /etc/sysctl.d/99-swappiness.conf \
+            /etc/udev/rules.d/40-aic8800-modeswitch.rules \
+            /etc/usb_modeswitch.d/1111:1111
+    fi
     persist_state_add "persistence"
     print_success "SteamOS update persistence enabled. Toolkit settings will be re-applied after system updates."
 }
