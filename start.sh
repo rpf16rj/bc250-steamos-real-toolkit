@@ -678,28 +678,28 @@ run_configure_swap() {
 
     local swap_size swappiness
     if [[ "$auto" == "auto" ]]; then
-        swap_size="16"
-        swappiness="60"
-        print_info "Install All: using defaults (16G, swappiness=60). Use 'Configure Swap' from the menu to customize."
+        swap_size="32"
+        swappiness="120"
+        print_info "Install All: using defaults (32G, swappiness=120). Use 'Configure Swap' from the menu to customize."
     else
-        read -rp "$(echo -e "  ${BOLD}${WHITE}Swap size in GB (default: 16):${RESET} ")" swap_size_input
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Swap size in GB (default: 32):${RESET} ")" swap_size_input
         if [[ -z "$swap_size_input" ]]; then
-            swap_size="16"
+            swap_size="32"
         elif [[ "$swap_size_input" =~ ^[0-9]+$ ]] && (( swap_size_input > 0 )); then
             swap_size="$swap_size_input"
         else
-            print_error "Invalid size '$swap_size_input' — must be a positive integer. Using default 16G."
-            swap_size="16"
+            print_error "Invalid size '$swap_size_input' — must be a positive integer. Using default 32G."
+            swap_size="32"
         fi
 
-        read -rp "$(echo -e "  ${BOLD}${WHITE}Swappiness value (default: 60):${RESET} ")" swappiness_input
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Swappiness value (default: 120):${RESET} ")" swappiness_input
         if [[ -z "$swappiness_input" ]]; then
-            swappiness="60"
+            swappiness="120"
         elif [[ "$swappiness_input" =~ ^[0-9]+$ ]]; then
             swappiness="$swappiness_input"
         else
-            print_error "Invalid swappiness '$swappiness_input' — must be a number. Using default 60."
-            swappiness="60"
+            print_error "Invalid swappiness '$swappiness_input' — must be a number. Using default 120."
+            swappiness="120"
         fi
     fi
 
@@ -3104,7 +3104,7 @@ run_extras_menu() {
 show_menu() {
     print_banner
     print_section "Quick Start"
-    print_item  "1"  "Install All"           "Everything: CPU/GPU governor, Mitigations, Swap/ZSWAP, Fixes, CU Unlock"
+    print_item  "1"  "Install All"           "Install all necessary optimizations: CPU/GPU governor, Mitigations, Swap/ZSWAP, Fixes, CU Unlock"
     print_item  "2"  "Install / Revert Manual" "Same as Install All, one component at a time"
     print_item  "3"  "Performance Profiles"  "CPU & GPU performance profiles"
     print_item  "4"  "Revert / Uninstall All" "Undo everything back to SteamOS defaults"
@@ -3139,6 +3139,8 @@ while true; do
         I) run_help;              press_enter ;;
         0)
             echo -e "\n  ${DIM}Goodbye.${RESET}\n"
+            echo -e "  ${DIM}Press Enter to close...${RESET}"
+            read -r
             exit 0
             ;;
         *)

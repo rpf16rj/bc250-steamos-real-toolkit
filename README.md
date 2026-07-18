@@ -56,6 +56,9 @@ Without their work, none of this would be possible. 🙏
 ### 2026-07-17
 
 - **Fixed:** ZSWAP status menu showed "ZRAM off / ZSWAP on" even when `/sys/module/zswap/parameters/enabled` was `N` after reboot. The toolkit now enables ZSWAP at runtime immediately and only reports it ON when the runtime parameter is `Y`.
+- **Changed:** Default swapfile size raised to 32G and default swappiness to 120 for both manual "Configure Swap" and the "Install All" flow.
+- **Changed:** Main menu option 1 now reads "Install all necessary optimizations" in its description.
+- **Improved:** Selecting `0` to exit now waits for Enter before closing, keeping the Konsole window visible.
 
 ### 2026-07-15
 
