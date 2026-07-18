@@ -53,6 +53,10 @@ Without their work, none of this would be possible. 🙏
 
 ## Changelog
 
+### 2026-07-18
+
+- **Improved:** Diagnostic error logs now include a full `set -x` command trace (saved to a hidden fd) and the last lines of the captured script output, so failures show exactly which command failed and the surrounding verbose output.
+
 ### 2026-07-17
 
 - **Fixed:** ZSWAP status menu showed "ZRAM off / ZSWAP on" even when `/sys/module/zswap/parameters/enabled` was `N` after reboot. The toolkit now enables ZSWAP at runtime immediately and only reports it ON when the runtime parameter is `Y`.

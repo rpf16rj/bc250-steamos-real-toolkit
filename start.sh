@@ -33,7 +33,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 
-TOOLKIT_VERSION="v2026-07-17"
+# ==============================================================================
+# EXECUTION LOGGING
+# ==============================================================================
+# Capture a hidden trace of every command plus stdout/stderr so the diagnostic
+# log can show exactly what the script ran and printed when an error occurs.
+LOG_DIR="${REAL_HOME}/.bc250-toolkit/logs"
+mkdir -p "$LOG_DIR"
+TOOLKIT_RUN_LOG="${LOG_DIR}/bc250-toolkit-run-$(date +%Y%m%d-%H%M%S)-$$.log"
+TOOLKIT_TRACE_LOG="${LOG_DIR}/bc250-toolkit-trace-$(date +%Y%m%d-%H%M%S)-$$.log"
+# Trace goes to fd 5 so it does not clutter the terminal.
+exec 5>>"$TOOLKIT_TRACE_LOG"
+BASH_XTRACEFD=5
+PS4='+ ${BASH_SOURCE:-$0}:${LINENO}:${FUNCNAME[0]:+${FUNCNAME[0]}()} '
+set -x
+# User-visible output is also saved to the run log.
+exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
+
+TOOLKIT_VERSION="v2026-07-18"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -216,11 +233,15 @@ is_steamos() {
 
 save_error_log() {
     local context="${1:-Unknown step}"
+    local detail="${2:-}"
     local logfile="${REAL_HOME}/bc250-toolkit-error-$(date +%Y%m%d-%H%M%S).log"
     {
         echo "BC-250 SteamOS Real Toolkit — Error Report"
         echo "Generated : $(date)"
         echo "Context   : $context"
+        [[ -n "$detail" ]] && echo "Detail    : $detail"
+        echo "Script    : $SCRIPT_PATH"
+        echo "Version   : $TOOLKIT_VERSION"
         echo ""
         echo "== System Info =="
         uname -a
@@ -236,6 +257,23 @@ save_error_log() {
         echo ""
         echo "== Pacman log (last 80 lines) =="
         tail -n 80 /var/log/pacman.log 2>&1 || true
+        echo ""
+        echo "== Shell Environment =="
+        env | sort || true
+        echo ""
+        echo "== Script Trace (last 1000 lines) =="
+        if [[ -s "$TOOLKIT_TRACE_LOG" ]]; then
+            tail -n 1000 "$TOOLKIT_TRACE_LOG" 2>&1 || true
+        else
+            echo "No trace log available."
+        fi
+        echo ""
+        echo "== Script Output (last 500 lines) =="
+        if [[ -s "$TOOLKIT_RUN_LOG" ]]; then
+            tail -n 500 "$TOOLKIT_RUN_LOG" 2>&1 || true
+        else
+            echo "No run log available."
+        fi
     } > "$logfile" 2>/dev/null
     chown "$REAL_USER":"$REAL_USER" "$logfile" 2>/dev/null || true
 
@@ -259,13 +297,13 @@ save_error_log() {
 fail_with_log() {
     local msg="$1" context="${2:-$1}"
     print_error "$msg"
-    save_error_log "$context"
+    save_error_log "$context" "$msg"
 }
 
 toolkit_unhandled_error() {
     local failed_command="${1:-unknown command}" rc="${2:-1}"
     print_error "Unexpected error (exit code $rc): $failed_command"
-    save_error_log "Unhandled error — $failed_command (exit $rc)"
+    save_error_log "Unhandled error — $failed_command" "exit code $rc"
 }
 
 trap 'toolkit_unhandled_error "$BASH_COMMAND" "$?"' ERR
