@@ -1,0 +1,26 @@
+diff --git a/src/USB/driver_fw/drivers/aic8800/aic_load_fw/aicbluetooth.c b/src/USB/driver_fw/drivers/aic8800/aic_load_fw/aicbluetooth.c
+index afa29df..5944cb3 100644
+--- a/src/USB/driver_fw/drivers/aic8800/aic_load_fw/aicbluetooth.c
++++ b/src/USB/driver_fw/drivers/aic8800/aic_load_fw/aicbluetooth.c
+@@ -144,7 +144,7 @@ enum aicbsp_cpmode_type {
+ 
+ #define FW_PATH_MAX 200
+ #if defined(CONFIG_PLATFORM_UBUNTU)
+-static const char* aic_default_fw_path = "/lib/firmware";
++static const char* aic_default_fw_path = "/lib/firmware/aic8800_fw/USB";
+ #else
+ static const char* aic_default_fw_path = "/vendor/etc/firmware";
+ #endif
+diff --git a/src/USB/driver_fw/drivers/aic_btusb/aic_btusb.c b/src/USB/driver_fw/drivers/aic_btusb/aic_btusb.c
+index 185fcc6..18113b6 100644
+--- a/src/USB/driver_fw/drivers/aic_btusb/aic_btusb.c
++++ b/src/USB/driver_fw/drivers/aic_btusb/aic_btusb.c
+@@ -2844,7 +2844,7 @@ struct aicbsp_info_t aicbsp_info = {
+ 
+ char aic_fw_path[FW_PATH_MAX];
+ #if (CONFIG_BLUEDROID == 0) || defined (CONFIG_PLATFORM_UBUNTU)
+-static const char* aic_default_fw_path = "/lib/firmware";
++static const char* aic_default_fw_path = "/lib/firmware/aic8800_fw/USB/aic8800DC";
+ #else
+ static const char* aic_default_fw_path = "/vendor/etc/firmware";
+ #endif

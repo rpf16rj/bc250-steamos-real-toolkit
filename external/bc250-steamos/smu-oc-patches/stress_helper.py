@@ -1,0 +1,51 @@
+import atexit
+import os
+import shutil
+import subprocess
+from multiprocessing import Process
+
+_process = None
+_burners = []
+
+# Fallback CPU burner for systems without the `stress` binary (e.g. SteamOS,
+# where pacman packages are wiped by OS updates). A spinning float loop pegs
+# the core just as well for boost/throttle detection purposes.
+def _burn():
+    x = 1.0001
+    while True:
+        x = x * x % 1e9 + 1.0001
+
+def stress_start():
+    global _process
+    if _process is not None or _burners:
+        return
+    ncpu = os.cpu_count() or 12
+    if shutil.which("stress"):
+        _process = subprocess.Popen(["stress", "--cpu", str(ncpu)],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        for _ in range(ncpu):
+            p = Process(target=_burn, daemon=True)
+            p.start()
+            _burners.append(p)
+
+def stress_stop():
+    global _process
+    if _process:
+        _process.terminate()
+        try:
+            _process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            _process.kill()
+            _process.wait()
+        _process = None
+    for p in _burners:
+        p.terminate()
+    for p in _burners:
+        p.join(timeout=1)
+        if p.is_alive():
+            p.kill()
+            p.join()
+    _burners.clear()
+
+atexit.register(stress_stop)

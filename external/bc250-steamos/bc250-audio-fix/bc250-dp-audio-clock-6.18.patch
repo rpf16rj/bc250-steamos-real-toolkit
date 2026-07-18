@@ -1,0 +1,12 @@
+--- a/drivers/gpu/drm/amd/display/dc/clk_mgr/dcn201/dcn201_clk_mgr.c
++++ b/drivers/gpu/drm/amd/display/dc/clk_mgr/dcn201/dcn201_clk_mgr.c
+@@ -214,4 +214,9 @@ void dcn201_clk_mgr_construct(struct dc_context *ctx,
+ 			clk_mgr->dfs_bypass_enabled = true;
+ 
+ 	dce_clock_read_ss_info(clk_mgr);
++
++	if (bp->integrated_info && !bp->integrated_info->dp_ss_control) {
++		clk_mgr->dprefclk_ss_percentage = 0;
++		clk_mgr->ss_on_dprefclk = false;
++	}
+ }

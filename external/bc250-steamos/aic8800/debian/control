@@ -1,0 +1,73 @@
+Source: aic8800
+Maintainer: "Radxa Computer Co., Ltd" <dev@radxa.com>
+Section: misc
+Priority: optional
+Standards-Version: 4.6.0
+Build-Depends: debhelper (>=12~),
+               devscripts,
+               dh-exec,
+               dh-sequence-dkms,
+               lintian,
+               dos2unix,
+               crossbuild-essential-arm64 [!arm64],
+               libc6:arm64 [!arm64],
+
+Package: aic8800-sdio-dkms
+Architecture: all
+Section: misc
+Priority: optional
+Depends: aic8800-firmware (= ${binary:Version}),
+         ${misc:Depends},
+Provides: aic8800-dkms (= 3.0+git20240116.ec460377-1)
+Conflicts: aic8800-dkms (<< 3.0+git20240116.ec460377-1),
+           aic8800-usb-dkms,
+           aic8800-pcie-dkms,
+Replaces: aic8800-dkms (<< 3.0+git20240116.ec460377-1)
+Description: dkms sources for Aicsemi aic8800 SDIO Wi-Fi driver
+ This package provides the dkms source code for Aicsemi
+ aic8800 SDIO Wi-Fi driver.
+
+Package: aic8800-usb-dkms
+Architecture: all
+Section: misc
+Priority: optional
+Depends: aic8800-firmware (= ${binary:Version}),
+         ${misc:Depends},
+Conflicts: aic8800-dkms (<< 3.0+git20240116.ec460377-1),
+           aic8800-sdio-dkms,
+           aic8800-pcie-dkms,
+Description: dkms sources for Aicsemi aic8800 USB Wi-Fi driver
+ This package provides the dkms source code for Aicsemi
+ aic8800 USB Wi-Fi driver.
+
+Package: aic8800-pcie-dkms
+Architecture: all
+Section: misc
+Priority: optional
+Depends: aic8800-firmware (= ${binary:Version}),
+         ${misc:Depends},
+Conflicts: aic8800-dkms (<< 3.0+git20240116.ec460377-1),
+           aic8800-sdio-dkms,
+           aic8800-usb-dkms,
+Description: dkms sources for Aicsemi aic8800 PCIe Wi-Fi driver
+ This package provides the dkms source code for Aicsemi
+ aic8800 PCIe Wi-Fi driver.
+
+Package: aicrf-test
+Architecture: any
+Section: misc
+Priority: optional
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Description: Aicsemi RF test tools
+ This Package provides Bluetooth and Wi-Fi test tools
+ from Aicsemi aic8800 Wi-Fi driver.
+
+Package: aic8800-firmware
+Architecture: all
+Section: misc
+Priority: optional
+Depends: ${misc:Depends},
+Description: Aicsemi aic8800 supplemental firmware
+ This package contains Aicsemi aic8800 firmware that are not
+ shipped by Debian.

@@ -1,0 +1,302 @@
+aic8800 (5.0+git20260123.5f7be68d-6) noble; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * Update pkg.conf
+
+  [ Hoe Hao Cheng ]
+  * Fix Linux 7.1 build
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Fri, 26 Jun 2026 11:30:02 +0000
+
+aic8800 (5.0+git20260123.5f7be68d-5) noble; urgency=medium
+
+  [ Chongbiao Chen ]
+  * fix: use bluez by default
+
+  [ ZHANG Yuntian ]
+  * fix: workaround OOM build failure
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Wed, 29 Apr 2026 10:34:22 +0000
+
+aic8800 (5.0+git20260123.5f7be68d-4) noble; urgency=medium
+
+  [ Chongbiao Chen ]
+  * fix: fix usb build error
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Mon, 13 Apr 2026 06:31:43 +0000
+
+aic8800 (5.0+git20260123.5f7be68d-3) noble; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * Update devcontainer.json
+
+  [ dependabot[bot] ]
+  * chore(deps): bump dependabot/fetch-metadata from 2 to 3
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Fri, 10 Apr 2026 06:57:48 +0000
+
+aic8800 (5.0+git20260123.5f7be68d-2) noble; urgency=medium
+
+  [ Vladislav Tatjanin ]
+  * add riscv64 -> riscv SUBARCH mapping
+
+  [ Chongbiao Chen ]
+  * fix: update patchset
+  * fix: fix vmalloc.h not include
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Wed, 08 Apr 2026 11:45:24 +0000
+
+aic8800 (5.0+git20260123.5f7be68d-1) noble; urgency=medium
+
+  [ dependabot[bot] ]
+  * chore(deps): bump actions/upload-artifact from 5 to 7
+  * chore(deps): bump docker/setup-qemu-action from 3 to 4
+  * chore(deps): bump cachix/cachix-action from 16 to 17
+  * chore(deps): bump actions/deploy-pages from 4 to 5
+  * chore(deps): bump actions/configure-pages from 5 to 6
+  * chore(deps): bump actions/download-artifact from 7 to 8
+
+  [ ZHANG Yuntian ]
+  * feat: update to aic8800d_linux_sdk_V5.0_2026_0123_5f7be68d
+  * fix: update patchset
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 07 Apr 2026 14:29:01 +0800
+
+aic8800 (4.0+git20250410.b99ca8b6-5) noble; urgency=medium
+
+  [ dependabot[bot] ]
+  * chore(deps): bump actions/download-artifact from 6 to 7
+
+  [ CodeChenL ]
+  * feat: add pkg.conf.template
+
+  [ Jianfeng Liu ]
+  * add fix for linux v6.19
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 30 Dec 2025 08:12:48 +0000
+
+aic8800 (4.0+git20250410.b99ca8b6-4) noble; urgency=medium
+
+  [ dependabot[bot] ]
+  * chore(deps): bump actions/upload-artifact from 4 to 5
+  * chore(deps): bump actions/checkout from 5 to 6
+  * chore(deps): bump actions/download-artifact from 5 to 6
+
+  [ Feng Zhang ]
+  * fix: add fix-Lower-the-debugging-log-level.patch
+
+  [ ZHANG Yuntian ]
+  * fix: debian/patches shares the license of its target
+  * fix: add GPLv2 license to driver source code
+  * fix: restore lost build config
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 09 Dec 2025 08:38:42 +0000
+
+aic8800 (4.0+git20250410.b99ca8b6-3) noble; urgency=medium
+
+  [ dependabot[bot] ]
+  * chore(deps): bump actions/upload-pages-artifact from 3 to 4
+
+  [ Jianfeng Liu ]
+  * fix build for linux 6.17
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 30 Sep 2025 06:02:28 +0000
+
+aic8800 (4.0+git20250410.b99ca8b6-2) noble; urgency=medium
+
+  [ dependabot[bot] ]
+  * chore(deps): bump actions/download-artifact from 4 to 5
+  * chore(deps): bump actions/checkout from 4 to 5
+
+  [ Jiali Chen ]
+  * fix: set CONFIG_USB_NO_TRANS_DMA_MAP=y when run on sun60iw2p1
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Sun, 24 Aug 2025 07:59:49 +0000
+
+aic8800 (4.0+git20250410.b99ca8b6-1) noble; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * feat: update to aic8800d_linux_sdk_V4.0_2025_0410_b99ca8b6
+  * feat: vendor Bluetooth firmware hotfix
+  * fix: update patches to the latest driver version
+  * fix: do not include VCS content
+
+  [ Stephen Chen ]
+  * fix: add fix-aic_btusb-use-bluez-by-default.patch
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 05 Aug 2025 10:17:13 +0000
+
+aic8800 (4.0+git20241119.06da8476-1) noble; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * feat: update to aic8800d_linux_sdk_V4.0_2024_1119_06da8476
+  * chore: adapt patches to the latest AIC release
+  * fix: auto detect Allwinner kernel
+  * chore: clean up old build infra
+
+  [ amazingfate ]
+  * workflow: trigger check_linked_issue when pr is edited
+  * fix build for linux 6.16
+
+  [ Jiali Chen ]
+  * fix: add fix-usb-build.patch
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Mon, 07 Jul 2025 07:07:30 +0000
+
+aic8800 (3.0+git20240327.3561b08f-7) noble; urgency=medium
+
+  [ admin ]
+  * fix aic_btusb.c implicit declaration compat_ptr
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Mon, 09 Jun 2025 03:10:02 +0000
+
+aic8800 (3.0+git20240327.3561b08f-6) noble; urgency=medium
+
+  [ amazingfate ]
+  * fix cfg80211 api change with REGULATORY_IGNORE_STALE_KICKOFF for 6.1 kernel
+  * fix build for 6.15
+  * fix build with gcc14
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Thu, 22 May 2025 09:31:38 +0000
+
+aic8800 (3.0+git20240327.3561b08f-5) noble; urgency=medium
+
+  [ amazingfate ]
+  * fix build for kernel after 6.1.107
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Mon, 21 Apr 2025 02:04:44 +0000
+
+aic8800 (3.0+git20240327.3561b08f-4) noble; urgency=medium
+
+  [ amazingfate ]
+  * really fix build for kernel 6.12
+  * really fix build for kernel 6.13
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Mon, 10 Mar 2025 02:41:55 +0000
+
+aic8800 (3.0+git20240327.3561b08f-3) noble; urgency=medium
+
+  [ Mingcong Bai ]
+  * feat: fix build for kernels 6.12, 6.13
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Wed, 05 Feb 2025 11:09:10 +0000
+
+aic8800 (3.0+git20240327.3561b08f-2) jammy; urgency=medium
+
+  [ CodeChenL ]
+  * feat: add CODEOWNERS
+  * fix: define fw_info only when use correct config
+  * fix: define missing kernel version macros
+  * fix: update fix-linux-6.1-build.patch
+
+  [ amazingfate ]
+  * fix sdio and pcie build for kernel 6.7
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Mon, 24 Jun 2024 10:32:13 +0000
+
+aic8800 (3.0+git20240327.3561b08f-1) jammy; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * fix: firmware package is cross platform
+  * feat: update to aic8800d_linux_sdk_V3.0_2024_0327_3561b08f
+  * feat: add disclaimer
+  * fix: update for cfg80211_ch_switch* new parameter list
+  * fix: workaround a double free bug
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Thu, 20 Jun 2024 11:26:34 +0800
+
+aic8800 (3.0+git20240116.ec460377-8) jammy; urgency=medium
+
+  [ Peiyu Wu ]
+  * Fix the issue that the aic8800-sdio cannot be used in kernel 6.5.0 or later
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Thu, 16 May 2024 03:27:47 +0000
+
+aic8800 (3.0+git20240116.ec460377-7) jammy; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * fix: patch incompatible functions for Linux 6.7+
+  * fix: correct the logic error when building with Rockchip 6.1 kernel
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 23 Apr 2024 06:36:12 +0000
+
+aic8800 (3.0+git20240116.ec460377-6) jammy; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * feat: add aic_btusb module
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Wed, 03 Apr 2024 08:40:30 +0000
+
+aic8800 (3.0+git20240116.ec460377-5) jammy; urgency=medium
+
+  [ CodeChenL ]
+  * feat: add aic8800-firmware
+  * fix: remove duplicate firmware
+  * fix: fix  some package issues with reviewer
+  * fix: place explicit depends up front
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 02 Apr 2024 08:22:56 +0000
+
+aic8800 (3.0+git20240116.ec460377-4) jammy; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * feat: ci: update dependency and add release.yml
+  * fix: add patch to allow building with Linux 6.1.0+
+  * feat: allow multiple dkms packages to coexist
+  * fix: detect Rockchip kernel and their shenanigans
+  * fix: ci: update build command
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Thu, 28 Mar 2024 08:34:32 +0000
+
+aic8800 (3.0+git20240116.ec460377-3) jammy; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * Use distinct firmware path for each device variant
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Mon, 04 Mar 2024 19:11:45 +0800
+
+aic8800 (3.0+git20240116.ec460377-2) jammy; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * fix: mark aic8800-sdio-dkms as providing a newer aic8800-dkms
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Fri, 23 Feb 2024 15:24:13 +0800
+
+aic8800 (3.0+git20240116.ec460377-1) jammy; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * feat: rename aic8800-dkms to aic8800-sdio-dkms
+  * feat: add aic8800-usb-dkms
+  * feat: add aic8800-pcie-dkms
+  * feat: update to aic8800d_linux_sdk_V3.0_2024_0116_for_oms
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Fri, 23 Feb 2024 10:18:03 +0800
+
+aic8800 (3.0+git20231212.15dcf017-1) jammy; urgency=medium
+
+  [ dependabot[bot] ]
+  * Bump actions/upload-artifact from 3 to 4
+  * Bump actions/download-artifact from 3 to 4
+
+  [ ZHANG Yuntian ]
+  * Update to aic8800d_linux_sdk_V3.0_2023_1212_15dcf017
+  * Update firmware path
+  * Update dkms module installation location
+  * Use dh-install to handle package content
+  * Prepare for additional package
+  * Add aicrf-test package
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 02 Jan 2024 17:25:38 +0800
+
+aic8800 (3.0+git20231107.581567ff-2) jammy; urgency=medium
+
+  [ ZHANG Yuntian ]
+  * Fix default firmware location
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Tue, 28 Nov 2023 17:51:52 +0800
+
+aic8800 (3.0+git20231107.581567ff-1) jammy; urgency=medium
+
+  * Imported from aic8800_linux_sdk_V3.0_2023_1107_581567ff.7z
+
+ -- "Radxa Computer Co., Ltd" <dev@radxa.com>  Fri, 24 Nov 2023 18:41:28 +0800

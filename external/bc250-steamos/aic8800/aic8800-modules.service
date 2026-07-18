@@ -1,0 +1,15 @@
+[Unit]
+Description=AIC8800 dongle: rebuild and load WiFi/BT modules if missing
+After=local-fs.target network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/bc250-control
+ConditionPathExists=/var/lib/bc250-control/aic8800/source/Makefile
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=15min
+ExecStart=/var/lib/bc250-control/helper/aic8800-ensure-modules
+
+[Install]
+WantedBy=multi-user.target

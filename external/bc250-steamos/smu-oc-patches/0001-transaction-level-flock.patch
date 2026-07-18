@@ -1,0 +1,63 @@
+diff --git a/bc250_smu/transport.py b/bc250_smu/transport.py
+index a12647d..b65cf2f 100644
+--- a/bc250_smu/transport.py
++++ b/bc250_smu/transport.py
+@@ -27,30 +27,47 @@ class Bc250PciTransport:
+         if self._use_flock and self._fd is not None:
+             fcntl.flock(self._fd, fcntl.LOCK_UN)
+ 
+-    def read_config32(self, offset: int) -> int:
++    def _read_config32_unlocked(self, offset: int) -> int:
++        if self._fd is None:
++            raise RuntimeError("transport not opened")
++        data = os.pread(self._fd, 4, offset)
++        return struct.unpack("<I", data)[0]
++
++    def _write_config32_unlocked(self, offset: int, value: int) -> None:
+         if self._fd is None:
+             raise RuntimeError("transport not opened")
++        os.pwrite(self._fd, struct.pack("<I", value), offset)
++
++    def read_config32(self, offset: int) -> int:
+         self._lock()
+         try:
+-            data = os.pread(self._fd, 4, offset)
++            return self._read_config32_unlocked(offset)
+         finally:
+             self._unlock()
+-        return struct.unpack("<I", data)[0]
+ 
+     def write_config32(self, offset: int, value: int) -> None:
+-        if self._fd is None:
+-            raise RuntimeError("transport not opened")
+-        data = struct.pack("<I", value)
+         self._lock()
+         try:
+-            os.pwrite(self._fd, data, offset)
++            self._write_config32_unlocked(offset, value)
+         finally:
+             self._unlock()
+ 
++    # The 0xB8 (address) / 0xBC (data) pair is a shared indirect window:
++    # another SMU client (e.g. cyan-skillfish-governor-smu, which flocks the
++    # same config file) may move 0xB8 between our two accesses. Hold the
++    # lock across the whole pair, not per 32-bit access.
+     def read_smu_reg(self, reg: int) -> int:
+-        self.write_config32(0xB8, reg)
+-        return self.read_config32(0xBC)
++        self._lock()
++        try:
++            self._write_config32_unlocked(0xB8, reg)
++            return self._read_config32_unlocked(0xBC)
++        finally:
++            self._unlock()
+ 
+     def write_smu_reg(self, reg: int, value: int) -> None:
+-        self.write_config32(0xB8, reg)
+-        self.write_config32(0xBC, value)
++        self._lock()
++        try:
++            self._write_config32_unlocked(0xB8, reg)
++            self._write_config32_unlocked(0xBC, value)
++        finally:
++            self._unlock()

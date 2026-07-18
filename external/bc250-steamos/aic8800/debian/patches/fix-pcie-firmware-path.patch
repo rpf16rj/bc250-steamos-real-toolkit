@@ -1,0 +1,15 @@
+Index: aic8800/src/PCIE/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
+===================================================================
+--- aic8800.orig/src/PCIE/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
++++ aic8800/src/PCIE/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
+@@ -535,8 +535,8 @@ int wifi_fail = 0;
+ module_param(testmode, int, 0660);
+ module_param(adap_test, int, 0660);
+ module_param(wifi_fail, int, 0660);
+-char aic_fw_path[200]="/lib/firmware/aic8800D80";
+-char aic_fw_path_8800d80x2[200]="/lib/firmware/aic8800D80X2";
++char aic_fw_path[200]="/lib/firmware/aic8800_fw/PCIE/aic8800D80";
++char aic_fw_path_8800d80x2[200]="/lib/firmware/aic8800_fw/PCIE/aic8800D80X2";
+ u8 chip_sub_id = 0;
+ u8 chip_mcu_id = 0;
+ u8 chip_id = 0;

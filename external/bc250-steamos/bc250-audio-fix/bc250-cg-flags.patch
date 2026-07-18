@@ -1,0 +1,47 @@
+BC-250 / Cyan Skillfish: enable GFX clock gating (idle power)
+
+AMD ships cyan skillfish (GC 10.1.3/4) with cg_flags=0 and leaves its IP
+revisions out of every set_clockgating_state switch, so no clock ever
+gates at idle (~20 W on VDDCR_GFX at 0% activity). This layer enables ONLY
+the GFX MGCG/CGCG path: the silicon is navi1x-generation GC 10.1, so this
+reuses the register programming AMD already validated on Navi10 (10.1.10)
+and its siblings (10.1.1/10.1.2) — nothing here touches an unvalidated
+register map. It sets the two GFX flags and adds 10.1.3/4 to the gfx_v10
+set_clockgating_state switch so the flags actually program.
+
+The memory/SDMA/NBIO paths (MC, ATHUB, SDMA, HDP, NBIF) are split out into
+bc250-cg-flags-unvalidated.patch: those fold cyan skillfish's IP revisions
+into a *different* revision's register programming and are NOT known-safe
+(AMD ships cyan skillfish its own SDMA golden-settings table, so its
+register map is demonstrably distinct). Keep them opt-in.
+
+Each update func is flag-gated, so features can be bisected at boot with
+amdgpu.cg_mask (GFX-only: 0x5).
+
+The navi1x MGCG TCP_CTRL workaround is deliberately NOT applied: its
+register lists encode Navi10/12 WGP topology. If GFX misbehaves under
+load with MGCG, drop bit 0 via cg_mask before suspecting anything else.
+
+--- a/drivers/gpu/drm/amd/amdgpu/nv.c
++++ b/drivers/gpu/drm/amd/amdgpu/nv.c
+@@ -870,7 +870,8 @@
+ 		break;
+ 	case IP_VERSION(10, 1, 3):
+ 	case IP_VERSION(10, 1, 4):
+-		adev->cg_flags = 0;
++		adev->cg_flags = AMD_CG_SUPPORT_GFX_MGCG |
++			AMD_CG_SUPPORT_GFX_CGCG;
+ 		adev->pg_flags = 0;
+ 		adev->external_rev_id = adev->rev_id + 0x82;
+ 		break;
+--- a/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
+@@ -8495,6 +8495,8 @@
+ 	case IP_VERSION(10, 1, 10):
+ 	case IP_VERSION(10, 1, 1):
+ 	case IP_VERSION(10, 1, 2):
++	case IP_VERSION(10, 1, 3):
++	case IP_VERSION(10, 1, 4):
+ 	case IP_VERSION(10, 3, 0):
+ 	case IP_VERSION(10, 3, 2):
+ 	case IP_VERSION(10, 3, 1):

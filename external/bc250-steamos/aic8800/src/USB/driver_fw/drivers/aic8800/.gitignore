@@ -1,0 +1,10 @@
+steamos-headers/
+*.o
+*.o.d
+*.ko
+*.cmd
+*.mod
+*.mod.c
+.tmp_versions/
+Module.symvers
+modules.order

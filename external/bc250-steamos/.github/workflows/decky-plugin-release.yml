@@ -1,0 +1,101 @@
+name: Build Decky plugin release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: decky-plugin-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and publish plugin
+    runs-on: ubuntu-latest
+    env:
+      ARTIFACT_BASENAME: bc250-control-${{ github.ref_name }}
+
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: decky-plugin/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: decky-plugin
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: decky-plugin
+        run: pnpm run typecheck
+
+      - name: Build frontend
+        working-directory: decky-plugin
+        run: pnpm run build
+
+      - name: Run backend tests
+        working-directory: decky-plugin
+        run: PYTHONPATH=py_modules python3 -m unittest discover -s tests
+
+      - name: Package Decky runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="release/BC-250 Control"
+          mkdir -p "$package_dir"
+          cp decky-plugin/plugin.json "$package_dir/"
+          cp decky-plugin/package.json "$package_dir/"
+          cp decky-plugin/main.py "$package_dir/"
+          cp decky-plugin/LICENSE "$package_dir/"
+          mkdir -p "$package_dir/dist" "$package_dir/py_modules"
+          cp decky-plugin/dist/index.js "$package_dir/dist/"
+          rsync -a \
+            --exclude="__pycache__" \
+            --exclude="*.py[co]" \
+            decky-plugin/py_modules/ "$package_dir/py_modules/"
+          (cd release && zip -r "../${ARTIFACT_BASENAME}.zip" "BC-250 Control")
+          sha256sum "${ARTIFACT_BASENAME}.zip" > "${ARTIFACT_BASENAME}.zip.sha256"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_BASENAME }}
+          path: |
+            ${{ env.ARTIFACT_BASENAME }}.zip
+            ${{ env.ARTIFACT_BASENAME }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach artifact to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "${ARTIFACT_BASENAME}.zip" \
+              "${ARTIFACT_BASENAME}.zip.sha256" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "${ARTIFACT_BASENAME}.zip" \
+              "${ARTIFACT_BASENAME}.zip.sha256" \
+              --verify-tag \
+              --generate-notes \
+              --title "$GITHUB_REF_NAME"
+          fi

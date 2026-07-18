@@ -1,0 +1,82 @@
+BC-250 (cyan skillfish): use the PMFW's deep-sleep gfxclk message
+
+The cyan skillfish PMFW implements deep-sleep and WGP power-gating messages
+(SetMinDeepSleepGfxclkFreq 0x19, SetMaxDeepSleepDfllGfxDiv 0x1A,
+Request/QueryActiveWgp 0x18/0x1E — see bc250-power/SMU-FINDINGS.md and the
+bc250-collective/amd_smu_reverse_engineering message map), but the stock
+cyan_skillfish_ppt.c maps only 11 messages and never sends them. All four
+handlers are confirmed present (non-null) in the target Robin 3.00 PMFW; the
+message IDs come from smu_v11_8_ppsmc.h, so this is keyed to protocol IDs, not
+build-specific firmware addresses.
+
+This maps the four messages and, on a pp_od_clk_voltage COMMIT, lowers the
+deep-sleep gfxclk floor so the GPU idles further down. It touches the idle
+floor only, not clocks under load. Non-fatal if the PMFW rejects the message.
+No firmware modification — everything here uses handlers already present in
+the signed PMFW.
+
+EXPERIMENTAL / untested on hardware. Trigger after boot with:
+    DEV=/sys/class/drm/card0/device
+    echo "vc 0 1000 750" > $DEV/pp_od_clk_voltage   # any valid point
+    echo "c"            > $DEV/pp_od_clk_voltage    # COMMIT -> also sends deep-sleep floor
+Measure with $DEV/hwmon/hwmon*/power1_average.
+
+Against Evlav linux-integration 6.16/integration. Apply with: patch -p1 < this
+--- a/drivers/gpu/drm/amd/pm/swsmu/inc/smu_types.h
++++ b/drivers/gpu/drm/amd/pm/swsmu/inc/smu_types.h
+@@ -230,6 +230,9 @@
+ 	__SMU_DUMMY_MAP(DisallowGpo),                    \
+ 	__SMU_DUMMY_MAP(Enable2ndUSB20Port),             \
+ 	__SMU_DUMMY_MAP(RequestActiveWgp),               \
++	__SMU_DUMMY_MAP(QueryActiveWgp),                 \
++	__SMU_DUMMY_MAP(SetMinDeepSleepGfxclkFreq),      \
++	__SMU_DUMMY_MAP(SetMaxDeepSleepDfllGfxDiv),      \
+        __SMU_DUMMY_MAP(SetFastPPTLimit),                \
+        __SMU_DUMMY_MAP(SetSlowPPTLimit),                \
+        __SMU_DUMMY_MAP(GetFastPPTLimit),                \
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
+@@ -53,6 +53,12 @@
+ #define CYAN_SKILLFISH_VDDC_MAX			1129
+ #define CYAN_SKILLFISH_VDDC_MAGIC			5118 // 0x13fe
+ 
++/* EXPERIMENTAL (BC-250): idle deep-sleep gfxclk floor, MHz. The PMFW
++ * implements SetMinDeepSleepGfxclkFreq (msg 0x19) but the stock driver
++ * never sends it. Lower = deeper idle drop; affects the idle floor only,
++ * not clocks under load. See bc250-power/SMU-FINDINGS.md. */
++#define CYAN_SKILLFISH_DEEPSLEEP_GFXCLK		500
++
+ static struct gfx_user_settings {
+ 	uint32_t sclk;
+ 	uint32_t vddc;
+@@ -78,6 +84,10 @@
+ 	MSG_MAP(RequestGfxclk,                  PPSMC_MSG_RequestGfxclk,		0),
+ 	MSG_MAP(ForceGfxVid,                    PPSMC_MSG_ForceGfxVid,			0),
+ 	MSG_MAP(UnforceGfxVid,                  PPSMC_MSG_UnforceGfxVid,		0),
++	MSG_MAP(RequestActiveWgp,               PPSMC_MSG_RequestActiveWgp,		0),
++	MSG_MAP(QueryActiveWgp,                 PPSMC_MSG_QueryActiveWgp,		0),
++	MSG_MAP(SetMinDeepSleepGfxclkFreq,      PPSMC_MSG_SetMinDeepSleepGfxclkFreq,	0),
++	MSG_MAP(SetMaxDeepSleepDfllGfxDiv,      PPSMC_MSG_SetMaxDeepSleepDfllGfxDiv,	0),
+ };
+ 
+ static struct cmn2asic_mapping cyan_skillfish_table_map[SMU_TABLE_COUNT] = {
+@@ -527,6 +537,19 @@
+ 			}
+ 		}
+ 
++		/*
++		 * EXPERIMENTAL (BC-250): also lower the deep-sleep gfxclk floor so
++		 * the GPU idles further down. Firmware already implements this msg;
++		 * the stock driver just never sends it. Non-fatal on reject.
++		 */
++		ret = smu_cmn_send_smc_msg_with_param(smu,
++				SMU_MSG_SetMinDeepSleepGfxclkFreq,
++				CYAN_SKILLFISH_DEEPSLEEP_GFXCLK, NULL);
++		if (ret)
++			dev_warn(smu->adev->dev,
++				 "SetMinDeepSleepGfxclkFreq failed (non-fatal)\n");
++		ret = 0;
++
+ 		break;
+ 	default:
+ 		return -EOPNOTSUPP;

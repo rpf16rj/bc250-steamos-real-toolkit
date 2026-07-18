@@ -1,0 +1,38 @@
+# BC-250 CHIPSETMENU (3.00) — AMD CBS power knobs
+# UEFI var: AmdSetup  GUID 3a997502-647a-4c82-998e-52ef9486a247  size 2229
+# offset = byte offset into AmdSetup. ONE_OF value 0/1/2 = Disabled/Enabled/Auto (typical).
+
+0x0005	ONE_OF  	Global C-state Control	0=Disabled | 1=Enabled | 3=Auto
+0x0008	ONE_OF  	SMTEN	0=Disable | 1=Auto
+0x01f1	ONE_OF  	TdPickThrottleEnable	0=Disable | 1=Enable | 3=Auto
+0x0248	ONE_OF  	DF Pstate change quiesce ctrl	0=Disabled | 1=Enabled | 3=Auto
+0x0249	ONE_OF  	DF Cstate clk pwr down ctrl	0=Disabled | 1=Enabled | 3=Auto
+0x024a	ONE_OF  	DF Cstate self refresh ctrl	0=Disabled | 1=Enabled | 3=Auto
+0x024b	ONE_OF  	DF Cstate GMI pwr dn ctrl	0=Disabled | 1=Enabled | 3=Auto
+0x024c	ONE_OF  	DF Cstate xGMI pwr dn ctrl	0=Disabled | 1=Enabled | 3=Auto
+0x0284	ONE_OF  	PCIe Memory Power Deep Sleep in L1	15=Auto | 0=Disabled | 1=Enabled
+0x02e4	ONE_OF  	MMHUB Light Sleep	0=Disabled | 1=Enabled | 15=Auto
+0x0361	ONE_OF  	Power Down Enable	0=Disabled | 1=Enabled | 255=Auto
+0x0362	ONE_OF  	Power Down Mode	0=Channel | 1=Chip Select | 255=Auto
+0x0365	ONE_OF  	Aggressive Power Down Enable	0=Disabled | 1=Enabled | 255=Auto
+0x0366	ONE_OF  	Aggressive Power Down Delay Control	1=Manual | 255=Auto
+0x0367	NUMERIC 	Aggressive Power Down Delay	min=32 max=1 step=63 (1B)
+0x036d	ONE_OF  	Memory P-state	255=Auto | 1=Enabled | 0=Disabled
+0x06a1	ONE_OF  	THERMAL	0=Disabled | 1=Enabled | 15=Auto
+0x06a2	ONE_OF  	PLL_POWER_DOWN	0=Disabled | 1=Enabled | 15=Auto
+0x06a3	ONE_OF  	FCLK_DPM	0=Disabled | 1=Enabled | 15=Auto
+0x06a5	ONE_OF  	DS_GFXCLK	0=Disabled | 1=Enabled | 15=Auto
+0x06a6	ONE_OF  	DS_SOCCLK	0=Disabled | 1=Enabled | 15=Auto
+0x06a8	ONE_OF  	CORE_CSTATES	0=Disable | 1=Enable | 15=Auto
+0x06ab	ONE_OF  	SOC_DPM	0=Disabled | 1=Enabled | 15=Auto
+0x06b7	ONE_OF  	DS_MP3FCLK	0=Disabled | 1=Enabled | 15=Auto
+0x06bf	ONE_OF  	PPT	0=Disabled | 1=Enabled | 15=Auto
+0x06c0	ONE_OF  	STAPM	0=Disabled | 1=Enabled | 15=Auto
+0x06c1	ONE_OF  	CSTATE_BOOST	0=Disabled | 1=Enabled | 15=Auto
+0x06c2	ONE_OF  	Thermal Control	1=Manual | 0=Auto
+0x070c	NUMERIC 	FAST_PPT_LIMIT	min=18 max=0 step=0 (1B)
+0x0710	NUMERIC 	SLOW_PPT_LIMIT	min=18 max=0 step=0 (1B)
+0x0714	NUMERIC 	SLOW_PPT_TIME_CONSTANT	min=18 max=0 step=0 (1B)
+0x0718	NUMERIC 	VRM_CURRENT_LIMIT	min=18 max=0 step=0 (1B)
+0x071c	NUMERIC 	VRM_MAXIMUM_CURRENT_LIMIT	min=18 max=0 step=0 (1B)
+0x0730	ONE_OF  	GfxClkDfll	255=Auto | 0=Gfx CLK use original DFS | 1=Gfx CLK uses DFLL

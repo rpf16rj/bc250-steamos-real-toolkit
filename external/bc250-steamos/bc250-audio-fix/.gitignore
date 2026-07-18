@@ -1,0 +1,21 @@
+# Multi-gigabyte kernel trees and source tarballs — reproducible, never commit
+linux-6.16.12/
+linux-6.16.12.tar.gz
+linux-neptune-616/
+linux-neptune-616-*.src.tar.gz
+valve-kernel/
+valve-kernel-git/
+valve-kernel-dot-git/
+headers/
+
+# Build deps: extracted packages and their pacman archives
+deps/
+*.pkg.tar.zst
+
+# Build logs and intermediate/superseded module builds
+*.log
+amdgpu-*.ko
+amdgpu-*.ko.zst
+summary.txt
+
+# The one tracked artifact is amdgpu.ko.zst (kept, not matched above)

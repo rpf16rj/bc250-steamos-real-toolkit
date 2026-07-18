@@ -1,0 +1,10 @@
+{
+  "name": "BC-250 Control",
+  "author": "keyboardspecialist",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "root", "power-management"],
+    "description": "Big Picture controls for the BC-250 SteamOS toolkit."
+  }
+}

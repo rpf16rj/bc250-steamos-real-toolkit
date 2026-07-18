@@ -1,0 +1,87 @@
+BC-250 / Cyan Skillfish: EXPERIMENTAL memory/SDMA/NBIO clock gating
+
+*** UNVALIDATED REGISTER MAPS — this layer can black-screen the box. ***
+
+Applies ON TOP OF bc250-cg-flags.patch. Where that layer stays inside the
+Navi10-validated GFX path, this one folds cyan skillfish's IP revisions
+into a *different* revision's clock-gating register programming:
+
+  MMHUB 2.0.3  -> grouped with mmhub_v2_0 2.0.0/2.0.2
+  ATHUB 2.0.3  -> grouped with athub_v2_0 2.0.0/2.0.2
+  SDMA  5.0.1  -> grouped with sdma_v5_0  5.0.0/5.0.2/5.0.5
+  NBIF  2.1.1  -> routed into nv_common_set_clockgating_state (enables HDP)
+
+None of these revisions is validated by AMD for that register map. The
+strongest evidence they differ: AMD ships cyan skillfish its OWN SDMA
+golden-settings table (golden_settings_sdma_cyan_skillfish in sdma_v5_0.c),
+i.e. it treats 5.0.1's registers as distinct from the generic navi1x set —
+yet this layer applies the generic CG programming to it anyway. The MC
+(MMHUB/ATHUB) path is the most likely to hang: gating the memory hub on a
+mismatched register map stalls VRAM/scanout -> black screen.
+
+The cg_flags line here is an OR-append after external_rev_id, so this hunk
+is independent of the GFX-layer cg_flags assignment (they touch different
+lines and stack/reverse in any order). Every path is flag-gated, so bisect
+at boot with amdgpu.cg_mask: start GFX-only (0x5), then add MC (bits 8/9),
+SDMA (10/11), HDP (16/17) to find the offender. cg_mask=0 = stock behavior.
+
+--- a/drivers/gpu/drm/amd/amdgpu/nv.c
++++ b/drivers/gpu/drm/amd/amdgpu/nv.c
+@@ -874,6 +874,19 @@
+ 			AMD_CG_SUPPORT_GFX_CGCG;
+ 		adev->pg_flags = 0;
+ 		adev->external_rev_id = adev->rev_id + 0x82;
++		/* EXPERIMENTAL: unvalidated register maps for MC/SDMA/ATHUB/
++		 * HDP on cyan skillfish — bisect with amdgpu.cg_mask if the
++		 * display goes dark. See bc250-cg-flags-unvalidated.patch.
++		 */
++		adev->cg_flags |= AMD_CG_SUPPORT_IH_CG |
++			AMD_CG_SUPPORT_HDP_MGCG |
++			AMD_CG_SUPPORT_HDP_LS |
++			AMD_CG_SUPPORT_SDMA_MGCG |
++			AMD_CG_SUPPORT_SDMA_LS |
++			AMD_CG_SUPPORT_MC_MGCG |
++			AMD_CG_SUPPORT_MC_LS |
++			AMD_CG_SUPPORT_ATHUB_MGCG |
++			AMD_CG_SUPPORT_ATHUB_LS;
+ 		break;
+ 	case IP_VERSION(10, 3, 6):
+ 		adev->cg_flags = AMD_CG_SUPPORT_GFX_MGCG |
+@@ -1050,6 +1063,7 @@
+ 		return 0;
+ 
+ 	switch (amdgpu_ip_version(adev, NBIO_HWIP, 0)) {
++	case IP_VERSION(2, 1, 1):
+ 	case IP_VERSION(2, 3, 0):
+ 	case IP_VERSION(2, 3, 1):
+ 	case IP_VERSION(2, 3, 2):
+--- a/drivers/gpu/drm/amd/amdgpu/sdma_v5_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/sdma_v5_0.c
+@@ -1829,6 +1829,7 @@
+ 
+ 	switch (amdgpu_ip_version(adev, SDMA0_HWIP, 0)) {
+ 	case IP_VERSION(5, 0, 0):
++	case IP_VERSION(5, 0, 1):
+ 	case IP_VERSION(5, 0, 2):
+ 	case IP_VERSION(5, 0, 5):
+ 		sdma_v5_0_update_medium_grain_clock_gating(adev,
+--- a/drivers/gpu/drm/amd/amdgpu/mmhub_v2_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/mmhub_v2_0.c
+@@ -654,6 +654,7 @@
+ 	switch (amdgpu_ip_version(adev, MMHUB_HWIP, 0)) {
+ 	case IP_VERSION(2, 0, 0):
+ 	case IP_VERSION(2, 0, 2):
++	case IP_VERSION(2, 0, 3):
+ 	case IP_VERSION(2, 1, 0):
+ 	case IP_VERSION(2, 1, 1):
+ 	case IP_VERSION(2, 1, 2):
+--- a/drivers/gpu/drm/amd/amdgpu/athub_v2_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/athub_v2_0.c
+@@ -81,6 +81,7 @@
+ 	case IP_VERSION(1, 3, 1):
+ 	case IP_VERSION(2, 0, 0):
+ 	case IP_VERSION(2, 0, 2):
++	case IP_VERSION(2, 0, 3):
+ 		athub_v2_0_update_medium_grain_clock_gating(adev,
+ 				state == AMD_CG_STATE_GATE);
+ 		athub_v2_0_update_medium_grain_light_sleep(adev,

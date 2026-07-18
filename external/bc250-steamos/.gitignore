@@ -1,0 +1,27 @@
+# Build products — users build the module fresh against their running kernel
+bc250-audio-fix/amdgpu.ko.zst
+bc250-audio-fix/valve-kernel/
+bc250-audio-fix/valve-kernel-dot-git/
+bc250-audio-fix/deps/
+
+__pycache__/
+
+# Runtime downloads/builds when this is the persistent SteamOS checkout
+/.build/
+/acpi/
+/bin/
+/smu-oc/
+/bc250-cu-live-manager
+/bc250-cu-live-manager.sh
+/.var-lib-migrated
+
+# macOS cruft
+.DS_Store
+
+# Full BIOS image — 16 MiB signed blob; SHA-256 recorded in
+# bc250-power/SMU-FINDINGS.md instead of committing it
+BC250_3.00_CHIPSETMENU.ROM
+*.ROM
+# Full BIOS images at repo root (e.g. BC250_5.00_clv.bin) — anchored so it
+# does not catch extracted artifacts like bc250-power/cyan-skillfish-smu-fw.bin
+/BC250_*.bin

@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: bc250-smu-oc
+Version: 0.1.0
+Summary: BC250 CPU Overclocking Tools
+Requires-Python: >=3.8
+License-File: LICENSE
+Dynamic: license-file

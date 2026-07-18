@@ -497,19 +497,18 @@ run_cpu_governor() {
         return 1
     }
 
-    print_info "Cloning bc250_smu_oc repository..."
-    if [[ -d "bc250_smu_oc" ]]; then
-        print_info "Directory already exists — pulling latest changes..."
-        run_with_retry "git -C bc250_smu_oc pull" "git pull bc250_smu_oc" || { fail_with_log "Failed to pull repository." "CPU Governor Install — git pull"; return 1; }
-    else
-        run_with_retry "git clone https://github.com/bc250-collective/bc250_smu_oc.git" "git clone bc250_smu_oc" || { fail_with_log "Failed to clone repository." "CPU Governor Install — git clone"; return 1; }
+    CPU_GOVERNOR_DIR="$EXTERNAL_DIR/bc250_smu_oc"
+    if [[ ! -d "$CPU_GOVERNOR_DIR" ]]; then
+        fail_with_log "Vendored bc250_smu_oc not found at $CPU_GOVERNOR_DIR." "CPU Governor Install — missing vendored repo"
+        return 1
     fi
-    cd bc250_smu_oc
+    print_info "Using vendored bc250_smu_oc repository..."
+    pushd "$CPU_GOVERNOR_DIR" >/dev/null || return 1
     print_info "Installing via pipx..."
-    run_with_retry "pipx install ." "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; cd ..; return 1; }
+    run_with_retry "pipx install ." "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
+    popd >/dev/null || true
     pipx ensurepath || true
     export PATH="$PATH:/root/.local/bin"
-    cd ..
 
     cpu_governor_setup || return 1
     print_success "CPU Governor installed successfully!"
@@ -941,7 +940,7 @@ run_revert_zram_zswap() {
 
 SENSORS_MODPROBE_CONF="/etc/modprobe.d/sensors.conf"
 SENSORS_MODULES_LOAD_CONF="/etc/modules-load.d/99-sensors.conf"
-NCT6687D_REPO="https://github.com/Fred78290/nct6687d.git"
+NCT6687D_DIR="$EXTERNAL_DIR/nct6687d"
 
 sensors_driver_loaded() {
     [[ -d /sys/module/nct6683 || -d /sys/module/nct6687 ]]
@@ -1016,20 +1015,15 @@ install_sensors_pwm() {
         return 1
     fi
 
-    local build_dir
-    build_dir="$(mktemp -d /tmp/nct6687d-XXXXXX)"
-
-    print_info "Cloning nct6687d driver..."
-    run_with_retry "git clone \"$NCT6687D_REPO\" \"$build_dir\"" "git clone nct6687d" || {
-        fail_with_log "Failed to clone nct6687d repository." "PWM Sensors Install — git clone"
-        rm -rf "$build_dir"
+    if [[ ! -d "$NCT6687D_DIR" ]]; then
+        fail_with_log "Vendored nct6687d not found at $NCT6687D_DIR." "PWM Sensors Install — missing vendored repo"
         return 1
-    }
+    fi
 
+    print_info "Using vendored nct6687d driver..."
     print_info "Building kernel module..."
-    if ! make -C "$build_dir"; then
+    if ! make -C "$NCT6687D_DIR"; then
         fail_with_log "Failed to build nct6687 module." "PWM Sensors Install — make"
-        rm -rf "$build_dir"
         return 1
     fi
 
@@ -1039,14 +1033,13 @@ install_sensors_pwm() {
         print_info "SteamOS detected: disabling read-only mode..."
         if ! steamos-readonly disable; then
             fail_with_log "Failed to disable SteamOS read-only mode." "PWM Sensors Install — readonly disable"
-            rm -rf "$build_dir"
             return 1
         fi
     fi
 
     print_info "Installing kernel module..."
     local install_rc=0
-    make -C "$build_dir" install || install_rc=1
+    make -C "$NCT6687D_DIR" install || install_rc=1
 
     if [[ $install_rc -eq 0 ]]; then
         print_info "Blacklisting nct6683 and enabling nct6687 autoload..."
@@ -1061,8 +1054,6 @@ install_sensors_pwm() {
         print_info "Re-enabling SteamOS read-only mode..."
         steamos-readonly enable || true
     fi
-
-    rm -rf "$build_dir"
 
     if [[ $install_rc -ne 0 ]]; then
         fail_with_log "Failed to install nct6687 module." "PWM Sensors Install — make install"
@@ -1400,33 +1391,11 @@ FIXES_REPO_URL="https://github.com/keyboardspecialist/bc250-steamos.git"
 FIXES_REPO_DIR="$EXTERNAL_DIR/bc250-steamos"
 
 fixes_repo_sync() {
-    local avail_kb
-    avail_kb=$(df -Pk "$REAL_HOME" 2>/dev/null | awk 'NR==2{print $4}')
-    if [[ -n "$avail_kb" && "$avail_kb" -lt 512000 ]]; then
-        fail_with_log "Less than 500MB free at $REAL_HOME -- not enough space to clone the fixes repo." "Community Fixes — low disk space"
+    if [[ ! -d "$FIXES_REPO_DIR" ]]; then
+        fail_with_log "Vendored community fixes repo not found at $FIXES_REPO_DIR." "Community Fixes — missing vendored repo"
         return 1
     fi
-
-    mkdir -p "$(dirname "$FIXES_REPO_DIR")"
-    if [[ -d "$FIXES_REPO_DIR/.git" ]]; then
-        print_info "Updating community fixes repo..."
-        # This checkout is a build workspace (build.sh writes artifacts like
-        # amdgpu.ko.zst into it) — discard any local modifications before
-        # pulling so a previous build never blocks future updates.
-        git -C "$FIXES_REPO_DIR" reset --hard HEAD >/dev/null 2>&1 || true
-        git -C "$FIXES_REPO_DIR" clean -fd >/dev/null 2>&1 || true
-        git -C "$FIXES_REPO_DIR" pull --ff-only || {
-            fail_with_log "Failed to update the community fixes repository." "Community Fixes — git pull"
-            return 1
-        }
-    else
-        print_info "Cloning community fixes repo (keyboardspecialist/bc250-steamos)..."
-        run_with_retry "git clone --depth 1 \"$FIXES_REPO_URL\" \"$FIXES_REPO_DIR\"" "git clone community fixes" || {
-            rm -rf "$FIXES_REPO_DIR"
-            fail_with_log "Failed to clone the community fixes repository." "Community Fixes — git clone"
-            return 1
-        }
-    fi
+    print_info "Using vendored community fixes repo..."
     chown -R "$REAL_USER":"$REAL_USER" "$FIXES_REPO_DIR" 2>/dev/null || true
 }
 
