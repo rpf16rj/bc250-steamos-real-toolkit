@@ -4,3 +4,17 @@
 /game-save-sync/.venv/
 /game-save-sync/__pycache__/
 /game-save-sync/*.pyc
+
+# Build artifacts inside vendored external repos
+/external/nct6687d/*-drmexec*/
+/external/nct6687d/*.o
+/external/nct6687d/*.ko
+/external/nct6687d/*.mod.c
+/external/nct6687d/*.mod.o
+/external/nct6687d/Module.symvers
+/external/nct6687d/modules.order
+/external/bc250-steamos/aic8800/src/USB/driver_fw/drivers/aic8800/steamos-headers/
+/external/bc250-steamos/aic8800/src/USB/driver_fw/drivers/aic8800/**/*.o
+/external/bc250-steamos/aic8800/src/USB/driver_fw/drivers/aic8800/**/*.ko
+/external/bc250-steamos/bc250-audio-fix/valve-kernel/
+/external/bc250-steamos/bc250-audio-fix/valve-kernel-dot-git/

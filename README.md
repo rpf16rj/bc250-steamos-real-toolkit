@@ -58,6 +58,7 @@ Without their work, none of this would be possible. 🙏
 - **Changed:** Community fixes repository is now cloned into `$SCRIPT_DIR/external/` (inside the toolkit tree) instead of `~/.local/share/`, keeping scripts/assets local and cached.
 - **Changed:** AIC8800 WiFi/BT install no longer uses the vendor `steamdeck-setup.sh` (which pulled in `bc250-storage.sh` and `bc250-update-persistence.sh`); it now builds and installs the AIC8800 modules, firmware, udev rule and usb_modeswitch data directly, WiFi-only.
 - **Changed:** `bc250_smu_oc` and `nct6687d` are now vendored under `$SCRIPT_DIR/external/`. `start.sh` no longer performs `git clone` at runtime for these repositories; it uses the local vendored copies.
+- **Changed:** `.gitignore` now excludes generated kernel build artifacts inside the vendored `external/` directories (e.g., `steamos-headers`, `*.o`, `*.ko`, `*-drmexec*/`).
 
 ### 2026-07-18
 
