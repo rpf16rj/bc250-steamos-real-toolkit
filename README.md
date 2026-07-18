@@ -53,6 +53,11 @@ Without their work, none of this would be possible. 🙏
 
 ## Changelog
 
+### 2026-07-19
+
+- **Changed:** Community fixes repository is now cloned into `$SCRIPT_DIR/external/` (inside the toolkit tree) instead of `~/.local/share/`, keeping scripts/assets local and cached.
+- **Changed:** AIC8800 WiFi/BT install no longer uses the vendor `steamdeck-setup.sh` (which pulled in `bc250-storage.sh` and `bc250-update-persistence.sh`); it now builds and installs the AIC8800 modules, firmware, udev rule and usb_modeswitch data directly, WiFi-only.
+
 ### 2026-07-18
 
 - **Improved:** Diagnostic error logs now include a full `set -x` command trace (saved to a hidden fd) and the last lines of the captured script output, so failures show exactly which command failed and the surrounding verbose output.

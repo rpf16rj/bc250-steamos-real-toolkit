@@ -32,6 +32,7 @@ trap cleanup_sudo_keepalive EXIT
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
+EXTERNAL_DIR="$SCRIPT_DIR/external"
 
 # ==============================================================================
 # EXECUTION LOGGING
@@ -51,7 +52,7 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-07-18"
+TOOLKIT_VERSION="v2026-07-19"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -1394,10 +1395,9 @@ run_xbox_adapter_menu() {
 # ==============================================================================
 
 FIXES_REPO_URL="https://github.com/keyboardspecialist/bc250-steamos.git"
-# NB: deliberately NOT under /var -- SteamOS's /var partition is tiny (~230 MB,
-# often already nearly full) and this repo's aic8800/ vendor tree alone is
-# tens of MB. $REAL_HOME lives on the large /home partition.
-FIXES_REPO_DIR="$REAL_HOME/.local/share/bc250-fixes/bc250-steamos"
+# Keep external scripts/repos under the toolkit tree so they are cached locally
+# and executed without repeated runtime downloads.
+FIXES_REPO_DIR="$EXTERNAL_DIR/bc250-steamos"
 
 fixes_repo_sync() {
     local avail_kb
@@ -1793,9 +1793,6 @@ run_revert_audio_fix() {
 }
 
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
-AIC8800_TOOLS_DIR="/home/deck/tools/bc250"
-AIC8800_LINK="$AIC8800_TOOLS_DIR/aic8800"
-
 aic8800_installed() {
     [[ -d /sys/module/aic8800_fdrv || -f /etc/modprobe.d/aic8800.conf ]]
 }
@@ -1834,22 +1831,79 @@ install_aic8800_wifi() {
 
     fixes_repo_sync || return 1
 
-    mkdir -p "$AIC8800_TOOLS_DIR"
-    ln -sfn "$FIXES_REPO_DIR/aic8800" "$AIC8800_LINK"
-    ln -sfn "$FIXES_REPO_DIR/bc250-update-persistence.sh" "$AIC8800_TOOLS_DIR/bc250-update-persistence.sh"
+    local aic_dir="$FIXES_REPO_DIR/aic8800"
+    local drv="$aic_dir/src/USB/driver_fw/drivers/aic8800"
+    local fw_source="$aic_dir/src/USB/driver_fw/fw/aic8800D80"
 
-    local setup_script="$AIC8800_LINK/steamdeck-setup.sh"
-    if [[ ! -f "$setup_script" ]]; then
-        fail_with_log "steamdeck-setup.sh not found in the fixes repository." "AIC8800 WiFi — missing script"
+    if [[ ! -f "$drv/Makefile" || ! -d "$fw_source" ]]; then
+        fail_with_log "AIC8800 driver source not found in the fixes repository." "AIC8800 WiFi — missing source"
         return 1
     fi
 
-    aic8800_prefetch_headers "$AIC8800_LINK/src/USB/driver_fw/drivers/aic8800"
+    aic8800_prefetch_headers "$drv"
 
-    print_info "Running steamdeck-setup.sh (builds and installs the driver)..."
-    if ! bash "$setup_script"; then
-        fail_with_log "AIC8800 driver setup failed." "AIC8800 WiFi — steamdeck-setup.sh"
+    print_info "Installing build tools for AIC8800..."
+    steamos_writable 'pacman -Sy --noconfirm --needed base-devel' || {
+        fail_with_log "Failed to install AIC8800 build dependencies." "AIC8800 WiFi — build deps"
         return 1
+    }
+
+    print_info "Building AIC8800 modules..."
+    if command -v runuser >/dev/null 2>&1; then
+        runuser -u "$REAL_USER" -- make -C "$drv" clean || true
+        runuser -u "$REAL_USER" -- make -C "$drv" || {
+            fail_with_log "Failed to build AIC8800 modules." "AIC8800 WiFi — build"
+            return 1
+        }
+    else
+        make -C "$drv" clean || true
+        make -C "$drv" || {
+            fail_with_log "Failed to build AIC8800 modules." "AIC8800 WiFi — build"
+            return 1
+        }
+    fi
+
+    print_info "Installing AIC8800 modules, firmware and configuration..."
+    local stage
+    stage=$(mktemp -d /tmp/aic8800-wifi-XXXXXX)
+    mkdir -p "$stage/firmware/aic8800D80"
+    cp -a "$fw_source"/. "$stage/firmware/aic8800D80/"
+
+    cat > "$stage/aic8800.conf" <<EOF
+options aic_load_fw aic_fw_path=/usr/lib/firmware/aic8800D80
+EOF
+
+    cat > "$stage/40-aic8800-modeswitch.rules" <<'EOF'
+# AIC8800D80 WiFi dongle: auto-switch from fake mass-storage to WiFi mode
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1111", ATTR{idProduct}=="1111", RUN+="/usr/lib/udev/usb_modeswitch '%b/%k'"
+EOF
+
+    cat > "$stage/1111:1111" <<'EOF'
+# AIC8800D80 WiFi dongle: fake mass-storage -> WiFi mode
+MessageContent="555342431234567800000000000010fd0000000000000000000000000000f2"
+ResetUSB=1
+EOF
+
+    steamos_writable "make -C \"$drv\" install && depmod -a && mkdir -p /usr/lib/firmware/aic8800D80 && cp -a \"$stage/firmware/aic8800D80\"/. /usr/lib/firmware/aic8800D80/ && cp \"$stage/aic8800.conf\" /etc/modprobe.d/aic8800.conf && cp \"$stage/40-aic8800-modeswitch.rules\" /etc/udev/rules.d/ && cp \"$stage/1111:1111\" /etc/usb_modeswitch.d/1111:1111" || {
+        fail_with_log "Failed to install AIC8800 driver to /usr and /etc." "AIC8800 WiFi — install"
+        rm -rf "$stage"
+        return 1
+    }
+    rm -rf "$stage"
+
+    udevadm control --reload
+    systemctl daemon-reload
+
+    print_info "Loading AIC8800 modules..."
+    modprobe -r aic8800_fdrv aic_load_fw 2>/dev/null || true
+    modprobe aic_load_fw 2>/dev/null || true
+    modprobe aic8800_fdrv 2>/dev/null || true
+
+    if grep -q '1111' /sys/bus/usb/devices/*/idVendor 2>/dev/null \
+       && grep -q '1111' /sys/bus/usb/devices/*/idProduct 2>/dev/null; then
+        print_info "Switching AIC8800D80 dongle to WiFi mode..."
+        usb_modeswitch -v 1111 -p 1111 \
+            -M "555342431234567800000000000010fd0000000000000000000000000000f2" -R 2>/dev/null || true
     fi
 
     print_success "AIC8800 WiFi/BT driver installed!"
