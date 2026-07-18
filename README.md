@@ -58,6 +58,7 @@ Without their work, none of this would be possible. 🙏
 - **Improved:** Diagnostic error logs now include a full `set -x` command trace (saved to a hidden fd) and the last lines of the captured script output, so failures show exactly which command failed and the surrounding verbose output.
 - **Improved:** Network/download failures (slow SteamOS mirrors, git/clone timeouts, etc.) now prompt to `[R]etry` or `[A]bort` instead of immediately failing the whole script.
 - **Improved:** `Install All` tracks completed steps and offers to resume from the last unfinished step on the next run.
+- **Fixed:** AIC8800 WiFi/BT install failed with `Update persistence helper missing: /home/deck/tools/bc250/bc250-update-persistence.sh`. The toolkit now links the helper from the fixes repository into the expected location before running `steamdeck-setup.sh`.
 
 ### 2026-07-17
 

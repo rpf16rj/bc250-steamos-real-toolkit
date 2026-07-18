@@ -1836,6 +1836,7 @@ install_aic8800_wifi() {
 
     mkdir -p "$AIC8800_TOOLS_DIR"
     ln -sfn "$FIXES_REPO_DIR/aic8800" "$AIC8800_LINK"
+    ln -sfn "$FIXES_REPO_DIR/bc250-update-persistence.sh" "$AIC8800_TOOLS_DIR/bc250-update-persistence.sh"
 
     local setup_script="$AIC8800_LINK/steamdeck-setup.sh"
     if [[ ! -f "$setup_script" ]]; then
