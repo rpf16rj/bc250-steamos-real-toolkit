@@ -53,6 +53,11 @@ Sem o trabalho deles, nada disso seria possível. 🙏
 
 ## Changelog
 
+### 2026-07-19
+
+- **Adicionado:** `start.sh` agora faz auto-bootstrap quando baixado standalone (ex.: instalação via `curl` one-liner). Se os assets vendored em `external/` estiverem faltando, ele baixa o repositório completo do toolkit em `${REAL_HOME}/.bc250-toolkit/bc250-steamos-real-toolkit` via `git` (com fallback de `curl`+`tar`) e re-executa a partir de lá.
+- **Corrigido:** `cpu_governor_setup()` agora recria o `bc250-smu-oc.service` a partir de um `/etc/bc250-smu-oc.conf` existente quando o repositório vendored `bc250_smu_oc` não estiver presente, evitando a falha `Unit bc250-smu-oc.service does not exist`.
+
 ### 2026-07-18
 
 - **Alterado:** Driver WiFi/BT AIC8800D80 USB movido de "Install All" / "Install Manual" para o menu `Extras` e agora usa `A` (instalar) e `R` (reverter). O driver não usa mais o `steamdeck-setup.sh` da vendor; ele compila e instala os módulos AIC8800, firmware, regra udev e dados usb_modeswitch diretamente, somente WiFi.

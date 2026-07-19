@@ -34,6 +34,38 @@ SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 EXTERNAL_DIR="$SCRIPT_DIR/external"
 
+# If this script was downloaded standalone (e.g. via curl), the vendored assets
+# under external/ will be missing. Fetch the full repository and re-execute.
+if [[ ! -d "$EXTERNAL_DIR/bc250_smu_oc" ]]; then
+    TOOLKIT_REPO_DIR="${REAL_HOME}/.bc250-toolkit/bc250-steamos-real-toolkit"
+    mkdir -p "$TOOLKIT_REPO_DIR"
+    rm -rf "$TOOLKIT_REPO_DIR"
+    echo "Vendored assets not found — fetching the full toolkit repository..."
+    if command -v git >/dev/null 2>&1; then
+        git clone --depth 1 "https://github.com/rpf16rj/bc250-steamos-real-toolkit.git" "$TOOLKIT_REPO_DIR" || {
+            echo "Error: failed to clone toolkit repository." >&2
+            exit 1
+        }
+    else
+        echo "git not found — falling back to curl..."
+        TMP_TARBALL="$(mktemp /tmp/bc250-toolkit-XXXXXX.tar.gz)"
+        curl -fsSL -o "$TMP_TARBALL" "https://github.com/rpf16rj/bc250-steamos-real-toolkit/archive/refs/heads/main.tar.gz" || {
+            echo "Error: failed to download toolkit archive." >&2
+            rm -f "$TMP_TARBALL"
+            exit 1
+        }
+        mkdir -p "$TOOLKIT_REPO_DIR"
+        tar -xzf "$TMP_TARBALL" -C "$TOOLKIT_REPO_DIR" --strip-components=1 || {
+            echo "Error: failed to extract toolkit archive." >&2
+            rm -f "$TMP_TARBALL"
+            exit 1
+        }
+        rm -f "$TMP_TARBALL"
+    fi
+    chown -R "$REAL_USER":"$REAL_USER" "$TOOLKIT_REPO_DIR" 2>/dev/null || true
+    exec bash "$TOOLKIT_REPO_DIR/start.sh" "$@"
+fi
+
 # Set to 1 when the toolkit is running unattended after a SteamOS update
 # re-apply pass. In AUTO mode all confirmations/pauses are skipped.
 AUTO="${AUTO:-0}"
@@ -142,7 +174,7 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-07-18"
+TOOLKIT_VERSION="v2026-07-19"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -552,27 +584,41 @@ cpu_governor_setup() {
     # Also pick up pipx ensurepath output if available
     command -v pipx &>/dev/null && eval "$(pipx ensurepath --shell 2>/dev/null || true)" || true
 
-    if [[ -d "bc250_smu_oc" ]]; then
-        cd bc250_smu_oc
+    if ! command -v bc250-apply &>/dev/null; then
+        fail_with_log "bc250-apply not found in PATH. Install the CPU governor package first." "CPU Governor Setup — missing bc250-apply"
+        return 1
+    fi
+
+    local cpu_dir="$EXTERNAL_DIR/bc250_smu_oc"
+    if [[ -d "$cpu_dir" ]]; then
+        cd "$cpu_dir" || return 1
         print_info "Running bc250-detect..."
         bc250-detect --frequency 3500 --vid 1000 --keep || {
             fail_with_log "bc250-detect failed." "CPU Governor Setup — bc250-detect"
-            cd ..
+            cd - >/dev/null || true
             return 1
         }
-        print_info "Applying overclock config..."
+        print_info "Applying overclock config and installing systemd service..."
         bc250-apply --install overclock.conf || {
             fail_with_log "bc250-apply failed." "CPU Governor Setup — bc250-apply"
-            cd ..
+            cd - >/dev/null || true
             return 1
         }
-        cd ..
+        cd - >/dev/null || true
+    elif [[ -f /etc/bc250-smu-oc.conf ]]; then
+        print_info "Repository directory not found — re-creating systemd service from existing /etc/bc250-smu-oc.conf..."
+        bc250-apply --install /etc/bc250-smu-oc.conf || {
+            fail_with_log "bc250-apply failed." "CPU Governor Setup — bc250-apply existing config"
+            return 1
+        }
     else
-        print_info "Repository directory not found — reusing existing installation as-is."
+        fail_with_log "No vendored bc250_smu_oc repository and no existing /etc/bc250-smu-oc.conf to re-apply." "CPU Governor Setup — missing source"
+        return 1
     fi
 
     print_info "Enabling and starting systemd service..."
-    systemctl enable --now bc250-smu-oc || {
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable --now bc250-smu-oc.service || {
         fail_with_log "Failed to enable service." "CPU Governor Setup — enable service"
         return 1
     }
