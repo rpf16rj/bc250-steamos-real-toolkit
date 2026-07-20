@@ -34,13 +34,27 @@ SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 EXTERNAL_DIR="$SCRIPT_DIR/external"
 
-# If this script was downloaded standalone (e.g. via curl), the vendored assets
-# under external/ will be missing. Fetch the full repository and re-execute.
-if [[ ! -d "$EXTERNAL_DIR/bc250_smu_oc" ]]; then
+# Keep the toolkit up-to-date on every launch. If this copy is a git clone,
+# fetch the latest main and re-execute when it changed. If this is a standalone
+# script (e.g. downloaded via curl), bootstrap the full repository and re-execute.
+if [[ -d "$SCRIPT_DIR/.git" ]]; then
+    if command -v git >/dev/null 2>&1; then
+        cd "$SCRIPT_DIR" || exit 1
+        current_rev="$(git rev-parse HEAD 2>/dev/null || true)"
+        git fetch origin main 2>/dev/null || true
+        remote_rev="$(git rev-parse origin/main 2>/dev/null || echo "$current_rev")"
+        if [[ -n "$current_rev" && -n "$remote_rev" && "$current_rev" != "$remote_rev" ]]; then
+            echo "Updating toolkit to latest main..."
+            git reset --hard origin/main || exit 1
+            exec bash "$SCRIPT_DIR/start.sh" "$@"
+        fi
+        cd - >/dev/null || true
+    fi
+elif [[ ! -d "$EXTERNAL_DIR/bc250_smu_oc" ]]; then
     TOOLKIT_REPO_DIR="${REAL_HOME}/.bc250-toolkit/bc250-steamos-real-toolkit"
     mkdir -p "$TOOLKIT_REPO_DIR"
     rm -rf "$TOOLKIT_REPO_DIR"
-    echo "Vendored assets not found — fetching the full toolkit repository..."
+    echo "Standalone script detected — fetching the full toolkit repository..."
     if command -v git >/dev/null 2>&1; then
         git clone --depth 1 "https://github.com/rpf16rj/bc250-steamos-real-toolkit.git" "$TOOLKIT_REPO_DIR" || {
             echo "Error: failed to clone toolkit repository." >&2
@@ -174,7 +188,7 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-07-19"
+TOOLKIT_VERSION="v2026-07-20"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -265,48 +279,6 @@ run_changelog() {
     print_step "LOG" "Changelog"
     print_info "Full list of changes/updates (README changelog section on GitHub):"
     open_url "$CHANGELOG_URL"
-}
-
-run_update_script() {
-    print_step "UPD" "Update Script"
-    print_info "Current version: ${TOOLKIT_VERSION}"
-    print_info "Downloading latest version from GitHub..."
-
-    local tmp
-    tmp="$(mktemp /tmp/bc250-toolkit-update.XXXXXX)"
-    run_with_retry "curl -fsSL \"$TOOLKIT_RAW_URL\" -o \"$tmp\"" "download latest script" || {
-        print_error "Failed to download the latest script. Check your internet connection."
-        rm -f "$tmp"
-        return 1
-    }
-
-    if ! bash -n "$tmp"; then
-        print_error "Downloaded script failed a syntax check — aborting update to avoid breaking the toolkit."
-        rm -f "$tmp"
-        return 1
-    fi
-
-    if cmp -s "$tmp" "$SCRIPT_PATH"; then
-        print_info "Already up to date."
-        rm -f "$tmp"
-        return 0
-    fi
-
-    if ! confirm "A new version is available. Replace $SCRIPT_PATH and restart the toolkit now?"; then
-        print_info "Cancelled."
-        rm -f "$tmp"
-        return 0
-    fi
-
-    cp "$SCRIPT_PATH" "${SCRIPT_PATH}.bak"
-    mv "$tmp" "$SCRIPT_PATH"
-    chmod +x "$SCRIPT_PATH"
-    chown "$REAL_USER":"$REAL_USER" "$SCRIPT_PATH" 2>/dev/null || true
-
-    print_success "Updated! Backup of the previous version saved at ${SCRIPT_PATH}.bak"
-    print_info "Relaunching..."
-    sleep 1
-    exec bash "$SCRIPT_PATH"
 }
 
 ensure_desktop_shortcut() {
@@ -3627,7 +3599,6 @@ show_menu() {
     print_section "System"
     print_item  "V"  "Verify My Setup"       "Current system summary"
     print_item  "G"  "Changelog"             "Open the README changelog on GitHub"
-    print_item  "U"  "Update Script"         "Download the latest version from GitHub"
     print_item  "I"  "Help"                  "Open the repository (usage & troubleshooting)"
     print_item  "P"  "SteamOS Update Persistence" "Track, view and re-apply after any SteamOS update (recommended)"
     print_item  "0"  "Exit"                  ""
@@ -3657,7 +3628,6 @@ while true; do
         5) run_extras_menu ;;
         V) run_status;            press_enter ;;
         G) run_changelog;         press_enter ;;
-        U) run_update_script;     press_enter ;;
         I) run_help;              press_enter ;;
         P) run_persistence_menu;  press_enter ;;
         0)

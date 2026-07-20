@@ -53,6 +53,11 @@ Sem o trabalho deles, nada disso seria possível. 🙏
 
 ## Changelog
 
+### 2026-07-20
+
+- **Adicionado:** `start.sh` agora se auto-atualiza a cada execução. Quando executado a partir de um clone git, ele faz `fetch` de `origin/main` e faz `hard-reset` para o commit mais recente, re-executando se houver mudanças. Quando executado standalone, ele faz o bootstrap do repositório completo em `~/.bc250-toolkit/bc250-steamos-real-toolkit`, como antes.
+- **Removido:** A opção de menu manual `Update Script` (`U`) e a função `run_update_script()` não são mais necessárias, pois as atualizações acontecem automaticamente na inicialização.
+
 ### 2026-07-19
 
 - **Adicionado:** `start.sh` agora faz auto-bootstrap quando baixado standalone (ex.: instalação via `curl` one-liner). Se os assets vendored em `external/` estiverem faltando, ele baixa o repositório completo do toolkit em `${REAL_HOME}/.bc250-toolkit/bc250-steamos-real-toolkit` via `git` (com fallback de `curl`+`tar`) e re-executa a partir de lá.
