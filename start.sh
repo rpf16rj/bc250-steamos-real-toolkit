@@ -39,24 +39,23 @@ EXTERNAL_DIR="$SCRIPT_DIR/external"
 # script (e.g. downloaded via curl), bootstrap the full repository and re-execute.
 if [[ -d "$SCRIPT_DIR/.git" ]]; then
     if command -v git >/dev/null 2>&1; then
-        cd "$SCRIPT_DIR" || exit 1
-        current_rev="$(git rev-parse HEAD 2>/dev/null || true)"
-        git fetch origin main 2>/dev/null || true
-        remote_rev="$(git rev-parse origin/main 2>/dev/null || echo "$current_rev")"
+        chown -R "$REAL_USER":"$REAL_USER" "$SCRIPT_DIR" 2>/dev/null || true
+        current_rev="$(runuser -u "$REAL_USER" -- git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || true)"
+        runuser -u "$REAL_USER" -- git -C "$SCRIPT_DIR" fetch origin main 2>/dev/null || true
+        remote_rev="$(runuser -u "$REAL_USER" -- git -C "$SCRIPT_DIR" rev-parse origin/main 2>/dev/null || echo "$current_rev")"
         if [[ -n "$current_rev" && -n "$remote_rev" && "$current_rev" != "$remote_rev" ]]; then
             echo "Updating toolkit to latest main..."
-            git reset --hard origin/main || exit 1
+            runuser -u "$REAL_USER" -- git -C "$SCRIPT_DIR" reset --hard origin/main || exit 1
             exec bash "$SCRIPT_DIR/start.sh" "$@"
         fi
-        cd - >/dev/null || true
     fi
 elif [[ ! -d "$EXTERNAL_DIR/bc250_smu_oc" ]]; then
     TOOLKIT_REPO_DIR="${REAL_HOME}/.bc250-toolkit/bc250-steamos-real-toolkit"
-    mkdir -p "$TOOLKIT_REPO_DIR"
+    runuser -u "$REAL_USER" -- mkdir -p "$(dirname "$TOOLKIT_REPO_DIR")"
     rm -rf "$TOOLKIT_REPO_DIR"
     echo "Standalone script detected — fetching the full toolkit repository..."
     if command -v git >/dev/null 2>&1; then
-        git clone --depth 1 "https://github.com/rpf16rj/bc250-steamos-real-toolkit.git" "$TOOLKIT_REPO_DIR" || {
+        runuser -u "$REAL_USER" -- git clone --depth 1 "https://github.com/rpf16rj/bc250-steamos-real-toolkit.git" "$TOOLKIT_REPO_DIR" || {
             echo "Error: failed to clone toolkit repository." >&2
             exit 1
         }
@@ -840,6 +839,7 @@ SWAPFILE_PATH="/home/swapfile"
 SWAPFILE_STOCK_SIZE_MB=1024   # SteamOS's own swapfile.service default
 SWAPPINESS_CONF="/etc/sysctl.d/99-bc250-swappiness.conf"
 MKINITCPIO_CONF="/etc/mkinitcpio.conf"
+ZSWAP_TMPFILES_CONF="/etc/tmpfiles.d/bc250-zswap.conf"
 
 swapfile_size_mb() {
     [[ -f "$SWAPFILE_PATH" ]] || { echo 0; return; }
@@ -1011,6 +1011,8 @@ run_zram_zswap_toggle() {
             sed -i 's/^MODULES=(\\(.*\\))/MODULES=(\\1 lz4 lz4_compress)/' \"$MKINITCPIO_CONF\"
             mkinitcpio -P
         fi
+        printf '%s\n' 'w /sys/module/zswap/parameters/enabled - - - - Y' > \"$ZSWAP_TMPFILES_CONF\"
+        systemd-tmpfiles --create \"$ZSWAP_TMPFILES_CONF\"
         update-grub
     " || {
         fail_with_log "Failed to disable ZRAM / enable ZSWAP." "ZRAM->ZSWAP — grub/mkinitcpio"
@@ -1057,6 +1059,7 @@ run_revert_zram_zswap() {
         sed -i 's/ zswap\\.[a-z_]*=[a-zA-Z0-9]*//g' \"$GRUB_DEFAULT\"
         sed -i 's/ lz4_compress//g; s/ lz4\\b//g' \"$MKINITCPIO_CONF\" 2>/dev/null || true
         mkinitcpio -P 2>/dev/null || true
+        rm -f \"$ZSWAP_TMPFILES_CONF\"
         update-grub
     " || {
         fail_with_log "Failed to revert ZRAM/ZSWAP." "Revert ZRAM/ZSWAP — grub/mkinitcpio"
@@ -3106,6 +3109,8 @@ run_status() {
 
     if zram_currently_disabled && zswap_currently_on; then
         echo -e "  ${CYAN}ZRAM/ZSWAP${RESET}        ${ICON_OK} ${GREEN}ZRAM off / ZSWAP on${RESET} (lz4)"
+    elif zram_currently_disabled; then
+        echo -e "  ${CYAN}ZRAM/ZSWAP${RESET}        ${ICON_WARN} ${YELLOW}ZRAM off / ZSWAP configured but inactive${RESET}"
     else
         echo -e "  ${CYAN}ZRAM/ZSWAP${RESET}        ${DIM}ZRAM on / ZSWAP off (SteamOS default)${RESET}"
     fi
