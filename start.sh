@@ -188,7 +188,7 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-07-20"
+TOOLKIT_VERSION="v2026-07-23"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -3359,6 +3359,22 @@ run_aic8800_menu() {
     done
 }
 
+install_toolkit_steamos_control_plugin() {
+    print_step "DSC" "Toolkit SteamOS Control Decky Plugin"
+
+    local plugin_dir="$SCRIPT_DIR/extras/toolkit-steamos-control"
+    if [[ ! -f "$plugin_dir/install.sh" ]]; then
+        fail_with_log "Toolkit SteamOS Control plugin files are missing." "Decky Plugin Install"
+        return 1
+    fi
+    print_info "Installing prebuilt Toolkit SteamOS Control for Decky..."
+    sudo -u "$REAL_USER" -H bash "$plugin_dir/install.sh" || {
+        fail_with_log "Decky plugin installation failed." "Decky Plugin Install"
+        return 1
+    }
+    print_success "Toolkit SteamOS Control installed. Open Decky's Quick Access Menu to use it."
+}
+
 run_extras_menu() {
     while true; do
         print_banner
@@ -3370,6 +3386,7 @@ run_extras_menu() {
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
         print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
+        print_item "Z" "Toolkit SteamOS Control"      "Install Decky fan profiles and LED bar controls"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3382,6 +3399,7 @@ run_extras_menu() {
             K) run_coolercontrol_menu ;;
             P) install_persistence;       press_enter ;;
             X) run_xbox_adapter_menu ;;
+            Z) install_toolkit_steamos_control_plugin; press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$extras_choice'"
@@ -3490,6 +3508,9 @@ EOF
 /etc/bc250-control
 /etc/coolercontrol
 /etc/coolercontrold
+/var/lib/toolkit-steamos-control
+/etc/systemd/system/toolkit-steamos-fan.service
+/etc/systemd/system/steamos-led.service.d/toolkit-steamos-control.conf
 /etc/systemd/system/bc250-smu-oc.service
 /etc/systemd/system/cyan-skillfish-governor-smu.service
 /etc/systemd/system/bc250-acpi-heal.service

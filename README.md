@@ -17,6 +17,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 - CPU mitigations toggle (disable/re-enable)
 - Sensor & fan monitoring, with optional full PWM fan control
 - CoolerControl integration for custom fan curves via a web UI
+- Prebuilt Toolkit SteamOS Control Decky plugin with Pump Fan automatic/manual/managed controls, four-point profiles, and optional LED bar controls
 - HDMI-CEC / TV & receiver control
 - Community-sourced fixes: ACPI power states, DisplayPort audio/video clock fix, AIC8800 WiFi/BT driver
 - One-click install, automatic desktop shortcut, and a built-in updater — everything is fully revertible
@@ -52,6 +53,13 @@ This toolkit builds on top of great work from the BC-250 community. Huge thanks 
 Without their work, none of this would be possible. 🙏
 
 ## Changelog
+
+### 2026-07-23
+
+- **Added:** `Extras` option `Z` installs the prebuilt Toolkit SteamOS Control Decky plugin. It installs Decky Loader stable automatically when needed, copies the bundled plugin artifact, and restarts the loader without Node.js, pnpm, or a local build.
+- **Added:** Pump Fan automatic, manual, and managed four-point curve controls for the BC-250 NCT sensor/PWM channel, plus optional LED bar effect controls when `steamos-led.service` is present.
+- **Added:** SteamOS update persistence for the Toolkit SteamOS Control fan configuration and managed-fan service.
+- **Improved:** The Decky interface separates Cooler and LED bar views, preserves unsaved slider changes during status polling, and disables Pump Fan controls when the required sensor/PWM channel is unavailable.
 
 ### 2026-07-20
 

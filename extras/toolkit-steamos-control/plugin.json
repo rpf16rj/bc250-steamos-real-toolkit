@@ -1,0 +1,10 @@
+{
+  "name": "Toolkit SteamOS Control",
+  "author": "rpf16rj",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "fan-control", "led", "steamos"],
+    "description": "Fan curves, cooling profiles, and LED bar controls for the SteamOS toolkit."
+  }
+}

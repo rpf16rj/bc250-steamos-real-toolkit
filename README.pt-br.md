@@ -17,6 +17,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 - Alternância de mitigações de CPU (desabilitar/reabilitar)
 - Monitoramento de sensores e fans, com controle total de PWM opcional
 - Integração com CoolerControl para curvas de fan personalizadas via interface web
+- Plugin Decky Toolkit SteamOS Control pré-compilado, com controles automático/manual/gerenciado da Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
 - Controle de HDMI-CEC / TV e receiver
 - Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800
 - Instalação em um clique, atalho de área de trabalho automático, e atualizador embutido — tudo totalmente reversível
@@ -52,6 +53,13 @@ Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um 
 Sem o trabalho deles, nada disso seria possível. 🙏
 
 ## Changelog
+
+### 2026-07-23
+
+- **Adicionado:** A opção `Z` em `Extras` instala o plugin Decky Toolkit SteamOS Control pré-compilado. Ele instala automaticamente o Decky Loader stable quando necessário, copia o artefato incluído e reinicia o loader sem Node.js, pnpm ou build local.
+- **Adicionado:** Controles automático, manual e por curva gerenciada de quatro pontos para a Pump Fan no canal NCT sensor/PWM da BC-250, além de controles opcionais de efeitos da LED bar quando `steamos-led.service` estiver presente.
+- **Adicionado:** Persistência após atualizações do SteamOS para a configuração de fan e o serviço de fan gerenciado do Toolkit SteamOS Control.
+- **Melhorado:** A interface Decky separa as visualizações de Cooler e LED bar, preserva alterações não salvas nos sliders durante o polling de status e desabilita os controles da Pump Fan quando o canal sensor/PWM necessário não estiver disponível.
 
 ### 2026-07-20
 
