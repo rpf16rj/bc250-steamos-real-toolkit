@@ -2095,7 +2095,12 @@ run_cec_control() {
     # Must run as the real (deck) user, not root: cecd lives on the user
     # D-Bus session, and the script itself refuses to run as root (only its
     # own "shutdown-standby install" step escalates, via its own sudo prompt).
-    runuser -u "$REAL_USER" -- bash "$cec_script"
+    local user_id
+    user_id=$(id -u "$REAL_USER")
+    runuser --pty -u "$REAL_USER" -- env \
+        XDG_RUNTIME_DIR="/run/user/$user_id" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$user_id/bus" \
+        bash "$cec_script"
 }
 
 run_fixes_menu() {
