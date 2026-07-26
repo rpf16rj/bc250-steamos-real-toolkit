@@ -54,6 +54,12 @@ Sem o trabalho deles, nada disso seria possível. 🙏
 
 ## Changelog
 
+### 2026-07-26
+
+- **Corrigido:** O bootstrap standalone one-click agora corrige a propriedade de `~/.bc250-toolkit` antes de clonar como usuário desktop, evitando `could not create work tree dir: Permission denied` após execuções anteriores como root.
+- **Corrigido:** As autoatualizações Git são executadas como usuário desktop e primeiro corrigem a propriedade do checkout, evitando `dubious ownership`, `.git/FETCH_HEAD: Permission denied` e pedidos de senha da IDE causados por arquivos do repositório pertencentes ao root.
+- **Corrigido:** A ativação runtime do ZSWAP agora persiste após reiniciar por meio de uma regra systemd-tmpfiles em kernels SteamOS que ignoram `zswap.enabled=1`; o status também diferencia ZSWAP configurado, porém inativo.
+
 ### 2026-07-23
 
 - **Adicionado:** A opção `Z` em `Extras` instala o plugin Decky Toolkit SteamOS Control pré-compilado. Ele instala automaticamente o Decky Loader stable quando necessário, copia o artefato incluído e reinicia o loader sem Node.js, pnpm ou build local.

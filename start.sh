@@ -50,8 +50,10 @@ if [[ -d "$SCRIPT_DIR/.git" ]]; then
         fi
     fi
 elif [[ ! -d "$EXTERNAL_DIR/bc250_smu_oc" ]]; then
-    TOOLKIT_REPO_DIR="${REAL_HOME}/.bc250-toolkit/bc250-steamos-real-toolkit"
-    runuser -u "$REAL_USER" -- mkdir -p "$(dirname "$TOOLKIT_REPO_DIR")"
+    TOOLKIT_BASE_DIR="${REAL_HOME}/.bc250-toolkit"
+    TOOLKIT_REPO_DIR="$TOOLKIT_BASE_DIR/bc250-steamos-real-toolkit"
+    mkdir -p "$TOOLKIT_BASE_DIR"
+    chown "$REAL_USER":"$REAL_USER" "$TOOLKIT_BASE_DIR"
     rm -rf "$TOOLKIT_REPO_DIR"
     echo "Standalone script detected — fetching the full toolkit repository..."
     if command -v git >/dev/null 2>&1; then
@@ -187,7 +189,7 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-07-23"
+TOOLKIT_VERSION="v2026-07-26"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
