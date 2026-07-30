@@ -894,7 +894,10 @@ ram_split_build_tool() {
 
 ram_split_current_uma() {
     [[ -x "$RAM_SPLIT_BIN" ]] || return 1
-    "$RAM_SPLIT_BIN" 2>/dev/null | awk -F= '$1 == "UMA_SIZE" {print $2}' | tr -d ' \r'
+    local val
+    val=$("$RAM_SPLIT_BIN" 2>/dev/null | awk -F= '$1 == "UMA_SIZE" {print $2}' | tr -d ' \r')
+    [[ -n "$val" ]] || return 1
+    echo "$((10#$val))"
 }
 
 ram_split_installed() {
