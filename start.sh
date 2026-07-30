@@ -2874,7 +2874,10 @@ oc_edit_cpu_config_nano() {
         print_error "Configuration file not found at $CPU_DEST"
         return 1
     fi
-    nano "$CPU_DEST" || true
+    # nano is a full-screen program; stdout is a pipe (into tee, for the run
+    # log) at this point, which breaks ncurses' keypad/cursor addressing and
+    # makes arrow keys fail to navigate. Talk to the real terminal directly.
+    nano "$CPU_DEST" < /dev/tty > /dev/tty 2>&1 || true
     if confirm "Would you like to restart the CPU service to apply changes?"; then
         systemctl daemon-reload
         systemctl restart "$CPU_SERVICE"
@@ -2893,7 +2896,9 @@ oc_edit_gpu_config_nano() {
         print_error "Configuration file not found at $GPU_DEST"
         return 1
     fi
-    nano "$GPU_DEST" || true
+    # See the comment in oc_edit_cpu_config_nano: force the real TTY so
+    # ncurses keypad/cursor addressing (arrow-key navigation) works.
+    nano "$GPU_DEST" < /dev/tty > /dev/tty 2>&1 || true
     if confirm "Would you like to restart the GPU service to apply changes?"; then
         systemctl restart "$GPU_SERVICE"
         if systemctl is-active --quiet "$GPU_SERVICE"; then
