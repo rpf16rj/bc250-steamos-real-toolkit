@@ -855,18 +855,35 @@ ram_split_bc250_detected() {
     command -v lspci >/dev/null 2>&1 && lspci -Dn 2>/dev/null | grep -qi '1002:13fe'
 }
 
+ram_split_gcc_can_compile() {
+    command -v gcc >/dev/null 2>&1 || return 1
+    local probe; probe=$(mktemp -u --suffix=.c)
+    printf '#include <stdio.h>\nint main(void){return 0;}\n' > "$probe"
+    gcc "$probe" -o "${probe%.c}.out" >/dev/null 2>&1
+    local rc=$?
+    rm -f "$probe" "${probe%.c}.out"
+    return $rc
+}
+
 ram_split_build_tool() {
     [[ -x "$RAM_SPLIT_BIN" ]] && return 0
     if [[ ! -f "$RAM_SPLIT_DIR/main.cpp" ]]; then
         fail_with_log "Vendored bc250_memcfg source not found at $RAM_SPLIT_DIR." "RAM/VRAM Split — missing vendored source"
         return 1
     fi
-    if ! command -v gcc >/dev/null 2>&1; then
-        print_info "Installing base-devel (gcc) to build bc250memcfg..."
-        steamos_writable 'pacman -Sy --noconfirm base-devel' || {
-            fail_with_log "Failed to install gcc." "RAM/VRAM Split — gcc"
+    if ! ram_split_gcc_can_compile; then
+        # gcc may be present but glibc headers (stdio.h etc.) missing/stripped
+        # on the SteamOS overlay -- force-reinstall rather than relying on
+        # pacman's "already installed" bookkeeping (which --needed respects).
+        print_info "gcc / libc headers missing or broken — (re)installing base-devel + glibc..."
+        steamos_writable 'pacman -Sy --noconfirm base-devel glibc' || {
+            fail_with_log "Failed to install gcc/glibc." "RAM/VRAM Split — gcc"
             return 1
         }
+    fi
+    if ! ram_split_gcc_can_compile; then
+        fail_with_log "gcc still cannot compile a plain C program after reinstalling base-devel/glibc (missing /usr/include headers on this SteamOS image). Check 'pacman -Qo /usr/include/stdio.h' and 'ls /usr/include/stdio.h'." "RAM/VRAM Split — gcc headers"
+        return 1
     fi
     print_info "Building bc250memcfg from vendored source..."
     (cd "$RAM_SPLIT_DIR" && gcc -Os -s main.cpp -o bc250memcfg) || {
