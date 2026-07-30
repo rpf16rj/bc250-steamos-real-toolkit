@@ -18,3 +18,4 @@
 /external/bc250-steamos/aic8800/src/USB/driver_fw/drivers/aic8800/**/*.ko
 /external/bc250-steamos/bc250-audio-fix/valve-kernel/
 /external/bc250-steamos/bc250-audio-fix/valve-kernel-dot-git/
+/external/bc250_memcfg/bc250memcfg
