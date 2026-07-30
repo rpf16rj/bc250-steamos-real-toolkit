@@ -128,6 +128,7 @@ persist_detect_and_record_installed() {
     xone_installed 2>/dev/null && persist_state_add "xbox"
     cec_control_installed 2>/dev/null && persist_state_add "cec"
     [[ -f /etc/bc250-cu-live-manager.conf ]] && persist_state_add "cu"
+    core_unlock_persist_installed 2>/dev/null && persist_state_add "core_unlock"
     if find "/lib/modules/$(uname -r)/updates" -name 'amdgpu.ko*' 2>/dev/null | grep -q .; then
         persist_state_add "audio"
     fi
@@ -189,7 +190,7 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-07-26"
+TOOLKIT_VERSION="v2026-07-30"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
 CHANGELOG_URL="${REPO_URL}#changelog"
 TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
@@ -731,6 +732,121 @@ run_revert_gpu_governor() {
     steamos_writable 'aur_remove cyan-skillfish-governor-smu' || true
     print_success "GPU governor removed successfully."
     persist_state_remove "gpu"
+}
+
+# ==============================================================================
+# CPU CORE UNLOCK (rw-r-r-0644/bc250-core-unlock)
+# ==============================================================================
+# BC-250 ships with 2 of its 8 CPU cores gated off (6c/12t as shipped). An
+# SMU mailbox message (queue 3, msg 0x98) can overwrite the core presence
+# mask directly; AGESA then enumerates all 8 cores on the *next* boot. The
+# write only survives warm reboots — a full cold power-off clears the mask
+# back to 6c/12t — so a boot-time systemd service re-applies it every start.
+# No SteamOS-specific changes were needed: the script only touches the PCI
+# config space of the host bridge and the existing cyan-skillfish-governor
+# service, both already present on this toolkit's supported systems.
+# EXPERIMENTAL: upstream notes these cores may be disabled for a reason
+# (silicon binning) — see external/bc250-core-unlock/README.md.
+
+CORE_UNLOCK_DIR="$EXTERNAL_DIR/bc250-core-unlock"
+CORE_UNLOCK_SCRIPT="$CORE_UNLOCK_DIR/bc250-unlock-cores.py"
+CORE_UNLOCK_SERVICE="/etc/systemd/system/bc250-core-unlock.service"
+
+core_unlock_persist_installed() {
+    systemctl list-unit-files bc250-core-unlock.service &>/dev/null
+}
+
+core_unlock_cores_active() {
+    (( $(nproc --all 2>/dev/null || echo 0) >= 16 ))
+}
+
+install_core_unlock() {
+    local auto="${1:-}"
+    print_step "09" "Installing CPU Core Unlock (BC-250 6c/12t -> 8c/16t)"
+    echo -e "  ${YELLOW}⚠  EXPERIMENTAL: these 2 cores may be disabled for a reason (silicon binning).${RESET}"
+    echo -e "  ${YELLOW}⚠  Stress-test (mprime/stress-ng) for a few hours and check dmesg for MCEs before relying on them.${RESET}"
+    echo -e "  ${YELLOW}⚠  Known issue: GPU clock reporting (pp_dpm_sclk / hwmon freq1_input) becomes inaccurate after unlocking.${RESET}"
+    echo -e "  ${DIM}Fixed by the DP Audio/Video Fix (Install Manual 7), which queries GFX clock directly from the SMU and${RESET}"
+    echo -e "  ${DIM}adds GPU utilization reporting. Not chained automatically here (it rebuilds a kernel module); run it too.${RESET}"
+    echo -e "  ${DIM}Volatile: a cold power-off reverts to 6c/12t. A systemd service re-applies the unlock on every boot.${RESET}"
+    echo ""
+
+    if [[ ! -f "$CORE_UNLOCK_SCRIPT" ]]; then
+        fail_with_log "Vendored bc250-unlock-cores.py not found at $CORE_UNLOCK_SCRIPT." "CPU Core Unlock — missing vendored script"
+        return 1
+    fi
+
+    if [[ "$auto" != "auto" ]] && ! confirm "Continue with the CPU core unlock?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    print_info "Stopping GPU governor service (shares the SMU mailbox)..."
+    local gpu_was_active=0
+    systemctl is-active --quiet "$GPU_SERVICE" 2>/dev/null && gpu_was_active=1
+    systemctl stop "$GPU_SERVICE" 2>/dev/null || true
+
+    print_info "Running bc250-unlock-cores.py..."
+    local unlock_output unlock_rc
+    unlock_output="$(python3 "$CORE_UNLOCK_SCRIPT" 2>&1)"
+    unlock_rc=$?
+    echo "$unlock_output" | sed 's/^/    /'
+
+    if (( gpu_was_active )); then
+        systemctl start "$GPU_SERVICE" 2>/dev/null || true
+    fi
+
+    if (( unlock_rc != 0 )); then
+        fail_with_log "bc250-unlock-cores.py failed — see output above. This is expected if the core presence mask is not 0x77 (already unlocked, or a different board/harvest)." "CPU Core Unlock — bc250-unlock-cores.py"
+        return 1
+    fi
+
+    # The community reports 8-core operation needs the updated (6c/8c-compatible)
+    # ACPI C-/P-state tables — install/update it transparently in the same run.
+    print_info "Ensuring the 6c/8c-compatible ACPI fix is installed alongside the core unlock..."
+    install_acpi_fix force || print_error "ACPI fix install/update failed — CPU core unlock still applied, but C-/P-states may misbehave with 8 cores active. Retry from Install Manual (6)."
+
+    cat > "$CORE_UNLOCK_SERVICE" <<EOF
+[Unit]
+Description=Re-apply BC-250 CPU core unlock (volatile across cold boot)
+After=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/bin/systemctl stop cyan-skillfish-governor-smu.service
+ExecStart=/usr/bin/python3 $CORE_UNLOCK_SCRIPT
+ExecStartPost=-/usr/bin/systemctl start cyan-skillfish-governor-smu.service
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable bc250-core-unlock.service
+
+    print_success "CPU core unlock applied and boot-time re-apply service installed. Reboot to bring up all 8 cores/16 threads."
+    persist_state_add "core_unlock"
+}
+
+run_revert_core_unlock() {
+    print_step "R-09" "Revert CPU Core Unlock"
+
+    if ! core_unlock_persist_installed; then
+        print_info "CPU core unlock service does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will disable the boot-time re-apply service. The core mask itself only reverts to 6c/12t after a cold power-off (not immediately, and not on a warm reboot). Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    systemctl disable --now bc250-core-unlock.service 2>/dev/null || true
+    rm -f "$CORE_UNLOCK_SERVICE"
+    systemctl daemon-reload
+
+    print_success "CPU core unlock boot service removed. The extra cores remain active until the next cold power-off."
+    persist_state_remove "core_unlock"
 }
 
 # ==============================================================================
@@ -1551,7 +1667,12 @@ fixes_repo_sync() {
 ACPI_FIX_DIR="/var/lib/bc250-acpi-fix"
 ACPI_FIX_CPIO_MASTER="$ACPI_FIX_DIR/acpi_override.cpio"
 ACPI_FIX_CPIO_BOOT="/boot/acpi_override.cpio"
-ACPI_FIX_RAW_BASE="https://raw.githubusercontent.com/bc250-collective/bc250-acpi-fix/main"
+# mendesrr's updated SSDT tables work with both 6c/12t (stock) and 8c/16t
+# (CPU Core Unlock) BC-250 configurations, unlike the original
+# bc250-collective tables which only cover 6c/12t. Same filenames, drop-in
+# replacement — no other code here needed to change.
+ACPI_FIX_RAW_BASE="https://raw.githubusercontent.com/mendesrr/bc250-acpi-fix-updated-8c/main"
+ACPI_FIX_SOURCE_MARKER="$ACPI_FIX_DIR/.source"
 ACPI_FIX_HEAL_UNIT="/etc/systemd/system/bc250-acpi-heal.service"
 ACPI_FIX_CPUFREQ_UNIT="/etc/systemd/system/bc250-cpufreq.service"
 
@@ -1559,14 +1680,26 @@ acpi_fix_installed() {
     [[ -f "$ACPI_FIX_CPIO_BOOT" ]] || systemctl list-unit-files bc250-acpi-heal.service &>/dev/null
 }
 
-install_acpi_fix() {
-    print_step "ACPI" "Installing ACPI Fix (CPU C-states/P-states)"
+acpi_fix_source_current() {
+    [[ -f "$ACPI_FIX_SOURCE_MARKER" ]] && [[ "$(cat "$ACPI_FIX_SOURCE_MARKER" 2>/dev/null)" == "$ACPI_FIX_RAW_BASE" ]]
+}
 
-    if acpi_fix_installed; then
-        if ! confirm "ACPI fix is already installed. Reinstall it?"; then
+install_acpi_fix() {
+    local force="${1:-}"
+    print_step "ACPI" "Installing ACPI Fix (CPU C-states/P-states, 6c/8c-compatible SSDT tables)"
+
+    if acpi_fix_installed && acpi_fix_source_current; then
+        if [[ "$force" == "force" ]]; then
+            print_info "ACPI fix already installed and up to date (6c/8c-compatible SSDT tables)."
+            return 0
+        fi
+        if ! confirm "ACPI fix is already installed and up to date. Reinstall it?"; then
             print_info "Keeping existing installation."
             return 0
         fi
+    elif acpi_fix_installed; then
+        print_info "Updating ACPI override to the 6c/8c-compatible SSDT tables (mendesrr/bc250-acpi-fix-updated-8c)..."
+        rm -f "$ACPI_FIX_CPIO_MASTER"
     fi
 
     mkdir -p "$ACPI_FIX_DIR"
@@ -1575,7 +1708,7 @@ install_acpi_fix() {
         work="$(mktemp -d /tmp/bc250-acpi-XXXXXX)"
         mkdir -p "$work/kernel/firmware/acpi"
 
-        print_info "Fetching SSDT tables (bc250-collective/bc250-acpi-fix)..."
+        print_info "Fetching SSDT tables (mendesrr/bc250-acpi-fix-updated-8c)..."
         if ! run_with_retry "curl -fL -o \"$work/kernel/firmware/acpi/SSDT-CST.aml\" \"$ACPI_FIX_RAW_BASE/SSDT-CST.aml\"" "ACPI Fix SSDT-CST download" || \
            ! run_with_retry "curl -fL -o \"$work/kernel/firmware/acpi/SSDT-PST.aml\" \"$ACPI_FIX_RAW_BASE/SSDT-PST.aml\"" "ACPI Fix SSDT-PST download"; then
             fail_with_log "Failed to download SSDT tables." "ACPI Fix — download"
@@ -1599,6 +1732,7 @@ install_acpi_fix() {
             return 1
         fi
         rm -rf "$work"
+        echo "$ACPI_FIX_RAW_BASE" > "$ACPI_FIX_SOURCE_MARKER"
     fi
 
     local was_steamos=0
@@ -1777,9 +1911,11 @@ bc250_fetch_headers_pkg() {
 }
 
 # --- DisplayPort audio/video clock fix (patched amdgpu.ko) ------------------
-# See the shared helpers above: fetch-sources.sh hardcodes the "jupiter-main"
-# repo channel, so pre-stage the file it expects (it skips its own download
-# when the file is already present).
+# Upstream's own fetch-sources.sh now probes every jupiter-* repo channel
+# itself (via its vendored fetch-steamos-package.sh), so this is just a
+# redundant-but-harmless pre-stage using this toolkit's shared helpers above:
+# if the package is already cached locally, fetch-sources.sh's own idempotent
+# check skips re-downloading it.
 audio_fix_prefetch_headers() {
     local fix_dir="$1" hdrpkg
     hdrpkg=$(bc250_headers_pkg_name) || return 0
@@ -1808,13 +1944,17 @@ audio_fix_patch_fetch_sources() {
     local fetch_script="$1"
     [[ -f "$fetch_script" ]] || return 1
 
-    # The upstream dependency scan uses tar | sed | awk and exits from awk
-    # after the first exact match. With pipefail, that makes tar receive
-    # SIGPIPE and aborts fetch-sources.sh before any dependency is extracted.
+    # Older upstream revisions had a dependency scan using tar | sed | awk that
+    # exited from awk after the first exact match. With pipefail, that made
+    # tar receive SIGPIPE and aborted fetch-sources.sh before any dependency
+    # was extracted. Upstream has since fixed this directly (no more "exit"
+    # in the awk match), so the pattern below is normally absent — patch it
+    # only if a stale/older fetch-sources.sh still has it.
     if grep -q 'if (n==p) { print; exit }' "$fetch_script"; then
         print_info "Patching dependency scan to avoid tar SIGPIPE under pipefail."
         sed -i 's/if (n==p) { print; exit }/if (n==p) { print }/' "$fetch_script"
     fi
+    return 0
 }
 
 audio_fix_ensure_mkinitcpio_preset() {
@@ -1838,11 +1978,13 @@ audio_fix_ensure_mkinitcpio_preset() {
 }
 
 install_audio_fix() {
-    print_step "AUDIO" "Installing DisplayPort Audio/Video Clock Fix"
+    print_step "AUDIO" "Installing DisplayPort Audio/Video Clock + GPU Metrics Fix"
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
-    echo -e "  ${DIM}Only needed if DisplayPort video/audio play back at ~82% speed (pitched down).${RESET}"
+    echo -e "  ${DIM}Fixes DisplayPort video/audio played back at ~82% speed (pitched down).${RESET}"
+    echo -e "  ${DIM}Also queries GFX clock directly from the SMU and adds GPU utilization reporting${RESET}"
+    echo -e "  ${DIM}(needed for correct GPU clock/load readings once CPU Core Unlock is active).${RESET}"
     echo ""
     if ! confirm "Continue with the DisplayPort audio/video fix?"; then
         print_info "Cancelled."
@@ -2115,7 +2257,7 @@ run_fixes_menu() {
         echo -e "  ${DIM}From keyboardspecialist/bc250-steamos — ACPI power states, DP audio/video, AIC8800 WiFi${RESET}"
         echo ""
         print_item "1" "Install ACPI Fix (C/P-states)"     "CPU idle states + cpufreq scaling (800-3200 MHz)"
-        print_item "2" "Install DP Audio/Video Fix"        "⚠  Patched amdgpu.ko — fixes ~82% speed DP audio/video"
+        print_item "2" "Install DP Audio/Video Fix"        "⚠  Patched amdgpu.ko — DP audio/video clock + GPU metrics"
         print_item "3" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
         echo ""
         print_item "4" "Revert ACPI Fix"                   ""
@@ -3099,6 +3241,16 @@ run_status() {
         echo -e "  ${CYAN}CPU Mitigations${RESET}   ${ICON_WARN} ${YELLOW}enabled${RESET} (default — disable for max performance)"
     fi
 
+    if core_unlock_persist_installed; then
+        if core_unlock_cores_active; then
+            echo -e "  ${CYAN}CPU Core Unlock${RESET}   ${ICON_OK} ${GREEN}8c/16t active${RESET} ($(nproc --all) threads, boot service enabled)"
+        else
+            echo -e "  ${CYAN}CPU Core Unlock${RESET}   ${ICON_WARN} ${YELLOW}boot service enabled, still 6c/12t${RESET} (reboot to pick up all 8 cores)"
+        fi
+    else
+        echo -e "  ${CYAN}CPU Core Unlock${RESET}   ${DIM}not installed (6c/12t, SteamOS default)${RESET}"
+    fi
+
     echo ""
     print_section "Swap & ZRAM/ZSWAP"
 
@@ -3208,7 +3360,7 @@ run_install_all_step() {
 }
 
 run_install_all() {
-    print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock"
+    print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock + CPU Core Unlock"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -3228,6 +3380,7 @@ run_install_all() {
     run_install_all_step install_acpi_fix || return 1
     run_install_all_step install_audio_fix || return 1
     run_install_all_step run_cu_live_manager || return 1
+    run_install_all_step install_core_unlock auto || return 1
 
     install_all_progress_clear
     print_success "Install All completed!"
@@ -3248,6 +3401,8 @@ run_revert_all() {
     run_revert_acpi_fix
     echo ""
     run_revert_audio_fix
+    echo ""
+    run_revert_core_unlock
     echo ""
     run_revert_aic8800_wifi
 }
@@ -3270,9 +3425,11 @@ run_install_manual() {
         print_item "5R" "Revert ZRAM/ZSWAP to Default"   "Back to stock ZRAM — needs reboot"
         print_item "6"  "Install ACPI Fix"               "CPU C-/P-states"
         print_item "6R" "Revert ACPI Fix"                 "Remove ACPI fix"
-        print_item "7"  "Install DP Audio/Video Fix"     "⚠  Patched amdgpu.ko clock fix"
+        print_item "7"  "Install DP Audio/Video Fix"     "⚠  Patched amdgpu.ko: clock fix + GPU metrics"
         print_item "7R" "Revert DP Audio/Video Fix"      "Restore stock amdgpu.ko"
         print_item "8"  "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
+        print_item "9"  "CPU Core Unlock"                "⚠  EXPERIMENTAL: 6c/12t -> 8c/16t, needs reboot"
+        print_item "9R" "Revert CPU Core Unlock"          "Remove boot-time re-apply service"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3294,6 +3451,8 @@ run_install_manual() {
             7)  install_audio_fix;       press_enter ;;
             7R) run_revert_audio_fix;    press_enter ;;
             8)  run_cu_live_manager;     press_enter ;;
+            9)  install_core_unlock;     press_enter ;;
+            9R) run_revert_core_unlock;  press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
@@ -3446,6 +3605,7 @@ reapply_installed_components() {
             acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
             audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
             cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;
+            core_unlock) print_info "CPU Core Unlock boot service persists via the atomic-update keep list — skipped in unattended re-apply." ;;
             aic8800)    install_aic8800_wifi || print_error "AIC8800 WiFi reapply failed" ;;
             sensors)    install_sensors_pwm || print_error "Sensors PWM reapply failed" ;;
             coolercontrol) install_coolercontrol || print_error "CoolerControl reapply failed" ;;
@@ -3529,6 +3689,7 @@ EOF
 /etc/systemd/system/bc250-cpufreq.service
 /etc/systemd/system/bc250-gpu-freq-restore.service
 /etc/systemd/system/bc250-cu-live-manager.service
+/etc/systemd/system/bc250-core-unlock.service
 /etc/systemd/system/aic8800-modules.service
 /etc/systemd/system/bc250-toolkit-persist.service
 /etc/systemd/system/multi-user.target.wants/bc250-smu-oc.service
@@ -3537,6 +3698,7 @@ EOF
 /etc/systemd/system/multi-user.target.wants/bc250-cpufreq.service
 /etc/systemd/system/multi-user.target.wants/bc250-gpu-freq-restore.service
 /etc/systemd/system/multi-user.target.wants/bc250-cu-live-manager.service
+/etc/systemd/system/multi-user.target.wants/bc250-core-unlock.service
 /etc/systemd/system/multi-user.target.wants/aic8800-modules.service
 /etc/systemd/system/multi-user.target.wants/bc250-toolkit-persist.service
 /etc/systemd/system-sleep/bc250-cec-amp.sh

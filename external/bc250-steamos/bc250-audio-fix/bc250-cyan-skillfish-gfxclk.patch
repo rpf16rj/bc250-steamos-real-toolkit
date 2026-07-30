@@ -1,0 +1,56 @@
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
+index 8bd054d55179..10bd399b9d96 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
+@@ -96,6 +96,7 @@ static struct cmn2asic_msg_mapping cyan_skillfish_message_map[SMU_MSG_MAX_COUNT]
+ 	MSG_MAP(TransferTableSmu2Dram,          PPSMC_MSG_TransferTableSmu2Dram,	0),
+ 	MSG_MAP(TransferTableDram2Smu,          PPSMC_MSG_TransferTableDram2Smu,	0),
+ 	MSG_MAP(GetEnabledSmuFeatures,          PPSMC_MSG_GetEnabledSmuFeatures,	0),
++	MSG_MAP(GetGfxclkFrequency,             PPSMC_MSG_GetGfxFrequency,		0),
+ 	MSG_MAP(RequestGfxclk,                  PPSMC_MSG_RequestGfxclk,		0),
+ 	MSG_MAP(ForceGfxVid,                    PPSMC_MSG_ForceGfxVid,			0),
+ 	MSG_MAP(UnforceGfxVid,                  PPSMC_MSG_UnforceGfxVid,		0),
+@@ -161,7 +162,8 @@ cyan_skillfish_get_smu_metrics_data(struct smu_context *smu,
+ 
+ 	switch (member) {
+ 	case METRICS_CURR_GFXCLK:
+-		*value = metrics->Current.GfxclkFrequency;
++		ret = smu_cmn_send_smc_msg(smu, SMU_MSG_GetGfxclkFrequency,
++					       value);
+ 		break;
+ 	case METRICS_CURR_SOCCLK:
+ 		*value = metrics->Current.SocclkFrequency;
+@@ -414,11 +416,16 @@ static ssize_t cyan_skillfish_get_gpu_metrics(struct smu_context *smu,
+ 	struct gpu_metrics_v2_2 *gpu_metrics =
+ 		(struct gpu_metrics_v2_2 *)smu_table->gpu_metrics_table;
+ 	SmuMetrics_t metrics;
++	uint32_t gfxclk;
+ 	int i, ret = 0;
+ 
+ 	ret = smu_cmn_get_metrics_table(smu, &metrics, true);
+ 	if (ret)
+ 		return ret;
++	ret = smu_cmn_send_smc_msg(smu, SMU_MSG_GetGfxclkFrequency,
++				       &gfxclk);
++	if (ret)
++		return ret;
+ 
+ 	smu_cmn_init_soft_gpu_metrics(gpu_metrics, 2, 2);
+ 
+@@ -430,14 +437,14 @@ static ssize_t cyan_skillfish_get_gpu_metrics(struct smu_context *smu,
+ 	gpu_metrics->average_soc_power = metrics.Current.Power[0];
+ 	gpu_metrics->average_gfx_power = metrics.Current.Power[1];
+ 
+-	gpu_metrics->average_gfxclk_frequency = metrics.Average.GfxclkFrequency;
++	gpu_metrics->average_gfxclk_frequency = gfxclk;
+ 	gpu_metrics->average_socclk_frequency = metrics.Average.SocclkFrequency;
+ 	gpu_metrics->average_uclk_frequency = metrics.Average.MemclkFrequency;
+ 	gpu_metrics->average_fclk_frequency = metrics.Average.MemclkFrequency;
+ 	gpu_metrics->average_vclk_frequency = metrics.Average.VclkFrequency;
+ 	gpu_metrics->average_dclk_frequency = metrics.Average.DclkFrequency;
+ 
+-	gpu_metrics->current_gfxclk = metrics.Current.GfxclkFrequency;
++	gpu_metrics->current_gfxclk = gfxclk;
+ 	gpu_metrics->current_socclk = metrics.Current.SocclkFrequency;
+ 	gpu_metrics->current_uclk = metrics.Current.MemclkFrequency;
+ 	gpu_metrics->current_fclk = metrics.Current.MemclkFrequency;

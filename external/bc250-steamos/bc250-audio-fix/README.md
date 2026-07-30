@@ -1,6 +1,10 @@
-# DisplayPort clock correction
+# AMDGPU corrections
 
-Corrects DisplayPort video and audio playback timing through a patched `amdgpu` module.
+Corrects DisplayPort video/audio timing and Cyan Skillfish GPU telemetry
+through one patched `amdgpu` module. Six-core and eight-core CPU topologies use
+the firmware's published `SmuMetrics_t` layout. GPU activity comes from GC
+status sampling, GFX clock comes from a direct SMU query, and per-core CPU
+metrics contain the firmware's six entries.
 
 ## Install
 
@@ -12,7 +16,7 @@ cd ~/.local/share/bc250-fixes/bc250-steamos/bc250-audio-fix
 sudo reboot
 ```
 
-`patch-driver.sh` fetches matching sources and build dependencies, builds the module, validates it, and invokes `sudo` for installation.
+`patch-driver.sh` restores the SteamOS build toolchain if an OS update removed it, fetches matching sources and kernel-specific dependencies, builds the module, validates it, and invokes `sudo` for privileged steps. If Valve omitted the exact headers package, it builds the exact kernel source completely to generate the missing symbol inventory. That fallback can take hours and requires about 40 GiB of free temporary space.
 
 ## Kernel Support
 
@@ -21,19 +25,73 @@ sudo reboot
 | 3.8.x | `linux-neptune-616` | [`bc250-dp-audio-clock-6.16.patch`](bc250-dp-audio-clock-6.16.patch) |
 | 3.9.x | `linux-neptune-618` | [`bc250-dp-audio-clock-6.18.patch`](bc250-dp-audio-clock-6.18.patch) |
 
-The build selects the patch from the running kernel and produces `amdgpu.ko.zst` for that exact release.
+Both versions also apply the Cyan Skillfish telemetry patches. They preserve
+the firmware's published metrics layout, query the GFX clock through the SMU,
+and sample GPU activity from GC status.
+The build selects the display patch from the running kernel and produces
+`amdgpu.ko.zst` for that exact release.
+
+## GPU Metrics Patches
+
+Display/audio and telemetry corrections share the same per-kernel `amdgpu`
+override.
+
+### Runtime Patch Set
+
+| Patch | Operation |
+|---|---|
+| `bc250-cyan-skillfish-gpu-telemetry.patch` | Apply GC activity sampling while retaining `SmuMetrics_t` |
+| `bc250-cyan-skillfish-gfxclk.patch` | Apply direct SMU GFX-clock reporting |
+
+### Runtime Data
+
+| Export | Source | Representation |
+|---|---|---|
+| `AMDGPU_PP_SENSOR_GPU_LOAD` | `GRBM_STATUS.GUI_ACTIVE` sampling | `0-100` percent |
+| `gpu_metrics_v2_2.average_gfx_activity` | `GRBM_STATUS.GUI_ACTIVE` sampling | `0-10000` centipercent |
+| `METRICS_CURR_GFXCLK` | `PPSMC_MSG_GetGfxFrequency` | Point-in-time MHz |
+| `gpu_metrics_v2_2.current_gfxclk` | `PPSMC_MSG_GetGfxFrequency` | Point-in-time MHz |
+| `gpu_metrics_v2_2.average_gfxclk_frequency` | `PPSMC_MSG_GetGfxFrequency` | Point-in-time MHz |
+| CPU core arrays | Firmware `SmuMetrics_t` | Six per-core entries |
+
+### Activity Sampling
+
+`gpu-telemetry` samples `GRBM_STATUS.GUI_ACTIVE` 32 times at 50-microsecond
+intervals. The approximately 1.55-millisecond window supplies both activity
+exports. The `average_gfx_activity` member name follows the
+`gpu_metrics_v2_2` ABI; its value represents this sampling window.
+
+### GFX Clock Query
+
+`gfxclk` maps `SMU_MSG_GetGfxclkFrequency` to Cyan Skillfish firmware command
+`PPSMC_MSG_GetGfxFrequency`. One SMU reply populates `METRICS_CURR_GFXCLK`,
+`current_gfxclk`, and `average_gfxclk_frequency`. Query errors propagate to the
+metrics caller.
+
+### Core Count
+
+The runtime patches use the published `SmuMetrics_t` transfer size for stock
+6-core/12-thread and unlocked 8-core/16-thread topologies. AGESA and Linux expose
+the active topology. The firmware metrics ABI supplies six CPU rows. GPU
+activity and GFX clock reporting use topology-independent register and SMU
+sources.
 
 ## Commands
 
 | Command | Action |
 |---|---|
 | `./patch-driver.sh` | Fetch, build, validate, and install |
+| `./patch-driver.sh status` | Report installed per-kernel module overrides |
+| `./patch-driver.sh uninstall` | Noninteractively restore stock modules for all installed kernels |
 | `./fetch-sources.sh` | Fetch the matching kernel source, symbols, and dependencies |
+| `./ensure-build-prereqs.sh` | Restore a missing SteamOS host build toolchain |
+| `./prepare-kernel.sh` | Prepare an exact Kbuild tree for external modules |
 | `./build.sh` | Build and validate `amdgpu.ko.zst` |
 | `./check-module.sh amdgpu.ko.zst` | Validate vermagic and ABI compatibility |
 | `sudo ./install.sh` | Install the module and rebuild the initramfs |
 | `sudo ./rollback.sh` | Restore the stock module for the running kernel |
 | `sudo ./rollback.sh <kernel-release>` | Restore the stock module for a selected kernel |
+| `sudo ./rollback.sh --all` | Restore stock modules for every installed kernel override |
 | `sudo ./cleanup-other-slot.sh` | Restore the stock module in the alternate SteamOS slot |
 | `./clean.sh` | Reset build state and retain downloaded packages |
 | `./clean.sh --all` | Remove the kernel tree, dependencies, downloads, and generated builds |
@@ -76,7 +134,7 @@ Restore the stock module and reboot:
 
 ```bash
 cd ~/.local/share/bc250-fixes/bc250-steamos/bc250-audio-fix
-sudo ./rollback.sh
+./patch-driver.sh uninstall
 sudo reboot
 ```
 
@@ -104,7 +162,9 @@ cd bc250-audio-fix
 sudo reboot
 ```
 
-Source availability follows the Evlav kernel mirror. Run the command again after the target kernel commit appears in the mirror.
+Source availability follows the Evlav kernel mirror. Run the command again after the target kernel commit appears in the mirror. When the commit exists but Valve's headers package does not, the full-build fallback runs automatically. Set `FULL_BUILD_JOBS` to control parallelism or `FULL_BUILD_MIN_FREE_GB` to adjust the default 40 GiB free-space guard.
+
+The complete fallback remains mandatory for the AMDGPU override. AIC8800 may instead use `prepare-kernel.sh --wifi`, which runs `modules_prepare` without `Module.symvers` only when `CONFIG_MODVERSIONS` is explicitly disabled.
 
 ## Files
 
@@ -112,6 +172,8 @@ Source availability follows the Evlav kernel mirror. Run the command again after
 |---|---|
 | `patch-driver.sh` | Complete build and installation workflow |
 | `fetch-sources.sh` | Source, symbol, and dependency acquisition |
+| `ensure-build-prereqs.sh` | Conditional SteamOS host-toolchain installation |
+| `prepare-kernel.sh` | Shared exact Kbuild preparation for Wi-Fi and GPU modules |
 | `build.sh` | Patch application, module build, packaging, and validation |
 | `check-module.sh` | Vermagic and ABI validation |
 | `install.sh` | Module override installation and initramfs generation |
@@ -121,5 +183,7 @@ Source availability follows the Evlav kernel mirror. Run the command again after
 | `build-env.sh` | Local build environment |
 | `bc250-dp-audio-clock-6.16.patch` | SteamOS 3.8.x display clock patch |
 | `bc250-dp-audio-clock-6.18.patch` | SteamOS 3.9.x display clock patch |
+| `bc250-cyan-skillfish-gpu-telemetry.patch` | Runtime GPU activity export using the published metrics layout |
+| `bc250-cyan-skillfish-gfxclk.patch` | Runtime GFX clock export using a direct SMU query |
 | `bc250-cg-flags.patch` | Experimental GFX clock gating |
 | `bc250-cg-flags-unvalidated.patch` | Experimental expanded clock gating |

@@ -12,5 +12,8 @@ export C_INCLUDE_PATH="$DEPS/usr/include"
 export LIBRARY_PATH="$DEPS/usr/lib"
 export PKG_CONFIG_PATH="$DEPS/usr/lib/pkgconfig"
 
-command -v pahole >/dev/null || { echo "FATAL: pahole not on PATH"; return 1; }
-command -v bc     >/dev/null || { echo "FATAL: bc not on PATH";     return 1; }
+for tool in make gcc ld ar nm objcopy objdump strip patch perl python3 cpio \
+            flex bison msgfmt pkg-config pahole bc zstd modinfo; do
+    command -v "$tool" >/dev/null \
+        || { echo "FATAL: $tool not on PATH"; return 1; }
+done

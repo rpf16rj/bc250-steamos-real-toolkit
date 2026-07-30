@@ -4,6 +4,10 @@
 
 > ⚠️ **Atualizações do SteamOS:** uma atualização pode substituir o kernel, módulos, headers, configuração de boot ou serviços instalados. Depois de **toda atualização do SteamOS**, consulte o status do toolkit e esteja preparado para reinstalar os componentes afetados. Isso é especialmente importante se o canal **Beta** estiver ativo. Se ocorrer um erro, o toolkit salva um log de diagnóstico na sua pasta pessoal e também o copia para a Área de Trabalho quando possível. O atalho da Área de Trabalho mantém o terminal aberto depois que o script termina, permitindo visualizar o erro.
 
+> 🔄 **Já instalou e só quer atualizar?** Depois de baixar uma versão mais nova do toolkit, não precisa desinstalar nada antes — basta rodar **Install All** de novo no menu principal. Ele reaplica e atualiza cada componente no lugar (correções, drivers, serviços, perfis), pulando o que já está atualizado.
+
+> ⚡ **Consumo de energia com 8 núcleos de CPU / 40 CUs ativos:** Rodar os 8 núcleos de CPU (Desbloqueio de Núcleos de CPU) junto com as 40 unidades de computação da GPU consome bem mais energia da fonte do que a configuração de fábrica (6c/12t + 32 CUs). Se você tiver travamentos, reinicializações ou desligamentos aleatórios sob carga nessa combinação, sua fonte pode estar subdimensionada — tente um perfil de undervolting antes de suspeitar de defeito de hardware. O perfil de performance **Mild (undervolt)** (CPU 3.5 GHz / GPU 1600 MHz, com undervolt) foi testado estável usando uma fonte de servidor HP de 460 W.
+
 🇺🇸 Prefer English? Read the [README.md](./README.md).
 
 ## O que é isso?
@@ -14,6 +18,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 - Governors de performance de CPU & GPU, com perfis prontos (Padrão → Extremo) ou combinações totalmente personalizadas
 - Desbloqueio de Compute Units (CU) — até 40 CUs em tempo real, com persistência após reiniciar
+- Desbloqueio de Núcleos de CPU — ⚠ experimental, 6c/12t → 8c/16t via escrita na mailbox da SMU, com serviço de reaplicação no boot
 - Alternância de mitigações de CPU (desabilitar/reabilitar)
 - Monitoramento de sensores e fans, com controle total de PWM opcional
 - Integração com CoolerControl para curvas de fan personalizadas via interface web
@@ -45,6 +50,8 @@ Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (correção ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, controle HDMI-CEC)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (driver de controle PWM dos fans)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (patch de kernel para o desbloqueio de 40 CUs)
+- [rw-r-r-0644](https://github.com/rw-r-r-0644) — [bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock) (desbloqueio de núcleos de CPU, 6c/12t → 8c/16t)
+- [mendesrr](https://github.com/mendesrr) — [bc250-acpi-fix-updated-8c](https://github.com/mendesrr/bc250-acpi-fix-updated-8c) (tabelas ACPI C-/P-state, compatíveis com 6c e 8c)
 - [redbeard1083](https://github.com/redbeard1083) — [bc250-toolkit](https://github.com/redbeard1083/bc250-toolkit) (configuração de swap / ZRAM→ZSWAP)
 - [bc250-collective](https://github.com/bc250-collective) — [bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc) (governor de CPU)
 - [filippor](https://github.com/filippor) — [cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor) (governor de GPU)
@@ -53,6 +60,12 @@ Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um 
 Sem o trabalho deles, nada disso seria possível. 🙏
 
 ## Changelog
+
+### 2026-07-30
+
+- **Adicionado:** `Desbloqueio de Núcleos de CPU` em `Install Manual` (`9`/`9R`) e em `Install All`/`Revert All`. Traz vendorizado o [rw-r-r-0644/bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock), que escreve a máscara de presença de núcleos da BC-250 via mensagem na mailbox da SMU para habilitar os 2 núcleos de CPU desabilitados (6c/12t → 8c/16t). Nenhuma adaptação específica do SteamOS foi necessária — o script upstream só acessa o espaço de configuração PCI e o serviço já existente do governor de GPU. Como a escrita é volátil após um power-off frio, a instalação cria um serviço systemd de boot (`bc250-core-unlock.service`) que reaplica a escrita a cada inicialização; o status agora mostra a contagem atual de núcleos/threads. ⚠ Experimental — veja `external/bc250-core-unlock/README.md` para as ressalvas (possível binning de silício, bug de leitura de clock da GPU).
+- **Alterado:** `Install ACPI Fix` agora busca as tabelas SSDT-CST/SSDT-PST do [mendesrr/bc250-acpi-fix-updated-8c](https://github.com/mendesrr/bc250-acpi-fix-updated-8c) em vez das do bc250-collective, pois a comunidade reportou que as tabelas originais (só 6c) apresentam problemas após desbloquear os 2 núcleos extras. Instalações existentes são atualizadas automaticamente na próxima execução da correção ACPI. O `Desbloqueio de Núcleos de CPU` agora instala/atualiza essa correção ACPI de forma transparente na mesma execução, sem confirmação extra, garantindo que as duas correções sempre andem juntas.
+- **Alterado:** `external/bc250-steamos/bc250-audio-fix` foi revendorizado a partir do upstream [keyboardspecialist/bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos), que agora também corrige o `cyan_skillfish_ppt.c` para consultar o clock GFX diretamente via SMU e adiciona leitura de utilização da GPU (`bc250-cyan-skillfish-gfxclk.patch`, `bc250-cyan-skillfish-gpu-telemetry.patch`) — a correção reportada pela comunidade para as métricas de clock/carga da GPU ficarem incorretas após desbloquear os 2 núcleos extras. O `Install DP Audio/Video Fix` (Install Manual `7`) aplica isso junto com a correção de clock do DisplayPort já existente; não é encadeado automaticamente no `Desbloqueio de Núcleos de CPU` por reconstruir um módulo de kernel, mas o `Install All` já executa essa correção antes da etapa de desbloqueio de núcleos. Também foi vendorizado o script `fetch-steamos-package.sh` do upstream (descoberta multi-canal de pacotes do SteamOS), e corrigido um falso-erro no workaround de SIGPIPE deste toolkit, já que o upstream corrigiu esse bug de forma independente.
 
 ### 2026-07-26
 

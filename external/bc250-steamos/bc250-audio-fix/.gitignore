@@ -7,6 +7,7 @@ valve-kernel/
 valve-kernel-git/
 valve-kernel-dot-git/
 headers/
+.prepare-kernel.lock
 
 # Build deps: extracted packages and their pacman archives
 deps/

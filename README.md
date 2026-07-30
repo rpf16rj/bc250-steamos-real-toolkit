@@ -4,6 +4,10 @@
 
 > ⚠️ **SteamOS updates:** an OS update can replace the kernel, modules, headers, boot configuration, or installed services. After **every SteamOS update**, check the toolkit status and be prepared to reinstall the affected components. This is especially important when the **Beta channel** is enabled. If an operation fails, the toolkit saves a diagnostic log in your home directory and copies it to the Desktop when available. The Desktop shortcut keeps the terminal open after the script exits so the error remains visible.
 
+> 🔄 **Already installed and just want to update?** After pulling a newer version of the toolkit, you don't need to uninstall anything first — just run **Install All** again from the main menu. It re-applies and upgrades every component in place (fixes, drivers, services, profiles), skipping what's already up to date.
+
+> ⚡ **Power draw with 8 CPU cores / 40 CUs active:** Running all 8 CPU cores (CPU Core Unlock) together with all 40 GPU compute units draws noticeably more power from the PSU than the stock 6c/12t + 32 CU configuration. If you experience random crashes, reboots, or shutdowns under load with this combination, your power supply may be undersized for it — try an undervolt profile before assuming a hardware fault. The **Mild (undervolt)** performance profile (CPU 3.5 GHz / GPU 1600 MHz, undervolted) has been tested stable on an HP server PSU rated at 460 W.
+
 🇧🇷 Prefere português? Leia o [README.pt-br.md](./README.pt-br.md).
 
 ## What is this?
@@ -14,6 +18,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 - CPU & GPU performance governors, with ready-made profiles (Stock → Extreme) or fully custom combos
 - Compute Unit (CU) unlock — run up to 40 CUs at runtime, with boot persistence
+- CPU Core Unlock — ⚠ experimental 6c/12t → 8c/16t via an SMU mailbox write, with a boot-time re-apply service
 - CPU mitigations toggle (disable/re-enable)
 - Sensor & fan monitoring, with optional full PWM fan control
 - CoolerControl integration for custom fan curves via a web UI
@@ -45,6 +50,8 @@ This toolkit builds on top of great work from the BC-250 community. Huge thanks 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (ACPI fix, DisplayPort audio/video fix, AIC8800 WiFi/BT driver, HDMI-CEC control)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (PWM fan control driver)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (kernel patch for the 40 CU unlock)
+- [rw-r-r-0644](https://github.com/rw-r-r-0644) — [bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock) (CPU core unlock, 6c/12t → 8c/16t)
+- [mendesrr](https://github.com/mendesrr) — [bc250-acpi-fix-updated-8c](https://github.com/mendesrr/bc250-acpi-fix-updated-8c) (ACPI C-/P-state tables, 6c and 8c compatible)
 - [redbeard1083](https://github.com/redbeard1083) — [bc250-toolkit](https://github.com/redbeard1083/bc250-toolkit) (swap / ZRAM→ZSWAP setup)
 - [bc250-collective](https://github.com/bc250-collective) — [bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc) (CPU governor)
 - [filippor](https://github.com/filippor) — [cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor) (GPU governor)
@@ -53,6 +60,12 @@ This toolkit builds on top of great work from the BC-250 community. Huge thanks 
 Without their work, none of this would be possible. 🙏
 
 ## Changelog
+
+### 2026-07-30
+
+- **Added:** `CPU Core Unlock` in `Install Manual` (`9`/`9R`) and `Install All`/`Revert All`. Vendors [rw-r-r-0644/bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock), which writes the BC-250's core presence mask via an SMU mailbox message to enable its 2 disabled CPU cores (6c/12t → 8c/16t). No SteamOS-specific adaptation was needed — the upstream script only touches PCI config space and the existing GPU governor service. Since the write is volatile across a cold power-off, install adds a boot-time systemd service (`bc250-core-unlock.service`) that re-applies it on every start; status now reports the current core/thread count. ⚠ Experimental — see `external/bc250-core-unlock/README.md` for caveats (possible silicon binning, GPU clock reporting bug).
+- **Changed:** `Install ACPI Fix` now fetches [mendesrr/bc250-acpi-fix-updated-8c](https://github.com/mendesrr/bc250-acpi-fix-updated-8c)'s SSDT-CST/SSDT-PST tables instead of bc250-collective's, since the community reported the original 6c-only tables misbehave once the extra 2 cores are unlocked. Existing installs auto-upgrade the next time the ACPI fix runs. `CPU Core Unlock` now installs/updates this ACPI fix transparently in the same run, with no extra confirmation, so both fixes are always applied together.
+- **Changed:** Re-vendored `external/bc250-steamos/bc250-audio-fix` from upstream [keyboardspecialist/bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos), which now also patches `cyan_skillfish_ppt.c` to query GFX clock directly from the SMU and add GPU utilization reporting (`bc250-cyan-skillfish-gfxclk.patch`, `bc250-cyan-skillfish-gpu-telemetry.patch`) — the community-reported fix for GPU clock/load metrics becoming inaccurate once the 2 extra cores are unlocked. `Install DP Audio/Video Fix` (Install Manual `7`) applies it together with the existing DisplayPort clock correction; not chained automatically into `CPU Core Unlock` since it rebuilds a kernel module, but `Install All` already runs it before the core unlock step. Also vendored the upstream `fetch-steamos-package.sh` helper (multi-channel SteamOS package discovery) and fixed a false-failure in this toolkit's own SIGPIPE workaround now that upstream fixed that bug independently.
 
 ### 2026-07-26
 
