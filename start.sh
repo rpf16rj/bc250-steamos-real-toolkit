@@ -129,6 +129,7 @@ persist_detect_and_record_installed() {
     cec_control_installed 2>/dev/null && persist_state_add "cec"
     [[ -f /etc/bc250-cu-live-manager.conf ]] && persist_state_add "cu"
     core_unlock_persist_installed 2>/dev/null && persist_state_add "core_unlock"
+    ram_split_installed 2>/dev/null && persist_state_add "ram_split"
     if find "/lib/modules/$(uname -r)/updates" -name 'amdgpu.ko*' 2>/dev/null | grep -q .; then
         persist_state_add "audio"
     fi
@@ -826,6 +827,148 @@ EOF
 
     print_success "CPU core unlock applied and boot-time re-apply service installed. Reboot to bring up all 8 cores/16 threads."
     persist_state_add "core_unlock"
+}
+
+# ==============================================================================
+# RAM/VRAM SPLIT (fanoush/bc250_memcfg)
+# ==============================================================================
+# The BC-250 shares 16GB of RAM between CPU and GPU (UMA). The stock BIOS
+# reserves a fixed minimum VRAM size (UMA_SIZE, stored in battery-backed
+# CMOS) of 8192MB (8GB RAM / 8GB VRAM), locking half the machine's memory to
+# the GPU even at idle. Dropping UMA_SIZE to 512 (the documented minimum
+# floor) frees nearly all RAM when idle; Linux's amdgpu/ttm driver still
+# dynamically grows VRAM above that floor as games need it, up to a
+# kernel-enforced ceiling that defaults to roughly half of free RAM. That
+# default ceiling can be too low for games wanting 8GB+ VRAM, so we also
+# raise it via the ttm.pages_limit kernel parameter. Neither setting needs a
+# modded BIOS -- UMA_SIZE is a plain CMOS write via a small vendored tool
+# (fanoush/bc250_memcfg), compiled locally from source at install time.
+# See: https://elektricm.github.io/amd-bc250-docs/bios/vram/
+
+RAM_SPLIT_DIR="$EXTERNAL_DIR/bc250_memcfg"
+RAM_SPLIT_BIN="$RAM_SPLIT_DIR/bc250memcfg"
+RAM_SPLIT_DEFAULT_UMA_MB=512
+RAM_SPLIT_STOCK_UMA_MB=8192
+RAM_SPLIT_DEFAULT_TTM_PAGES=3145728   # ~12GB dynamic VRAM ceiling (4KiB pages)
+
+ram_split_bc250_detected() {
+    command -v lspci >/dev/null 2>&1 && lspci -Dn 2>/dev/null | grep -qi '1002:13fe'
+}
+
+ram_split_build_tool() {
+    [[ -x "$RAM_SPLIT_BIN" ]] && return 0
+    if [[ ! -f "$RAM_SPLIT_DIR/main.cpp" ]]; then
+        fail_with_log "Vendored bc250_memcfg source not found at $RAM_SPLIT_DIR." "RAM/VRAM Split — missing vendored source"
+        return 1
+    fi
+    if ! command -v gcc >/dev/null 2>&1; then
+        print_info "Installing base-devel (gcc) to build bc250memcfg..."
+        steamos_writable 'pacman -Sy --noconfirm base-devel' || {
+            fail_with_log "Failed to install gcc." "RAM/VRAM Split — gcc"
+            return 1
+        }
+    fi
+    print_info "Building bc250memcfg from vendored source..."
+    (cd "$RAM_SPLIT_DIR" && gcc -Os -s main.cpp -o bc250memcfg) || {
+        fail_with_log "Failed to build bc250memcfg." "RAM/VRAM Split — build"
+        return 1
+    }
+}
+
+ram_split_current_uma() {
+    [[ -x "$RAM_SPLIT_BIN" ]] || return 1
+    "$RAM_SPLIT_BIN" 2>/dev/null | awk -F= '$1 == "UMA_SIZE" {print $2}' | tr -d ' \r'
+}
+
+ram_split_installed() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -qE 'GRUB_CMDLINE_LINUX_DEFAULT=.*ttm\.pages_limit=' "$GRUB_DEFAULT" 2>/dev/null
+}
+
+install_ram_split() {
+    local auto="${1:-}"
+    print_step "10" "Installing RAM/VRAM Split (UMA_SIZE=${RAM_SPLIT_DEFAULT_UMA_MB}MB dynamic + ttm.pages_limit ceiling)"
+    echo -e "  ${YELLOW}⚠  Writes to the BC-250's battery-backed CMOS (BIOS memory config) — no modded BIOS needed.${RESET}"
+    echo -e "  ${DIM}Frees nearly all 16GB of RAM at idle (stock BIOS permanently reserves 8GB for VRAM);${RESET}"
+    echo -e "  ${DIM}the GPU still dynamically claims up to ~12GB when a game needs it (ttm.pages_limit).${RESET}"
+    echo -e "  ${DIM}Recovery if something goes wrong: clear CMOS via the board's jumper/battery.${RESET}"
+    echo ""
+
+    if [[ "$auto" != "auto" ]] && ! confirm "Continue with the RAM/VRAM split configuration?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    if ! ram_split_bc250_detected; then
+        fail_with_log "BC-250 GPU (PCI ID 1002:13fe) not detected — refusing the CMOS write to avoid corrupting unrelated hardware." "RAM/VRAM Split — hardware check"
+        return 1
+    fi
+
+    ram_split_build_tool || return 1
+
+    print_info "Writing UMA_SIZE=${RAM_SPLIT_DEFAULT_UMA_MB} to CMOS..."
+    local output
+    output=$("$RAM_SPLIT_BIN" UMA_SIZE "$RAM_SPLIT_DEFAULT_UMA_MB" 2>&1)
+    echo "$output" | sed 's/^/    /'
+    [[ "$output" == "setting UMA_SIZE to $RAM_SPLIT_DEFAULT_UMA_MB" ]] || {
+        fail_with_log "bc250memcfg did not confirm the UMA_SIZE write." "RAM/VRAM Split — CMOS write"
+        return 1
+    }
+    local readback
+    readback=$(ram_split_current_uma)
+    [[ "$readback" == "$RAM_SPLIT_DEFAULT_UMA_MB" ]] || {
+        fail_with_log "CMOS readback is ${readback:-unknown}MB, not the requested ${RAM_SPLIT_DEFAULT_UMA_MB}MB." "RAM/VRAM Split — CMOS readback"
+        return 1
+    }
+
+    print_info "Raising the kernel's dynamic VRAM ceiling (ttm.pages_limit)..."
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ ttm\\.pages_limit=[0-9]*//g; s/ttm\\.pages_limit=[0-9]* //g; s/ttm\\.pages_limit=[0-9]*//g' \"$GRUB_DEFAULT\"
+        sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 ttm.pages_limit=$RAM_SPLIT_DEFAULT_TTM_PAGES\"/' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        fail_with_log "Failed to update GRUB with ttm.pages_limit." "RAM/VRAM Split — grub"
+        return 1
+    }
+
+    print_success "RAM/VRAM split configured! UMA_SIZE=${RAM_SPLIT_DEFAULT_UMA_MB}MB (CMOS), ttm.pages_limit=$RAM_SPLIT_DEFAULT_TTM_PAGES (~12GB dynamic ceiling). Reboot required."
+    persist_state_add "ram_split"
+    print_info "After reboot verify: ${CYAN}free -h${RESET} and ${CYAN}cat /sys/class/drm/card0/device/mem_info_vram_total${RESET}"
+}
+
+run_revert_ram_split() {
+    print_step "R-10" "Revert RAM/VRAM Split — restore stock ${RAM_SPLIT_STOCK_UMA_MB}MB split"
+
+    if ! ram_split_installed; then
+        print_info "RAM/VRAM split does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This restores the stock UMA_SIZE=${RAM_SPLIT_STOCK_UMA_MB} split and removes ttm.pages_limit from GRUB. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    if [[ -x "$RAM_SPLIT_BIN" ]] && ram_split_bc250_detected; then
+        print_info "Restoring stock UMA_SIZE=${RAM_SPLIT_STOCK_UMA_MB} in CMOS..."
+        local output
+        output=$("$RAM_SPLIT_BIN" UMA_SIZE "$RAM_SPLIT_STOCK_UMA_MB" 2>&1)
+        echo "$output" | sed 's/^/    /'
+    else
+        print_info "bc250memcfg unavailable — skipping CMOS restore (only removing the GRUB ttm.pages_limit override)."
+    fi
+
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ ttm\\.pages_limit=[0-9]*//g; s/ttm\\.pages_limit=[0-9]* //g; s/ttm\\.pages_limit=[0-9]*//g' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        fail_with_log "Failed to remove ttm.pages_limit from GRUB." "RAM/VRAM Split — grub revert"
+        return 1
+    }
+
+    print_success "RAM/VRAM split reverted to stock ${RAM_SPLIT_STOCK_UMA_MB}MB split. Reboot to apply."
+    persist_state_remove "ram_split"
 }
 
 run_revert_core_unlock() {
@@ -3256,6 +3399,14 @@ run_status() {
         echo -e "  ${CYAN}CPU Core Unlock${RESET}   ${DIM}not installed (6c/12t, SteamOS default)${RESET}"
     fi
 
+    if ram_split_installed; then
+        local uma_now
+        uma_now=$(ram_split_current_uma 2>/dev/null)
+        echo -e "  ${CYAN}RAM/VRAM Split${RESET}    ${ICON_OK} ${GREEN}UMA_SIZE=${uma_now:-?}MB${RESET}, ttm.pages_limit ceiling active"
+    else
+        echo -e "  ${CYAN}RAM/VRAM Split${RESET}    ${DIM}not installed (stock ${RAM_SPLIT_STOCK_UMA_MB}MB split, SteamOS default)${RESET}"
+    fi
+
     echo ""
     print_section "Swap & ZRAM/ZSWAP"
 
@@ -3365,7 +3516,7 @@ run_install_all_step() {
 }
 
 run_install_all() {
-    print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock + CPU Core Unlock"
+    print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock + CPU Core Unlock + RAM/VRAM Split"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -3386,6 +3537,7 @@ run_install_all() {
     run_install_all_step install_audio_fix || return 1
     run_install_all_step run_cu_live_manager || return 1
     run_install_all_step install_core_unlock auto || return 1
+    run_install_all_step install_ram_split auto || return 1
 
     install_all_progress_clear
     print_success "Install All completed!"
@@ -3408,6 +3560,8 @@ run_revert_all() {
     run_revert_audio_fix
     echo ""
     run_revert_core_unlock
+    echo ""
+    run_revert_ram_split
     echo ""
     run_revert_aic8800_wifi
 }
@@ -3435,6 +3589,8 @@ run_install_manual() {
         print_item "8"  "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
         print_item "9"  "CPU Core Unlock"                "⚠  EXPERIMENTAL: 6c/12t -> 8c/16t, needs reboot"
         print_item "9R" "Revert CPU Core Unlock"          "Remove boot-time re-apply service"
+        print_item "10"  "Install RAM/VRAM Split"        "UMA_SIZE=512 + ttm.pages_limit dynamic ceiling"
+        print_item "10R" "Revert RAM/VRAM Split"         "Restore stock ${RAM_SPLIT_STOCK_UMA_MB}MB split"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3458,6 +3614,8 @@ run_install_manual() {
             8)  run_cu_live_manager;     press_enter ;;
             9)  install_core_unlock;     press_enter ;;
             9R) run_revert_core_unlock;  press_enter ;;
+            10) install_ram_split;       press_enter ;;
+            10R) run_revert_ram_split;   press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
@@ -3611,6 +3769,7 @@ reapply_installed_components() {
             audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
             cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;
             core_unlock) print_info "CPU Core Unlock boot service persists via the atomic-update keep list — skipped in unattended re-apply." ;;
+            ram_split)  print_info "RAM/VRAM split persists on its own (CMOS is hardware state; GRUB config is in the atomic-update keep list) — skipped in unattended re-apply." ;;
             aic8800)    install_aic8800_wifi || print_error "AIC8800 WiFi reapply failed" ;;
             sensors)    install_sensors_pwm || print_error "Sensors PWM reapply failed" ;;
             coolercontrol) install_coolercontrol || print_error "CoolerControl reapply failed" ;;
