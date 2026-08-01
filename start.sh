@@ -3130,6 +3130,81 @@ oc_edit_gpu_config_nano() {
     fi
 }
 
+oc_run_bc250_detect() {
+    print_step "03-D" "Run bc250-detect (auto-tune CPU undervolt)"
+    echo -e "  ${DIM}Stress-tests the CPU at increasing frequency steps to find the lowest stable${RESET}"
+    echo -e "  ${DIM}SMU voltage-curve scale ('scale' in overclock.conf) for your target frequency/voltage.${RESET}"
+    echo -e "  ${YELLOW}⚠  Re-run this after enabling/disabling CPU Core Unlock (Install Manual 9) — the${RESET}"
+    echo -e "  ${YELLOW}⚠  extra 2 cores change the CPU's power/thermal profile, so a scale tuned for 6c/12t${RESET}"
+    echo -e "  ${YELLOW}⚠  may no longer be the safest/optimal undervolt for 8c/16t (or vice-versa).${RESET}"
+    echo -e "  ${YELLOW}⚠  This runs a real stress test (several minutes) and pushes CPU voltage/frequency${RESET}"
+    echo -e "  ${YELLOW}⚠  toward your limits. Monitor temperatures; abort (Ctrl+C) if anything looks wrong.${RESET}"
+    echo ""
+
+    export PATH="$PATH:/root/.local/bin:/home/deck/.local/bin"
+    command -v pipx &>/dev/null && eval "$(pipx ensurepath --shell 2>/dev/null || true)" || true
+    if ! command -v bc250-detect &>/dev/null; then
+        fail_with_log "bc250-detect not found in PATH. Install the CPU Governor first (Install Manual 1)." "bc250-detect — missing"
+        return 1
+    fi
+    if ! command -v stress &>/dev/null; then
+        fail_with_log "'stress' not found in PATH — bc250-detect needs it to load the CPU. Install the CPU Governor first (Install Manual 1)." "bc250-detect — missing stress"
+        return 1
+    fi
+
+    local cpu_dir="$EXTERNAL_DIR/bc250_smu_oc"
+    if [[ ! -d "$cpu_dir" ]]; then
+        fail_with_log "Vendored bc250_smu_oc repository not found at $cpu_dir." "bc250-detect — missing vendored repo"
+        return 1
+    fi
+
+    local d_freq d_vid d_temp
+    read -rp "$(echo -e "  ${BOLD}${WHITE}Target CPU frequency in MHz [3500]:${RESET} ")" d_freq
+    d_freq="${d_freq:-3500}"
+    read -rp "$(echo -e "  ${BOLD}${WHITE}CPU core voltage limit in mV [1000]:${RESET} ")" d_vid
+    d_vid="${d_vid:-1000}"
+    read -rp "$(echo -e "  ${BOLD}${WHITE}CPU/GPU temperature limit in °C [90]:${RESET} ")" d_temp
+    d_temp="${d_temp:-90}"
+
+    if ! [[ "$d_freq" =~ ^[0-9]+$ && "$d_vid" =~ ^[0-9]+$ && "$d_temp" =~ ^[0-9]+$ ]]; then
+        print_error "Frequency, voltage and temperature must all be plain numbers."
+        return 1
+    fi
+
+    if ! confirm "Run bc250-detect at ${d_freq}MHz / ${d_vid}mV / ${d_temp}°C now?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    cd "$cpu_dir" || return 1
+    print_info "Running bc250-detect..."
+    bc250-detect --frequency "$d_freq" --vid "$d_vid" --temp "$d_temp" --keep || {
+        fail_with_log "bc250-detect failed or was interrupted — see output above." "bc250-detect"
+        cd - >/dev/null || true
+        return 1
+    }
+    print_success "bc250-detect finished. New settings saved to $cpu_dir/overclock.conf."
+
+    if confirm "Apply this new profile now and (re)install the CPU governor service?"; then
+        bc250-apply --install overclock.conf || {
+            fail_with_log "bc250-apply failed." "bc250-detect — apply"
+            cd - >/dev/null || true
+            return 1
+        }
+        cd - >/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+        systemctl enable --now bc250-smu-oc.service || {
+            fail_with_log "Failed to enable/restart the CPU governor service." "bc250-detect — enable service"
+            return 1
+        }
+        persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
+        print_success "CPU governor updated with the new bc250-detect profile."
+    else
+        cd - >/dev/null || true
+        print_info "Not applied. Edit $cpu_dir/overclock.conf and run 'bc250-apply --install overclock.conf' yourself, or re-run this option (D) later."
+    fi
+}
+
 oc_active_profile() {
     local cpu_freq="" gpu_freq="" cpu_temp="" label=""
     if [[ -f "$CPU_DEST" ]]; then
@@ -3383,6 +3458,7 @@ run_overclock_menu() {
         print_item "C" "Custom"          "Mix & match CPU and GPU profiles"
         print_item "E" "Edit GPU Config" "Manually edit GPU config with nano"
         print_item "F" "Edit CPU Config" "Manually edit CPU config with nano"
+        print_item "D" "Run bc250-detect" "Auto-tune CPU undervolt (re-run after CPU Core Unlock)"
         print_item "0" "Back"            ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3392,6 +3468,7 @@ run_overclock_menu() {
             C) oc_apply_custom;         press_enter ;;
             E) oc_edit_gpu_config_nano; press_enter ;;
             F) oc_edit_cpu_config_nano; press_enter ;;
+            D) oc_run_bc250_detect;     press_enter ;;
             0) return 0 ;;
             *)
                 if [[ "$oc_choice" =~ ^[0-9]+$ ]] && (( oc_choice >= 1 && oc_choice <= ${#PRESET_NAMES[@]} )); then
