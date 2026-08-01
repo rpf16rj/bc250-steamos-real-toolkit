@@ -3476,7 +3476,11 @@ run_status() {
             echo -e "  ${CYAN}CPU Core Unlock${RESET}   ${ICON_WARN} ${YELLOW}boot service enabled, still 6c/12t${RESET} ($core_unlock_auto_hint)"
         fi
     else
-        echo -e "  ${CYAN}CPU Core Unlock${RESET}   ${DIM}not installed (6c/12t, SteamOS default)${RESET}"
+        if core_unlock_cores_active; then
+            echo -e "  ${CYAN}CPU Core Unlock${RESET}   ${YELLOW}boot service removed, but 8c/16t still active${RESET} ($(nproc --all) threads — mask persists until a real cold power-off)"
+        else
+            echo -e "  ${CYAN}CPU Core Unlock${RESET}   ${DIM}not installed (6c/12t, SteamOS default)${RESET}"
+        fi
     fi
 
     if ram_split_installed; then
