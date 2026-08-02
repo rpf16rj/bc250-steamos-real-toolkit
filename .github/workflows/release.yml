@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract changelog section for this tag
+        id: changelog
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ESCAPED_TAG="${TAG//./\\.}"
+          NOTES_FILE="$(mktemp)"
+          sed -n "/^## ${ESCAPED_TAG}/,\$p" CHANGELOG.md \
+            | awk 'NR==1{print;next} /^## /{exit} {print}' > "$NOTES_FILE"
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "No changelog entry found for $TAG" >&2
+            echo "Release $TAG" > "$NOTES_FILE"
+          fi
+          echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Build release zip(s)
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          git archive --format=zip -o "dist/bc250-steamos-real-toolkit-${TAG}.zip" "$TAG"
+          cp "dist/bc250-steamos-real-toolkit-${TAG}.zip" "dist/bc250-steamos-real-toolkit-latest.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: ${{ steps.changelog.outputs.notes_file }}
+          files: |
+            dist/bc250-steamos-real-toolkit-${{ github.ref_name }}.zip
+            dist/bc250-steamos-real-toolkit-latest.zip

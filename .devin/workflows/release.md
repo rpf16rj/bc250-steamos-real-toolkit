@@ -51,37 +51,35 @@ version", follow these steps:
    git checkout develop
    ```
 
-7. Build the release zip (excludes `.git`, gitignored build caches/vendored
-   kernel trees, etc. — anything not tracked by git is naturally excluded
-   since `git archive` only packs tracked files):
-   ```bash
-   git archive --format=zip -o /tmp/bc250-steamos-real-toolkit-vX.Y.Z.zip vX.Y.Z
-   ```
+7. That's it — pushing the tag in step 6 triggers
+   `.github/workflows/release.yml` on GitHub Actions, which:
+   - extracts the `## vX.Y.Z` section from `CHANGELOG.md` as the release notes,
+   - builds `bc250-steamos-real-toolkit-vX.Y.Z.zip` via `git archive` on the
+     tag (only git-tracked files, so build caches/vendored kernel trees are
+     naturally excluded),
+   - also publishes a copy under the **fixed** name
+     `bc250-steamos-real-toolkit-latest.zip`, so the README's "latest
+     release" download link never changes across versions,
+   - and creates the GitHub Release itself using the built-in
+     `GITHUB_TOKEN` — no manual step, `gh` CLI, or personal access token
+     needed.
+   Check the **Actions** tab on GitHub to confirm the `Release` workflow
+   run succeeded, then verify the new release appears under
+   `https://github.com/<owner>/<repo>/releases`.
 
-8. Create the GitHub Release:
-   - If the `gh` CLI is installed and authenticated (`gh auth status`):
-     ```bash
-     gh release create vX.Y.Z /tmp/bc250-steamos-real-toolkit-vX.Y.Z.zip \
-       --title "vX.Y.Z" \
-       --notes-file <(sed -n '/^## vX.Y.Z/,/^## v/p' CHANGELOG.md | sed '$d')
-     ```
-     Also upload the same zip a second time under a **fixed** asset name so
-     the README's "latest release" link never changes across versions:
-     ```bash
-     cp /tmp/bc250-steamos-real-toolkit-vX.Y.Z.zip /tmp/bc250-steamos-real-toolkit-latest.zip
-     gh release upload vX.Y.Z /tmp/bc250-steamos-real-toolkit-latest.zip
-     ```
-   - Otherwise (no `gh` CLI / no token available to this session): tell the
-     user the tag is pushed, and ask them to open
-     `https://github.com/<owner>/<repo>/releases/new?tag=vX.Y.Z` in a
-     browser, paste in the English changelog section as the release notes,
-     and upload `/tmp/bc250-steamos-real-toolkit-vX.Y.Z.zip` twice as
-     assets: once as-is, and once renamed to
-     `bc250-steamos-real-toolkit-latest.zip` (so the stable "latest" download
-     link keeps working release after release).
-
-9. The README's Quick Start section already links to
-   `.../releases/latest` (release page) and, where a direct download link is
-   used, `.../releases/latest/download/bc250-steamos-real-toolkit-latest.zip`
+8. The README's Quick Start section already links to
+   `.../releases/latest/download/bc250-steamos-real-toolkit-latest.zip`
    — no README changes needed for a routine release unless install
    instructions themselves changed.
+
+**Note:** if `.github/workflows/release.yml` didn't exist yet (or changed)
+at the commit a tag points to, GitHub Actions won't run it for that tag.
+When bootstrapping this workflow for the first time, or after editing the
+release workflow itself, delete and re-push the tag once the workflow file
+is merged into `main` so it points at a commit that actually contains it:
+```bash
+git tag -d vX.Y.Z
+git push origin :refs/tags/vX.Y.Z
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
