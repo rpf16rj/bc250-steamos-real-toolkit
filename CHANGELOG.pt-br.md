@@ -1,0 +1,166 @@
+# Changelog
+
+Todas as mudanças relevantes do BC-250 SteamOS Real Toolkit são documentadas
+aqui. As versões seguem [Versionamento Semântico](https://semver.org/lang/pt-BR/)
+(`MAJOR.MINOR.PATCH`) a partir da `v1.0.0`. Mudanças anteriores ficam abaixo
+como histórico datado de antes da adoção de versões numeradas.
+
+🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
+
+## v1.0.0 — 2026-08-02
+
+Primeira versão numerada. Adota versionamento semântico e GitHub Releases
+(zip para download) em vez de versões com data e do instalador `curl | bash`.
+
+- **Alterado:** Distribuição migrou de um one-liner `curl`-piped do
+  `start.sh` / clone git com auto-update para GitHub Releases versionados.
+  Baixe o zip da release mais recente, extraia e rode o `start.sh` — veja a
+  seção Instalação Rápida no README.
+- **Removido:** Auto-update a cada abertura (`git fetch origin main` +
+  `reset --hard` no início do `start.sh`). Ele descartava silenciosamente
+  qualquer alteração local não commitada ao abrir, podendo apagar trabalho
+  em andamento. Atualizar o toolkit agora significa baixar o zip da release
+  mais recente. O bootstrap standalone (buscar o repositório completo quando
+  `start.sh` roda sem os assets vendorizados de `external/`) não foi afetado.
+- **Adicionado:** `bc250-cyan-skillfish-8core-metrics.patch` em
+  `external/bc250-steamos/bc250-audio-fix`, vendorizado da versão mais nova
+  de [keyboardspecialist/bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos).
+  Em BIOS Robin 3.00 + topologia 8-core/16-thread totalmente desbloqueada
+  (`CPU Core Unlock`), lê power/temperatura/frequência reais por-núcleo dos
+  8 núcleos direto da tabela `PMSTATUSLOG` da SMU via acesso direto a
+  registrador PCIe, em vez do layout `SmuMetrics_t` de fábrica, que só
+  carrega 6 entradas de núcleo — o patch set anterior duplicava/truncava
+  silenciosamente os dados por-núcleo em sistemas 8-core desbloqueados. Cai
+  de volta pro relato de 6 núcleos do `SmuMetrics_t` (`-ENODEV`) em qualquer
+  outra topologia, então é seguro em sistemas 6c/12t sem modificação também.
+  Nota: o arquivo de patch publicado originalmente estava truncado (faltavam
+  chaves de fechamento) — completado manualmente e verificado para aplicar
+  de forma limpa e gerar C sintaticamente válido contra a árvore de kernel
+  vendorizada deste toolkit antes de ser incorporado.
+- **Alterado:** `bc250-cyan-skillfish-gfxclk.patch` atualizado para a versão
+  mais nova upstream, que envolve a consulta direta de clock GFX via SMU em
+  validação de faixa (descarta leituras fora de
+  `CYAN_SKILLFISH_SCLK_MIN`/`MAX` em vez de propagar valores inválidos para
+  `gpu_metrics`/hwmon).
+- **Corrigido:** o `build.sh` reaproveitava uma árvore de kernel já com
+  patch aplicado entre execuções separadas (`fetch-sources.sh` pula o
+  re-checkout quando a árvore já está no commit do kernel em execução, por
+  design, para ganhar velocidade). Quando o *conteúdo* de um patch
+  vendorizado muda entre execuções — como a atualização do `gfxclk.patch`
+  acima — o arquivo deixado por um build anterior podia ficar num estado que
+  não aplicava nem revertia de forma limpa contra o novo texto do patch,
+  abortando com "tree has drifted". O `build.sh` agora reseta exatamente os
+  arquivos que sua cadeia de patches toca (`cyan_skillfish_ppt.c`,
+  `dcn201_clk_mgr.c`, `clk_mgr.c`) para o estado pristine do git antes de
+  aplicar os patches, em toda execução.
+
+## Histórico pré-1.0 (versões datadas)
+
+### 2026-08-01
+
+- **Adicionado:** `RAM/VRAM Split` em `Install Manual` (`10`/`10R`) e `Install All`/`Revert All`. Traz vendorizado o [fanoush/bc250_memcfg](https://github.com/fanoush/bc250_memcfg) (compilado localmente na instalação) para reduzir o `UMA_SIZE` do split permanente de fábrica (8192MB, 8GB/8GB) para o piso mínimo documentado de 512MB na CMOS com bateria da BC-250, liberando quase toda a RAM de 16GB em idle, e eleva o teto dinâmico de VRAM do kernel via `ttm.pages_limit` no GRUB (~12GB) para jogos que pedem 8GB+ de VRAM não travarem com o split mais baixo. Não precisa de BIOS modificada; o status mostra o `UMA_SIZE` atual. Corrigidos dois bugs encontrados em seguida: o build agora força a reinstalação de `glibc`/`base-devel` quando o `gcc` não consegue de fato compilar um programa C (os headers podem sumir/ser removidos do overlay do SteamOS mesmo com o `gcc` presente), e a comparação do readback pós-escrita na CMOS agora remove o zero-padding do `bc250memcfg` (`0512`) antes de comparar.
+- **Adicionado:** Auto-reboot opcional para o `Desbloqueio de Núcleos de CPU`. Após um power-off frio, a AGESA só relê a máscara de núcleos reescrita no boot *seguinte* (não naquele em que o serviço de boot a reaplica), então recuperar os 2 núcleos extras sempre custa mais um reboot. A instalação agora pergunta se quer disparar esse segundo reboot obrigatório automaticamente, salvando a escolha em `/etc/bc250-core-unlock.conf`; o serviço de boot só reinicia sozinho logo após uma escrita nova da máscara com os núcleos ainda inativos, nunca num boot que já estava desbloqueado — evitando loop de reboot em caso de falha real de enumeração.
+- **Adicionado:** `Run bc250-detect` (`D`) no menu de Perfil de Performance, para reajustar manualmente o undervolt da CPU com frequência/tensão/temperatura alvo personalizadas — útil após ligar/desligar o `Desbloqueio de Núcleos de CPU`, já que 6c/12t vs 8c/16t muda o perfil elétrico/térmico da CPU o suficiente para um `scale` ajustado antes deixar de ser o ideal.
+- **Corrigido:** O status do `Desbloqueio de Núcleos de CPU` mostrava fixo "6c/12t, SteamOS default" sempre que o serviço de boot não estava instalado, mesmo que o revert só remova esse serviço — a própria máscara de núcleos (e portanto o estado real 8c/16t) permanece ativa até um power-off frio de verdade. O status agora checa a contagem real de núcleos também nesse caso.
+
+### 2026-07-30
+
+- **Adicionado:** `Desbloqueio de Núcleos de CPU` em `Install Manual` (`9`/`9R`) e em `Install All`/`Revert All`. Traz vendorizado o [rw-r-r-0644/bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock), que escreve a máscara de presença de núcleos da BC-250 via mensagem na mailbox da SMU para habilitar os 2 núcleos de CPU desabilitados (6c/12t → 8c/16t). Nenhuma adaptação específica do SteamOS foi necessária — o script upstream só acessa o espaço de configuração PCI e o serviço já existente do governor de GPU. Como a escrita é volátil após um power-off frio, a instalação cria um serviço systemd de boot (`bc250-core-unlock.service`) que reaplica a escrita a cada inicialização; o status agora mostra a contagem atual de núcleos/threads. ⚠ Experimental — veja `external/bc250-core-unlock/README.md` para as ressalvas (possível binning de silício, bug de leitura de clock da GPU).
+- **Alterado:** `Install ACPI Fix` agora busca as tabelas SSDT-CST/SSDT-PST de [mendesrr/bc250-acpi-fix-updated-8c](https://github.com/mendesrr/bc250-acpi-fix-updated-8c) em vez das da bc250-collective, já que a comunidade relatou que as tabelas originais (só 6c) se comportam mal depois que os 2 núcleos extras são desbloqueados. Instalações existentes atualizam automaticamente na próxima vez que a correção de ACPI rodar. `Desbloqueio de Núcleos de CPU` agora instala/atualiza essa correção de ACPI de forma transparente na mesma execução, sem confirmação extra, então as duas correções são sempre aplicadas juntas.
+- **Alterado:** Re-vendorizado `external/bc250-steamos/bc250-audio-fix` do upstream [keyboardspecialist/bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos), que agora também corrige `cyan_skillfish_ppt.c` para consultar o clock GFX direto da SMU e adicionar o relato de utilização de GPU (`bc250-cyan-skillfish-gfxclk.patch`, `bc250-cyan-skillfish-gpu-telemetry.patch`) — a correção reportada pela comunidade para as métricas de clock/carga da GPU ficarem imprecisas depois que os 2 núcleos extras são desbloqueados. `Install DP Audio/Video Fix` (Install Manual `7`) aplica isso junto com a correção de clock do DisplayPort já existente; não é encadeado automaticamente no `Desbloqueio de Núcleos de CPU` já que recompila um módulo do kernel, mas o `Install All` já roda antes do passo de desbloqueio de núcleos. Também vendorizado o helper `fetch-steamos-package.sh` do upstream (descoberta de pacote SteamOS multi-canal) e corrigido uma falsa-falha no workaround de SIGPIPE deste toolkit agora que o upstream corrigiu esse bug de forma independente.
+- **Adicionado:** `RAM/VRAM Split` em `Install Manual` (`10`/`10R`) e `Install All`/`Revert All`. Traz vendorizado o [fanoush/bc250_memcfg](https://github.com/fanoush/bc250_memcfg) (compilado localmente a partir do código-fonte na instalação) para escrever `UMA_SIZE=512` na CMOS com bateria da BC-250 — a BIOS de fábrica reserva um valor fixo de 8192MB (split 8GB/8GB) permanentemente para VRAM, e 512MB é o piso mínimo documentado, liberando quase toda a RAM de 16GB em idle. Também eleva o teto dinâmico de VRAM do kernel via `ttm.pages_limit` no GRUB (~12GB), já que o teto padrão com um piso de 512MB pode ser baixo demais para jogos que pedem 8GB+ de VRAM. Não precisa de BIOS modificada; o status mostra o `UMA_SIZE` atual. O revert restaura o split de fábrica de 8192MB e remove o override do GRUB.
+- **Corrigido:** o `nano` perdia a navegação por setas ao editar a config de CPU/GPU (menu Performance `F`/`E`) — o redirecionamento `exec > >(tee ...) 2>&1` do run-log do toolkit deixava o stdout do `nano` como um pipe em vez de um TTY de verdade, quebrando o endereçamento de teclado/cursor do ncurses. Os dois editores agora falam direto com `/dev/tty`.
+
+### 2026-07-26
+
+- **Corrigido:** O bootstrap standalone de um clique agora corrige a propriedade de `~/.bc250-toolkit` antes de clonar como o usuário desktop, evitando `could not create work tree dir: Permission denied` após execuções anteriores como root.
+- **Corrigido:** As auto-atualizações via git agora rodam como o usuário desktop e corrigem a propriedade do checkout primeiro, evitando `dubious ownership`, `.git/FETCH_HEAD: Permission denied`, e prompts de salvamento da IDE causados por arquivos do repositório de propriedade do root.
+- **Corrigido:** A ativação em tempo real do ZSWAP agora persiste após reiniciar através de uma regra do systemd-tmpfiles em kernels SteamOS que ignoram `zswap.enabled=1`; o status também distingue ZSWAP configurado-mas-inativo.
+
+### 2026-07-23
+
+- **Adicionado:** A opção `Z` de `Extras` instala o plugin Decky Toolkit SteamOS Control pré-compilado. Instala o Decky Loader estável automaticamente quando necessário, copia o artefato do plugin já pronto, e reinicia o loader sem precisar de Node.js, pnpm, ou build local.
+- **Adicionado:** Controles de Pump Fan automático, manual e gerenciado com curva de quatro pontos para o sensor/canal PWM NCT da BC-250, além de controles opcionais de efeitos da LED bar quando `steamos-led.service` está presente.
+- **Adicionado:** Persistência SteamOS para a configuração de fan do Toolkit SteamOS Control e o serviço de fan gerenciado.
+- **Melhorado:** A interface do Decky separa as visões de Cooler e LED bar, preserva mudanças não salvas dos sliders durante o polling de status, e desabilita os controles de Pump Fan quando o sensor/canal PWM necessário não está disponível.
+
+### 2026-07-20
+
+- **Adicionado:** o `start.sh` agora se auto-atualiza a cada abertura. Quando rodado de um clone git, ele busca `origin/main` e reseta forçadamente para o commit mais recente, reexecutando se algo mudou. Quando rodado como script standalone, ele faz bootstrap do repositório completo em `~/.bc250-toolkit/bc250-steamos-real-toolkit` como antes.
+- **Removido:** a opção manual `Update Script` (`U`) do menu e a função `run_update_script()` não são mais necessárias porque as atualizações acontecem automaticamente na abertura.
+
+  *(Ambos foram revertidos na v1.0.0 acima — o auto-update na abertura acabou sendo destrutivo para mudanças locais em andamento.)*
+
+### 2026-07-19
+
+- **Adicionado:** o `start.sh` agora faz bootstrap automático quando baixado sozinho (ex.: o instalador de uma linha via `curl`). Se os assets vendorizados de `external/` estão faltando, ele busca o repositório completo do toolkit em `${REAL_HOME}/.bc250-toolkit/bc250-steamos-real-toolkit` via `git` (com fallback via `curl`+`tar`) e reexecuta a partir dali.
+- **Corrigido:** `cpu_governor_setup()` agora recria o `bc250-smu-oc.service` a partir de um `/etc/bc250-smu-oc.conf` existente quando o repositório vendorizado `bc250_smu_oc` não está presente, evitando a falha `Unit bc250-smu-oc.service does not exist`.
+
+### 2026-07-18
+
+- **Alterado:** o driver WiFi/BT USB AIC8800D80 saiu de "Install All" / "Install Manual" e foi para o menu `Extras`, usando agora `A` (instalar) e `R` (reverter). O driver não usa mais o `steamdeck-setup.sh` do fornecedor; ele compila e instala os módulos AIC8800, firmware, regra udev e dados do usb_modeswitch diretamente, WiFi apenas.
+- **Alterado:** os repositórios de correções da comunidade (`bc250_smu_oc`, `nct6687d`) e o repositório principal de correções agora são vendorizados/clonados em `$SCRIPT_DIR/external/` em vez de `~/.local/share/`, mantendo os assets locais e em cache. O `.gitignore` agora exclui artefatos de build de kernel gerados dentro de `external/`.
+- **Alterado:** as letras de opção do menu `Extras` foram reordenadas em ordem alfabética (`A`, `F`, `H`, `K`, `P`, `R`, `X`, `0`).
+- **Adicionado:** persistência de atualização do SteamOS. O toolkit rastreia componentes instalados em `${REAL_HOME}/.bc250-toolkit/installed-components`; habilitar a persistência em `Extras` (`P`) instala o `bc250-toolkit-persist.service` e uma lista de "keep" do atomic-update. Após uma atualização do SteamOS, o toolkit reinstala componentes perdidos e restaura configs salvas.
+- **Adicionado:** snapshots de configuração para overclock de CPU/GPU (`/etc/bc250-smu-oc.conf`, `/etc/cyan-skillfish-governor-smu/config.toml`) e CoolerControl (`/etc/coolercontrol`) que são restaurados automaticamente após reaplicar.
+- **Melhorado:** visibilidade de comandos em execução com mensagens concisas de progresso `[contexto] iniciando...` / `[contexto] concluído.` em `run_with_retry()` e `steamos_writable()` sem poluir a saída.
+- **Melhorado:** os logs de diagnóstico de erro agora incluem um trace completo de `set -x` e a saída capturada recente.
+- **Melhorado:** falhas de rede/download agora perguntam `[R]etentar` ou `[A]bortar`; os prompts são pulados no modo de reaplicação não assistida (`AUTO=1`).
+- **Melhorado:** o `Install All` rastreia as etapas concluídas e oferece retomar a partir da última etapa não finalizada na próxima execução.
+- **Corrigido:** a instalação de persistência não inicia mais o `bc250-toolkit-persist.service` imediatamente (apenas `enable`), evitando um travamento por reaplicação recursiva.
+- **Corrigido:** a instalação do WiFi/BT AIC8800 falhava com `Update persistence helper missing: /home/deck/tools/bc250/bc250-update-persistence.sh`. O toolkit agora cria um link do helper a partir do repositório de correções para o local esperado antes de rodar o `steamdeck-setup.sh`.
+- **Alterado:** as opções de instalar e reverter o driver WiFi/BT AIC8800 em `Extras` agora estão agrupadas em um submenu dedicado.
+- **Alterado:** as opções de habilitar e ver a Persistência de Atualização do SteamOS no menu principal agora estão agrupadas em um submenu (`E` / `V`).
+- **Corrigido:** a lista de persistência agora detecta e registra automaticamente componentes já instalados do toolkit, então nada se perde ao habilitar a persistência depois do fato.
+
+### 2026-07-17
+
+- **Corrigido:** o menu de status do ZSWAP mostrava "ZRAM desligado / ZSWAP ligado" mesmo quando `/sys/module/zswap/parameters/enabled` era `N` após reiniciar. O toolkit agora habilita o ZSWAP em tempo real imediatamente e só reporta LIGADO quando o parâmetro em tempo real é `Y`.
+- **Alterado:** o tamanho padrão do swapfile foi elevado para 32G e o swappiness padrão para 120, tanto na "Configuração de Swap" manual quanto no fluxo do "Install All".
+- **Alterado:** a opção 1 do menu principal agora lê "Instalar todas as otimizações necessárias" em sua descrição.
+- **Melhorado:** selecionar `0` para sair agora espera Enter antes de fechar, mantendo a janela do Konsole visível.
+
+### 2026-07-15
+
+- **Corrigido:** a Correção de Clock de Áudio/Vídeo DisplayPort falhava quando a release do kernel SteamOS continha apenas um SHA de commit curto. O toolkit agora resolve o commit completo via `git ls-remote` e o passa como `FULLSHA` para o script de patch do driver da comunidade, evitando o erro HTTP 422 da API do GitHub.
+- **Corrigido:** a Correção de Clock de Áudio/Vídeo DisplayPort parava durante a extração de dependências porque o pipeline `tar | sed | awk` do upstream saía cedo demais sob `pipefail`. O toolkit agora corrige essa incompatibilidade antes de rodar o build.
+- **Adicionado:** um aviso de atualização do SteamOS é mostrado a cada abertura e documentado em ambos os READMEs. Os usuários são instruídos a checar o status do toolkit após toda atualização e estar preparados para reinstalar componentes, especialmente com o canal Beta ativo.
+- **Melhorado:** sessões abertas pela área de trabalho agora usam `konsole --hold`, erros não tratados geram logs de diagnóstico, e os logs de erro são copiados para a Área de Trabalho quando disponível.
+- **Melhorado:** o `sudo` é autenticado uma vez no início e seu timestamp é renovado durante a sessão, então instaladores aninhados não devem pedir a senha repetidamente.
+
+### 2026-07-14
+
+- **Renomeado** o script principal de `bc250-tollkit-steam-os-real.sh` (erro de digitação) para `start.sh`. Atualizado o `TOOLKIT_RAW_URL` (auto-atualizador) e os comandos de instalação em ambos os READMEs de acordo.
+- **Corrigido:** `[ERR] failed to read cyan_skillfish.gfx1013.mmSPI_PG_ENABLE_STATIC_WGP_MASK with umr` reportado por usuários. `select_asic()` agora tenta auto-detectar o seletor ASIC correto via `umr -lb` antes de desistir, cobrindo placas onde o seletor padrão `cyan_skillfish.gfx1013` não bate.
+- **Corrigido:** `bc250-detect: command not found` quando o usuário já tinha o governor de CPU instalado e escolhia não reinstalar (respondendo `n`). O script ia direto para `cpu_governor_setup()` sem adicionar o diretório bin do pipx ao `PATH`. Corrigido sempre adicionando `/root/.local/bin` e `/home/deck/.local/bin` no início de `cpu_governor_setup()`.
+
+### 2026-07-12
+
+- **Corrigido:** o menu 2 → opção 9 (CU Unlock Live) fechava o toolkit inteiro quando o usuário apertava `q` para sair do gerenciador de CU. Causa raiz: `bc250-cu-live-manager.sh` chama `exit 0` ao sair, o que se propagava para o script pai. Corrigido rodando o subscript em uma subshell: `( bash "$CU_LIVE_MANAGER" )`.
+
+### 2026-07-11 (2)
+
+- **O `game-save-sync`** foi extraído para seu próprio repositório standalone: [nonsteam-save-sync](https://github.com/rpf16rj/nonsteam-save-sync). Não faz mais parte deste toolkit. Veja aquele repositório para instruções de instalação e uso.
+
+### 2026-07-11
+
+- Adicionado um instalador de driver do Xbox Wireless Adapter em **Extras**: instala `dkms`, `xone-dkms`, e `xone-dongle-firmware` via o AUR helper, coloca na blacklist drivers conflitantes (`xpad`, `mt76x2u`), e carrega o `xone` automaticamente.
+- Corrigido a atualização do repositório de Correções da Comunidade abortando quando um build anterior deixava artefatos locais (ex.: `amdgpu.ko.zst`) no checkout.
+
+### 2026-07-09
+
+- Simplificado e reorganizado todo o menu: **Install All**, **Install Manual**, **Perfis de Performance**, **Reverter/Desinstalar Tudo**, e **Extras** (sensores, CoolerControl, HDMI-CEC), além de acesso rápido a **Verificar Minha Configuração**, **Changelog**, **Atualizar Script**, e **Ajuda**.
+- Adicionado um atualizador embutido, um atalho de área de trabalho criado automaticamente no primeiro uso, e as Mitigações de CPU + CU Unlock Live agora fazem parte do fluxo de instalação/desinstalação em um clique.
+- Adicionado o ajuste de Swap/ZRAM→ZSWAP e o controle de HDMI-CEC / TV.
+- Corrigido um bug que impedia a interface de controle remoto do governor de GPU de funcionar corretamente.
+
+### 2026-07-08
+
+- Adicionado monitoramento de sensores e fan para o chip onboard da BC-250, com controle total de PWM opcional.
+- Adicionada a integração com CoolerControl para curvas de fan personalizadas.
+- Adicionado o menu de Correções da Comunidade (estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800).
+- Várias correções de confiabilidade de instalação validadas em hardware real.
+
+### 2026-07-06
+
+- Primeiro lançamento público: Install All / Uninstall All em um clique, CU Unlock Live, perfis de performance, log de erros automático, e reparo automático do keyring do pacman.
