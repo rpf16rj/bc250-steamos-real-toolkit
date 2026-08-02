@@ -7,6 +7,21 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.0.3 — 2026-08-02
+
+- **Fixed:** `install_audio_fix()`'s `audio_fix_resolve_fullsha()` helper ran
+  `git ls-remote https://github.com/Evlav/linux-integration.git` with no
+  timeout to pre-resolve the running kernel's full 40-char commit SHA. On at
+  least one occasion this call sent its HTTP/2 `git-upload-pack` request and
+  then never received a response (confirmed reproducible: a plain HTTPS GET
+  to the same URL returned instantly, but `git ls-remote` itself hung past
+  30s), freezing the whole "Install All" resume flow indefinitely right
+  after "Running patch-driver.sh...". The caller already tolerated a failed
+  lookup gracefully (`|| true`, falling back to letting `fetch-sources.sh`
+  resolve the commit itself via the GitHub REST API), but that fallback
+  never got a chance to run because the blocking call itself never returned.
+  Wrapped it in `timeout 15`.
+
 ## v1.0.2 — 2026-08-02
 
 - **Reverted:** `bc250-cyan-skillfish-gfxclk.patch`'s range-validation

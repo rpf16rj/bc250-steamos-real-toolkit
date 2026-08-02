@@ -7,6 +7,22 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.0.3 — 2026-08-02
+
+- **Corrigido:** o auxiliar `audio_fix_resolve_fullsha()` de
+  `install_audio_fix()` rodava `git ls-remote
+  https://github.com/Evlav/linux-integration.git` sem timeout pra resolver
+  antecipadamente o SHA completo (40 caracteres) do commit do kernel em
+  execução. Em pelo menos uma ocasião essa chamada enviou a requisição HTTP/2
+  `git-upload-pack` e nunca recebeu resposta (reproduzido e confirmado: um
+  GET HTTPS simples na mesma URL respondeu na hora, mas o `git ls-remote` em
+  si travou por mais de 30s), congelando todo o fluxo de retomada do
+  "Install All" logo após "Running patch-driver.sh...". O chamador já tolera
+  falha na resolução (`|| true`, caindo pro `fetch-sources.sh` resolver o
+  commit sozinho via API REST do GitHub), mas esse fallback nunca chegava a
+  rodar porque a chamada bloqueante em si nunca retornava. Envolvida em
+  `timeout 15`.
+
 ## v1.0.2 — 2026-08-02
 
 - **Revertido:** o wrapper de validação de faixa do
