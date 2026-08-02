@@ -44,7 +44,7 @@ index 8bd054d55179..7771ec17d1f3 100644
  		break;
  	case METRICS_CURR_SOCCLK:
  		*value = metrics->Current.SocclkFrequency;
-@@ -414,11 +433,15 @@ static ssize_t cyan_skillfish_get_gpu_metrics(struct smu_context *smu,
+@@ -414,11 +433,23 @@ static ssize_t cyan_skillfish_get_gpu_metrics(struct smu_context *smu,
  	struct gpu_metrics_v2_2 *gpu_metrics =
  		(struct gpu_metrics_v2_2 *)smu_table->gpu_metrics_table;
  	SmuMetrics_t metrics;
@@ -54,9 +54,17 @@ index 8bd054d55179..7771ec17d1f3 100644
  	ret = smu_cmn_get_metrics_table(smu, &metrics, true);
  	if (ret)
  		return ret;
-+	ret = cyan_skillfish_get_gfxclk_frequency(smu, &gfxclk);
-+	if (ret)
-+		return ret;
++	/*
++	 * A range-invalid (or transient) GFX clock reading must not abort
++	 * the whole metrics readout below -- temperature, GPU activity%,
++	 * and per-core CPU metrics all live in this same gpu_metrics struct
++	 * and are populated by this same function call. Discarding just the
++	 * gfxclk field and falling back to the raw metrics-table value keeps
++	 * every other sensor updating (fan control depends on it) even when
++	 * the direct SMU clock query is momentarily unreliable.
++	 */
++	if (cyan_skillfish_get_gfxclk_frequency(smu, &gfxclk))
++		gfxclk = metrics.Current.GfxclkFrequency;
  
  	smu_cmn_init_soft_gpu_metrics(gpu_metrics, 2, 2);
  

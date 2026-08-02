@@ -7,6 +7,23 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.0.1 — 2026-08-02
+
+- **Corrigido:** o `bc250-cyan-skillfish-gfxclk.patch` (introduzido na v1.0.0)
+  fazia `cyan_skillfish_get_gpu_metrics()` retornar cedo demais — descartando
+  a leitura *inteira* de `gpu_metrics` (temperatura da GPU, % de atividade da
+  GPU, e todas as métricas por-núcleo de CPU, não só o clock) — sempre que
+  sua própria consulta direta de clock GFX via SMU com validação de faixa
+  vinha fora de `CYAN_SKILLFISH_SCLK_MIN`/`MAX` ou falhava por outro motivo.
+  Na prática isso deixava o relato de carga/temperatura da GPU parado ou
+  mostrando 0% em idle, só "recuperando" quando a carga empurrava o clock de
+  volta pra faixa válida — o que por sua vez impedia a curva de fan
+  gerenciada de subir a tempo e podia deixar a placa superaquecer sob carga
+  sustentada. Agora a falha na consulta de clock só cai de volta pro valor
+  bruto (sem validação) `metrics.Current.GfxclkFrequency` para esse campo
+  específico; todos os outros sensores de `gpu_metrics` continuam
+  atualizando normalmente a cada leitura.
+
 ## v1.0.0 — 2026-08-02
 
 Primeira versão numerada. Adota versionamento semântico e GitHub Releases
