@@ -178,10 +178,10 @@ set -x
 # User-visible output is also saved to the run log.
 exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
-TOOLKIT_VERSION="v2026-08-02"
+TOOLKIT_VERSION="v$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.0.0")"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
-CHANGELOG_URL="${REPO_URL}#changelog"
-TOOLKIT_RAW_URL="https://raw.githubusercontent.com/rpf16rj/bc250-steamos-real-toolkit/main/start.sh"
+CHANGELOG_URL="${REPO_URL}/blob/main/CHANGELOG.md"
+RELEASES_URL="${REPO_URL}/releases/latest"
 
 # ==============================================================================
 # COLORS & FORMATTING
@@ -267,8 +267,11 @@ run_help() {
 
 run_changelog() {
     print_step "LOG" "Changelog"
-    print_info "Full list of changes/updates (README changelog section on GitHub):"
+    print_info "Full list of changes/updates (CHANGELOG.md on GitHub):"
     open_url "$CHANGELOG_URL"
+    echo ""
+    print_info "To check for a newer version, see the releases page:"
+    open_url "$RELEASES_URL"
 }
 
 ensure_desktop_shortcut() {
