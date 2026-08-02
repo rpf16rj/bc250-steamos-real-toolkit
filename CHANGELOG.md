@@ -7,6 +7,23 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.0.2 — 2026-08-02
+
+- **Reverted:** `bc250-cyan-skillfish-gfxclk.patch`'s range-validation
+  wrapper (added in v1.0.0, partially patched in v1.0.1) is fully reverted
+  back to the plain, unconditional direct SMU `GetGfxclkFrequency` query —
+  the version confirmed working before v1.0.0. Field testing of v1.0.1
+  showed GPU activity% recovering (as expected — that fix removed the
+  whole-struct abort) but GFX clock MHz still stuck at 0 and GPU
+  temperature still frozen: the fallback value used on a rejected/invalid
+  clock reading, `metrics.Current.GfxclkFrequency` from the firmware's
+  `SmuMetrics_t` table, is itself always stale/zero on this hardware — that
+  unreliability is exactly why the direct SMU message query was introduced
+  in the first place, so falling back to it was not a usable fix. Root
+  cause of the temperature freeze together with the MHz-stuck-at-0 report
+  needs further field investigation with this reverted baseline before any
+  further attempt at gfxclk range validation.
+
 ## v1.0.1 — 2026-08-02
 
 - **Fixed:** `bc250-cyan-skillfish-gfxclk.patch` (introduced in v1.0.0) made

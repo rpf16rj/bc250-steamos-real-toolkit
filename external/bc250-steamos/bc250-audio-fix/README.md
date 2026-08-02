@@ -45,7 +45,7 @@ override.
 | Patch | Operation |
 |---|---|
 | `bc250-cyan-skillfish-gpu-telemetry.patch` | Apply GC activity sampling while retaining `SmuMetrics_t` |
-| `bc250-cyan-skillfish-gfxclk.patch` | Apply direct SMU GFX-clock reporting, discarding out-of-range replies |
+| `bc250-cyan-skillfish-gfxclk.patch` | Apply direct SMU GFX-clock reporting via `PPSMC_MSG_GetGfxFrequency` |
 | `bc250-cyan-skillfish-8core-metrics.patch` | Real per-core power/temp/freq on Robin 3.00 8c/16t; `-ENODEV` fallback to `SmuMetrics_t` otherwise |
 
 ### Runtime Data
