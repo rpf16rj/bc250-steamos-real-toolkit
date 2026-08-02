@@ -2138,7 +2138,7 @@ audio_fix_resolve_fullsha() {
     local rel="${1:-$(uname -r)}" short fullsha
     short="${rel##*-g}"
     [[ "$short" =~ ^[0-9a-fA-F]{7,40}$ ]] || return 1
-    fullsha=$(git ls-remote https://github.com/Evlav/linux-integration.git 2>/dev/null \
+    fullsha=$(timeout 15 git ls-remote https://github.com/Evlav/linux-integration.git 2>/dev/null \
         | awk -v prefix="$short" '$1 ~ "^" prefix { print $1; exit }')
     [[ "$fullsha" =~ ^[0-9a-fA-F]{40}$ ]] || return 1
     printf '%s\n' "$fullsha"
