@@ -34,22 +34,9 @@ SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CU_LIVE_MANAGER="$SCRIPT_DIR/bc250-cu-live-manager.sh"
 EXTERNAL_DIR="$SCRIPT_DIR/external"
 
-# Keep the toolkit up-to-date on every launch. If this copy is a git clone,
-# fetch the latest main and re-execute when it changed. If this is a standalone
-# script (e.g. downloaded via curl), bootstrap the full repository and re-execute.
-if [[ -d "$SCRIPT_DIR/.git" ]]; then
-    if command -v git >/dev/null 2>&1; then
-        chown -R "$REAL_USER":"$REAL_USER" "$SCRIPT_DIR" 2>/dev/null || true
-        current_rev="$(runuser -u "$REAL_USER" -- git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || true)"
-        runuser -u "$REAL_USER" -- git -C "$SCRIPT_DIR" fetch origin main 2>/dev/null || true
-        remote_rev="$(runuser -u "$REAL_USER" -- git -C "$SCRIPT_DIR" rev-parse origin/main 2>/dev/null || echo "$current_rev")"
-        if [[ -n "$current_rev" && -n "$remote_rev" && "$current_rev" != "$remote_rev" ]]; then
-            echo "Updating toolkit to latest main..."
-            runuser -u "$REAL_USER" -- git -C "$SCRIPT_DIR" reset --hard origin/main || exit 1
-            exec bash "$SCRIPT_DIR/start.sh" "$@"
-        fi
-    fi
-elif [[ ! -d "$EXTERNAL_DIR/bc250_smu_oc" ]]; then
+# If this is a standalone script (e.g. downloaded via curl, no git clone),
+# bootstrap the full repository and re-execute.
+if [[ ! -d "$SCRIPT_DIR/.git" && ! -d "$EXTERNAL_DIR/bc250_smu_oc" ]]; then
     TOOLKIT_BASE_DIR="${REAL_HOME}/.bc250-toolkit"
     TOOLKIT_REPO_DIR="$TOOLKIT_BASE_DIR/bc250-steamos-real-toolkit"
     mkdir -p "$TOOLKIT_BASE_DIR"
