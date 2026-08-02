@@ -278,6 +278,21 @@ else
     die "GPU clock query patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
+step "apply Cyan Skillfish 8-core (Robin 3.00) per-core metrics patch"
+# Reads real per-core power/temp/freq from the PMSTATUSLOG SMU table via direct
+# PCIe register access on Robin 3.00 BIOS + 8c/16t (CPU Core Unlock) systems;
+# falls back to the stock 6-core metrics table (-ENODEV) on 6c/12t or other
+# BIOS/SMU versions, so this is safe to apply unconditionally.
+EIGHTCORE_PATCH=$HERE/bc250-cyan-skillfish-8core-metrics.patch
+if patch -p1 -R --dry-run -s -f < "$EIGHTCORE_PATCH" >/dev/null 2>&1; then
+    echo "8-core metrics patch already applied"
+elif patch -p1 --dry-run -s -f < "$EIGHTCORE_PATCH" >/dev/null 2>&1; then
+    patch -p1 -s < "$EIGHTCORE_PATCH"
+    echo "8-core metrics patch applied"
+else
+    die "8-core metrics patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+fi
+
 step "clock-gating patches (BC-250 idle power) — EXPERIMENTAL, opt-in"
 # Two layers, both off by default (a leftover copy from a previous build is
 # actively reversed, not tolerated):

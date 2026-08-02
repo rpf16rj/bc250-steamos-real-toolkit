@@ -63,6 +63,11 @@ Without their work, none of this would be possible. 🙏
 
 ## Changelog
 
+### 2026-08-02
+
+- **Added:** `bc250-cyan-skillfish-8core-metrics.patch` to `external/bc250-steamos/bc250-audio-fix`, vendored from [keyboardspecialist/bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos)'s newer combined patch set. On Robin 3.00 BIOS + a fully unlocked 8-core/16-thread topology (`CPU Core Unlock`), reads real per-core power/temperature/frequency for all 8 cores from the SMU's `PMSTATUSLOG` table via direct PCIe register access, instead of the firmware's stock `SmuMetrics_t` layout, which only ever carries 6 core entries — the previous audio-fix patch set silently duplicated/truncated per-core data on unlocked 8-core systems. Falls back to the stock 6-core `SmuMetrics_t` reporting (`-ENODEV`) on any other topology, so it's safe on unmodified 6c/12t systems too. Note: the upstream patch file as published was truncated (missing closing braces) — hand-completed and verified to apply cleanly and produce syntactically valid C against this toolkit's vendored kernel tree before vendoring.
+- **Changed:** `bc250-cyan-skillfish-gfxclk.patch` updated to upstream's newer version, which wraps the direct SMU GFX-clock query in range validation (discards readings outside `CYAN_SKILLFISH_SCLK_MIN`/`MAX` instead of propagating garbage values to `gpu_metrics`/hwmon).
+
 ### 2026-08-01
 
 - **Added:** `RAM/VRAM Split` in `Install Manual` (`10`/`10R`) and `Install All`/`Revert All`. Vendors [fanoush/bc250_memcfg](https://github.com/fanoush/bc250_memcfg) (compiled locally at install time) to drop `UMA_SIZE` from the stock permanent 8192MB (8GB/8GB) split down to the documented 512MB minimum in the BC-250's battery-backed CMOS, freeing almost all 16GB of RAM at idle, and raises the kernel's dynamic VRAM ceiling via `ttm.pages_limit` in GRUB (~12GB) so 8GB+ VRAM games don't crash on the lower split. No modded BIOS needed; status now reports the live `UMA_SIZE`. Fixed two follow-up bugs: the build step now force-reinstalls `glibc`/`base-devel` when `gcc` can't actually compile a plain C program (headers can go missing/stripped on the SteamOS overlay even with `gcc` present), and the post-write CMOS readback comparison now strips `bc250memcfg`'s zero-padded output (`0512`) before comparing.
