@@ -36,7 +36,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 ## Instalação Rápida
 
-1. Baixe o zip da [**última release**](https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/latest) na sua máquina SteamOS (Modo Desktop, ou `Download` na página de releases).
+1. Baixe o [**zip da última release**](https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/latest/download/bc250-steamos-real-toolkit-latest.zip) na sua máquina SteamOS (Modo Desktop).
 2. Extraia, abra um terminal na pasta extraída (Modo Desktop → Konsole), e execute:
 
 ```bash
