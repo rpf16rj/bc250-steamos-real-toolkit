@@ -236,6 +236,20 @@ if [ "$PREPARE_ONLY" = 1 ]; then
     exit 0
 fi
 
+step "reset patched files to pristine before applying the patch stack"
+# This tree is reused across runs (fetch-sources.sh skips re-checkout when
+# already at the right kernel commit) for speed. If a vendored patch's
+# *content* changes between runs -- not just the kernel commit -- the file
+# left over from a previous build can be in a state that neither applies
+# nor reverses cleanly against the new patch text ("tree has drifted").
+# Reset exactly the files our patch stack touches to their pristine
+# tree-checked-out state first, so patch application is deterministic no
+# matter what a previous run left behind.
+git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
+    drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
+    drivers/gpu/drm/amd/display/dc/clk_mgr/dcn201/dcn201_clk_mgr.c \
+    drivers/gpu/drm/amd/display/dc/clk_mgr/clk_mgr.c
+
 step "apply DP-audio patch (runbook step 7)"
 # SteamOS 3.8.x (6.16) needs both hunks; 3.9.x (6.18) already carries the
 # clk_mgr DCN 2.01 reorder upstream, leaving only the dcn201
