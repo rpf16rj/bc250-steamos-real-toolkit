@@ -7,6 +7,23 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.0.5 — 2026-08-03
+
+- **Fixed:** v1.0.4's full revert of `build.sh` to the 2026-08-01 state
+  dropped the pristine-tree-reset step ahead of the patch stack, exactly as
+  warned about at the time. This reintroduced the "tree has drifted" bug it
+  had fixed: `fetch-sources.sh` reuses the vendored kernel tree across runs
+  once it's at the right commit, so a file left in a state from a previous
+  patch attempt could fail to either apply or reverse cleanly against the
+  current patch text, aborting the build entirely. Hit in practice:
+  `apply Cyan Skillfish GPU telemetry patch` failed with exactly that error
+  on a real build attempt after the v1.0.4 revert. Manually reset the
+  affected tree (`cyan_skillfish_ppt.c`) back to pristine to unblock the
+  in-progress install, and reintroduced the reset step in `build.sh` —
+  scoped only to the files the current two-patch stack touches
+  (`cyan_skillfish_ppt.c`, `dcn201_clk_mgr.c`, `clk_mgr.c`), with no
+  8-core-metrics patch application alongside it.
+
 ## v1.0.4 — 2026-08-03
 
 - **Reverted:** `external/bc250-steamos/bc250-audio-fix/` (build system and
