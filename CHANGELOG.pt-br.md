@@ -7,6 +7,24 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.0.5 — 2026-08-03
+
+- **Corrigido:** o revert completo do `build.sh` pro estado de 2026-08-01 na
+  v1.0.4 removeu o passo de reset da árvore pro estado pristine antes da
+  stack de patches, exatamente como avisado na hora. Isso trouxe de volta o
+  bug de "árvore desviou" que aquele passo corrigia: o `fetch-sources.sh`
+  reaproveita a árvore de kernel vendorizada entre execuções assim que ela
+  já está no commit certo, então um arquivo deixado num estado de uma
+  tentativa de patch anterior podia falhar em aplicar OU reverter de forma
+  limpa contra o texto do patch atual, abortando a build inteira. Ocorreu na
+  prática: `apply Cyan Skillfish GPU telemetry patch` falhou com exatamente
+  esse erro numa build real depois do revert da v1.0.4. Resetei manualmente
+  a árvore afetada (`cyan_skillfish_ppt.c`) pro estado pristine pra
+  destravar a instalação em andamento, e reintroduzi o passo de reset no
+  `build.sh` — restrito só aos arquivos que a stack atual de dois patches
+  toca (`cyan_skillfish_ppt.c`, `dcn201_clk_mgr.c`, `clk_mgr.c`), sem
+  aplicar o patch de 8 núcleos junto.
+
 ## v1.0.4 — 2026-08-03
 
 - **Revertido:** `external/bc250-steamos/bc250-audio-fix/` (sistema de build
