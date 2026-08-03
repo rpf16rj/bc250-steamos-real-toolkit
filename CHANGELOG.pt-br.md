@@ -7,6 +7,25 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.0.4 — 2026-08-03
+
+- **Revertido:** `external/bc250-steamos/bc250-audio-fix/` (sistema de build
+  e conjunto de patches do fix de áudio/vídeo DisplayPort + métricas de GPU)
+  foi revertido de volta ao estado exato de 2026-08-01 (commit `1e3b9f0`, o
+  dia em que a opção de menu `bc250-detect` foi adicionada), em cima do
+  `gfxclk.patch` já revertido na v1.0.2. O
+  `bc250-cyan-skillfish-8core-metrics.patch` — adicionado em 2026-08-02,
+  totalmente novo naquele dia — foi removido; o `build.sh` não aplica mais
+  esse patch nem reseta a árvore vendorizada pra um checkout pristine antes
+  da stack de patches (também adicionado em 2026-08-02). O `README.md` foi
+  revertido pra bater. Efeito líquido: só restam o patch de clock de
+  áudio/vídeo DP, a telemetria de atividade via GC, e o `gfxclk` de consulta
+  direta via SMU sem validação, batendo com o último estado conhecido antes
+  do trabalho de métricas de 8 núcleos Robin 3.00 e suas
+  regressões/correções subsequentes (v1.0.0 até v1.0.3). Verificado que a
+  stack de dois patches resultante aplica limpa contra um checkout pristine
+  recém-criado.
+
 ## v1.0.3 — 2026-08-02
 
 - **Corrigido:** o auxiliar `audio_fix_resolve_fullsha()` de
