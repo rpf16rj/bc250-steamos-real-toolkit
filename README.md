@@ -36,7 +36,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 ## Quick Start
 
-1. Download the [**latest release zip**](https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/latest/download/bc250-steamos-real-toolkit-latest.zip) on your SteamOS machine (Desktop Mode).
+1. Download the zip from the [**latest release**](https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/latest) on your SteamOS machine (Desktop Mode).
 2. Extract it, open a terminal in the extracted folder (Desktop Mode → Konsole), and run:
 
 ```bash

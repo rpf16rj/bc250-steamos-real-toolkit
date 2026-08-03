@@ -36,7 +36,6 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           mkdir -p dist
           git archive --format=zip -o "dist/bc250-steamos-real-toolkit-${TAG}.zip" "$TAG"
-          cp "dist/bc250-steamos-real-toolkit-${TAG}.zip" "dist/bc250-steamos-real-toolkit-latest.zip"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -45,4 +44,3 @@ jobs:
           body_path: ${{ steps.changelog.outputs.notes_file }}
           files: |
             dist/bc250-steamos-real-toolkit-${{ github.ref_name }}.zip
-            dist/bc250-steamos-real-toolkit-latest.zip

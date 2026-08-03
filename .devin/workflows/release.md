@@ -7,8 +7,16 @@ or via short-lived feature branches merged into `develop`). `main` only ever
 receives fast-forward-free merges from `develop` at release time, and every
 commit on `main` corresponds to exactly one tagged release `vX.Y.Z`.
 
-When the user asks to "lançar uma versão" / "cut a release" / "release a new
-version", follow these steps:
+**Only cut a release when the user explicitly asks for one** ("lançar uma
+versão" / "cut a release" / "release a new version"). Do not release a new
+version on your own after every fix — accumulate work on `develop` instead.
+When the user does ask, they will give you the context of what the release
+should cover; base the changelog entry on that context, not on every commit
+message or internal debugging detail. Keep changelog entries short and
+user-facing (what changed and why it matters to someone running the
+toolkit) — skip anything irrelevant to the toolkit itself (e.g. process
+notes, reverted-then-re-reverted internal back-and-forth, verification
+steps taken). Follow these steps:
 
 1. Make sure all intended work is committed and pushed on `develop`.
    ```bash
@@ -24,12 +32,14 @@ version", follow these steps:
 
 3. Write the new release's changelog entry **at the top** of both:
    - `CHANGELOG.md` (English) — new `## vX.Y.Z — YYYY-MM-DD` heading above the
-     previous top entry, bullets grouped as **Added** / **Changed** / **Fixed** / **Removed**.
+     previous top entry, a short paragraph or a few bullets — no need to
+     group into Added/Changed/Fixed/Removed sections unless the release has
+     enough distinct changes to warrant it.
    - `CHANGELOG.pt-br.md` (Portuguese) — same structure, translated (não é
      tradução literal palavra-por-palavra, mas mesmo conteúdo/estrutura).
-   Base the bullets on the commits/diffs since the last release tag
-   (`git log <last-tag>..HEAD --oneline`) and on this session's own knowledge
-   of what changed.
+   Base the entry on the context the user gives you for this release, kept
+   simple and focused on user-facing impact — not a full commit-by-commit
+   history of everything that happened on `develop`.
 
 4. Update the `VERSION` file to the new version (no `v` prefix, e.g. `1.1.0`).
 
@@ -54,12 +64,9 @@ version", follow these steps:
 7. That's it — pushing the tag in step 6 triggers
    `.github/workflows/release.yml` on GitHub Actions, which:
    - extracts the `## vX.Y.Z` section from `CHANGELOG.md` as the release notes,
-   - builds `bc250-steamos-real-toolkit-vX.Y.Z.zip` via `git archive` on the
-     tag (only git-tracked files, so build caches/vendored kernel trees are
-     naturally excluded),
-   - also publishes a copy under the **fixed** name
-     `bc250-steamos-real-toolkit-latest.zip`, so the README's "latest
-     release" download link never changes across versions,
+   - builds **only** `bc250-steamos-real-toolkit-vX.Y.Z.zip` via `git archive`
+     on the tag (only git-tracked files, so build caches/vendored kernel
+     trees are naturally excluded) — no separate fixed-name "latest" zip,
    - and creates the GitHub Release itself using the built-in
      `GITHUB_TOKEN` — no manual step, `gh` CLI, or personal access token
      needed.
@@ -67,10 +74,10 @@ version", follow these steps:
    run succeeded, then verify the new release appears under
    `https://github.com/<owner>/<repo>/releases`.
 
-8. The README's Quick Start section already links to
-   `.../releases/latest/download/bc250-steamos-real-toolkit-latest.zip`
-   — no README changes needed for a routine release unless install
-   instructions themselves changed.
+8. The README's Quick Start section links to
+   `.../releases/latest` (the releases page, not a direct asset link) — no
+   README changes needed for a routine release unless install instructions
+   themselves changed.
 
 **Note:** if `.github/workflows/release.yml` didn't exist yet (or changed)
 at the commit a tag points to, GitHub Actions won't run it for that tag.
