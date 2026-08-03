@@ -236,20 +236,6 @@ if [ "$PREPARE_ONLY" = 1 ]; then
     exit 0
 fi
 
-step "reset patched files to pristine before applying the patch stack"
-# This tree is reused across runs (fetch-sources.sh skips re-checkout when
-# already at the right kernel commit) for speed. If a vendored patch's
-# *content* changes between runs -- not just the kernel commit -- the file
-# left over from a previous build can be in a state that neither applies
-# nor reverses cleanly against the new patch text ("tree has drifted").
-# Reset exactly the files our patch stack touches to their pristine
-# tree-checked-out state first, so patch application is deterministic no
-# matter what a previous run left behind.
-git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
-    drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
-    drivers/gpu/drm/amd/display/dc/clk_mgr/dcn201/dcn201_clk_mgr.c \
-    drivers/gpu/drm/amd/display/dc/clk_mgr/clk_mgr.c
-
 step "apply DP-audio patch (runbook step 7)"
 # SteamOS 3.8.x (6.16) needs both hunks; 3.9.x (6.18) already carries the
 # clk_mgr DCN 2.01 reorder upstream, leaving only the dcn201
@@ -290,21 +276,6 @@ elif patch -p1 --dry-run -s -f < "$GFXCLK_PATCH" >/dev/null 2>&1; then
     echo "GPU clock query patch applied"
 else
     die "GPU clock query patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-fi
-
-step "apply Cyan Skillfish 8-core (Robin 3.00) per-core metrics patch"
-# Reads real per-core power/temp/freq from the PMSTATUSLOG SMU table via direct
-# PCIe register access on Robin 3.00 BIOS + 8c/16t (CPU Core Unlock) systems;
-# falls back to the stock 6-core metrics table (-ENODEV) on 6c/12t or other
-# BIOS/SMU versions, so this is safe to apply unconditionally.
-EIGHTCORE_PATCH=$HERE/bc250-cyan-skillfish-8core-metrics.patch
-if patch -p1 -R --dry-run -s -f < "$EIGHTCORE_PATCH" >/dev/null 2>&1; then
-    echo "8-core metrics patch already applied"
-elif patch -p1 --dry-run -s -f < "$EIGHTCORE_PATCH" >/dev/null 2>&1; then
-    patch -p1 -s < "$EIGHTCORE_PATCH"
-    echo "8-core metrics patch applied"
-else
-    die "8-core metrics patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
 step "clock-gating patches (BC-250 idle power) — EXPERIMENTAL, opt-in"

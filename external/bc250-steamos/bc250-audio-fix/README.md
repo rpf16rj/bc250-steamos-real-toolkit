@@ -1,14 +1,10 @@
 # AMDGPU corrections
 
 Corrects DisplayPort video/audio timing and Cyan Skillfish GPU telemetry
-through one patched `amdgpu` module. GPU activity comes from GC status
-sampling, GFX clock comes from a direct SMU query (range-validated against
-CYAN_SKILLFISH_SCLK_MIN/MAX). On Robin 3.00 BIOS + unlocked 8-core/16-thread
-topologies, per-core CPU power/temperature/frequency comes from a direct read
-of the SMU's PMSTATUSLOG table (real per-core data for all 8 cores); every
-other topology (stock 6-core/12-thread, or 8-core on a different BIOS/SMU
-version) falls back to the firmware's published `SmuMetrics_t` six-entry
-layout.
+through one patched `amdgpu` module. Six-core and eight-core CPU topologies use
+the firmware's published `SmuMetrics_t` layout. GPU activity comes from GC
+status sampling, GFX clock comes from a direct SMU query, and per-core CPU
+metrics contain the firmware's six entries.
 
 ## Install
 
@@ -45,8 +41,7 @@ override.
 | Patch | Operation |
 |---|---|
 | `bc250-cyan-skillfish-gpu-telemetry.patch` | Apply GC activity sampling while retaining `SmuMetrics_t` |
-| `bc250-cyan-skillfish-gfxclk.patch` | Apply direct SMU GFX-clock reporting via `PPSMC_MSG_GetGfxFrequency` |
-| `bc250-cyan-skillfish-8core-metrics.patch` | Real per-core power/temp/freq on Robin 3.00 8c/16t; `-ENODEV` fallback to `SmuMetrics_t` otherwise |
+| `bc250-cyan-skillfish-gfxclk.patch` | Apply direct SMU GFX-clock reporting |
 
 ### Runtime Data
 
@@ -57,7 +52,7 @@ override.
 | `METRICS_CURR_GFXCLK` | `PPSMC_MSG_GetGfxFrequency` | Point-in-time MHz |
 | `gpu_metrics_v2_2.current_gfxclk` | `PPSMC_MSG_GetGfxFrequency` | Point-in-time MHz |
 | `gpu_metrics_v2_2.average_gfxclk_frequency` | `PPSMC_MSG_GetGfxFrequency` | Point-in-time MHz |
-| CPU core arrays | PMSTATUSLOG (Robin 3.00 8c/16t) or firmware `SmuMetrics_t` fallback | Eight or six per-core entries |
+| CPU core arrays | Firmware `SmuMetrics_t` | Six per-core entries |
 
 ### Activity Sampling
 
@@ -75,15 +70,11 @@ metrics caller.
 
 ### Core Count
 
-`cyan_skillfish_is_robin3_8core()` detects Robin 3.00 BIOS + a fully unlocked
-8-core/16-thread topology by checking the SMU firmware version, the core
-presence mask, and `num_present_cpus()`. When all three match, per-core power,
-temperature, and frequency come from a live PCIe-register read of the SMU's
-PMSTATUSLOG table (8 real per-core rows) instead of the firmware's published
-`SmuMetrics_t`, which only carries six. Any other topology (stock 6c/12t, or
-8c/16t on a BIOS/SMU version this check doesn't recognize) falls back to the
-six-entry `SmuMetrics_t` layout (`-ENODEV`). GPU activity and GFX clock
-reporting use topology-independent register and SMU sources.
+The runtime patches use the published `SmuMetrics_t` transfer size for stock
+6-core/12-thread and unlocked 8-core/16-thread topologies. AGESA and Linux expose
+the active topology. The firmware metrics ABI supplies six CPU rows. GPU
+activity and GFX clock reporting use topology-independent register and SMU
+sources.
 
 ## Commands
 
@@ -194,6 +185,5 @@ The complete fallback remains mandatory for the AMDGPU override. AIC8800 may ins
 | `bc250-dp-audio-clock-6.18.patch` | SteamOS 3.9.x display clock patch |
 | `bc250-cyan-skillfish-gpu-telemetry.patch` | Runtime GPU activity export using the published metrics layout |
 | `bc250-cyan-skillfish-gfxclk.patch` | Runtime GFX clock export using a direct SMU query |
-| `bc250-cyan-skillfish-8core-metrics.patch` | Real per-core metrics on Robin 3.00 8c/16t, falls back to `SmuMetrics_t` otherwise |
 | `bc250-cg-flags.patch` | Experimental GFX clock gating |
 | `bc250-cg-flags-unvalidated.patch` | Experimental expanded clock gating |
