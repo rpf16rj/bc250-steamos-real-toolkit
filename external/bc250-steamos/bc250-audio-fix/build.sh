@@ -18,6 +18,12 @@
 # adds bc250-cg-flags-unvalidated.patch on top (MC/SDMA/ATHUB/HDP/NBIO on
 # unvalidated register maps — can black-screen; bisect with amdgpu.cg_mask).
 #
+# --gfx1013 applies the GFX1013 compute queue fix patches (3 patches from
+# bc250-gfx1013-fix): repairs compute queue lifecycle on BC-250 for async
+# compute support. Requires matching Mesa/RADV patches for full functionality.
+# When --gfx1013 is used alone, audio fix patches are NOT applied. Use
+# --gfx1013 --audio to apply both sets of patches.
+#
 # Run on the BC-250 itself, as the normal user: the running kernel's
 # /proc/config.gz and `uname -r` are the ground truth everything is checked
 # against. On success amdgpu.ko.zst here is replaced — but only after the
@@ -32,6 +38,8 @@ step() { echo; echo "==> $*"; }
 
 WITH_CG=0
 WITH_CG_UNVAL=0
+WITH_GFX1013=0
+WITH_AUDIO=0
 PREPARE_ONLY=0
 ALLOW_MISSING_SYMVERS=0
 ARGS=()
@@ -39,11 +47,20 @@ for a in "$@"; do
     case "$a" in
         --cg)             WITH_CG=1 ;;
         --cg-unvalidated) WITH_CG=1; WITH_CG_UNVAL=1 ;;  # implies --cg
+        --gfx1013)        WITH_GFX1013=1 ;;
+        --audio)          WITH_AUDIO=1 ;;
         --prepare-only)   PREPARE_ONLY=1 ;;
         --allow-missing-symvers) ALLOW_MISSING_SYMVERS=1 ;;
         *)                ARGS+=("$a") ;;
     esac
 done
+
+# Default: apply audio fix patches unless --gfx1013 is used alone
+if [ "$WITH_GFX1013" = 1 ] && [ "$WITH_AUDIO" = 0 ]; then
+    WITH_AUDIO=0
+else
+    WITH_AUDIO=1
+fi
 [ "${#ARGS[@]}" -le 1 ] || die "usage: $0 [--cg|--cg-unvalidated] [--prepare-only] [--allow-missing-symvers] [kernel-tree]"
 [ "$ALLOW_MISSING_SYMVERS" = 0 ] || [ "$PREPARE_ONLY" = 1 ] \
     || die "--allow-missing-symvers requires --prepare-only"
@@ -245,51 +262,93 @@ step "reset patched files to pristine before applying the patch stack"
 # Reset exactly the files our patch stack touches to their pristine
 # tree-checked-out state first, so patch application is deterministic no
 # matter what a previous run left behind.
-git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
-    drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
-    drivers/gpu/drm/amd/display/dc/clk_mgr/dcn201/dcn201_clk_mgr.c \
-    drivers/gpu/drm/amd/display/dc/clk_mgr/clk_mgr.c
-
-step "apply DP-audio patch (runbook step 7)"
-# SteamOS 3.8.x (6.16) needs both hunks; 3.9.x (6.18) already carries the
-# clk_mgr DCN 2.01 reorder upstream, leaving only the dcn201
-# spread-spectrum-state hunk. New kernel major: check which hunks are upstream
-# before adding a variant here.
-case "$BASE" in
-    6.16.*) PATCH=$HERE/bc250-dp-audio-clock-6.16.patch ;;
-    6.18.*) PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
-    *)      die "no DP-audio patch variant for kernel $BASE — check which hunks are already upstream, then add a case above" ;;
-esac
-echo "kernel $BASE -> $(basename "$PATCH")"
-if patch -p1 -R --dry-run -s -f < "$PATCH" >/dev/null 2>&1; then
-    echo "patch already applied"
-elif patch -p1 --dry-run -s -f < "$PATCH" >/dev/null 2>&1; then
-    patch -p1 -s < "$PATCH"
-    echo "patch applied"
-else
-    die "patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+if [ "$WITH_AUDIO" = 1 ]; then
+    git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
+        drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
+        drivers/gpu/drm/amd/display/dc/clk_mgr/dcn201/dcn201_clk_mgr.c \
+        drivers/gpu/drm/amd/display/dc/clk_mgr/clk_mgr.c
+fi
+if [ "$WITH_GFX1013" = 1 ]; then
+    git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
+        drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c \
+        drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c
 fi
 
-step "apply Cyan Skillfish GPU telemetry patch"
-METRICS_PATCH=$HERE/bc250-cyan-skillfish-gpu-telemetry.patch
+if [ "$WITH_AUDIO" = 1 ]; then
+    step "apply DP-audio patch (runbook step 7)"
+    # SteamOS 3.8.x (6.16) needs both hunks; 3.9.x (6.18) already carries the
+    # clk_mgr DCN 2.01 reorder upstream, leaving only the dcn201
+    # spread-spectrum-state hunk. New kernel major: check which hunks are upstream
+    # before adding a variant here.
+    case "$BASE" in
+        6.16.*) PATCH=$HERE/bc250-dp-audio-clock-6.16.patch ;;
+        6.18.*) PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
+        *)      die "no DP-audio patch variant for kernel $BASE — check which hunks are already upstream, then add a case above" ;;
+    esac
+    echo "kernel $BASE -> $(basename "$PATCH")"
+    if patch -p1 -R --dry-run -s -f < "$PATCH" >/dev/null 2>&1; then
+        echo "patch already applied"
+    elif patch -p1 --dry-run -s -f < "$PATCH" >/dev/null 2>&1; then
+        patch -p1 -s < "$PATCH"
+        echo "patch applied"
+    else
+        die "patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 
-if patch -p1 -R --dry-run -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
-    echo "GPU telemetry patch already applied"
-elif patch -p1 --dry-run -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
-    patch -p1 -s < "$METRICS_PATCH"
-    echo "GPU telemetry patch applied"
+    step "apply Cyan Skillfish GPU telemetry patch"
+    METRICS_PATCH=$HERE/bc250-cyan-skillfish-gpu-telemetry.patch
+
+    if patch -p1 -R --dry-run -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
+        echo "GPU telemetry patch already applied"
+    elif patch -p1 --dry-run -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
+        patch -p1 -s < "$METRICS_PATCH"
+        echo "GPU telemetry patch applied"
+    else
+        die "GPU telemetry patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
+    GFXCLK_PATCH=$HERE/bc250-cyan-skillfish-gfxclk.patch
+    if patch -p1 -R --dry-run -s -f < "$GFXCLK_PATCH" >/dev/null 2>&1; then
+        echo "GPU clock query patch already applied"
+    elif patch -p1 --dry-run -s -f < "$GFXCLK_PATCH" >/dev/null 2>&1; then
+        patch -p1 -s < "$GFXCLK_PATCH"
+        echo "GPU clock query patch applied"
+    else
+        die "GPU clock query patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 else
-    die "GPU telemetry patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    step "skipping audio fix patches (--gfx1013 used without --audio)"
 fi
 
-GFXCLK_PATCH=$HERE/bc250-cyan-skillfish-gfxclk.patch
-if patch -p1 -R --dry-run -s -f < "$GFXCLK_PATCH" >/dev/null 2>&1; then
-    echo "GPU clock query patch already applied"
-elif patch -p1 --dry-run -s -f < "$GFXCLK_PATCH" >/dev/null 2>&1; then
-    patch -p1 -s < "$GFXCLK_PATCH"
-    echo "GPU clock query patch applied"
+step "GFX1013 compute queue fix patches (async compute support)"
+# Three patches from bc250-gfx1013-fix that repair compute queue lifecycle
+# on BC-250. Applied in order: mmio-pasid-route, compute-gfxoff-guard,
+# scoped-pasid-type0. Requires matching Mesa/RADV patches for full async
+# compute functionality.
+GFX1013_PATCHES=(
+    "$HERE/0001-gfx1013-mmio-pasid-route.patch"
+    "$HERE/0002-gfx1013-compute-gfxoff-guard.patch"
+    "$HERE/0003-gfx1013-scoped-pasid-type0.patch"
+)
+if [ "$WITH_GFX1013" = 1 ]; then
+    for p in "${GFX1013_PATCHES[@]}"; do
+        if patch -p1 -R --dry-run -s -f < "$p" >/dev/null 2>&1; then
+            echo "$(basename "$p") already applied"
+        elif patch -p1 --dry-run -s -f < "$p" >/dev/null 2>&1; then
+            patch -p1 -s < "$p"
+            echo "$(basename "$p") applied"
+        else
+            die "$(basename "$p") neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        fi
+    done
 else
-    die "GPU clock query patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    # Ensure GFX1013 patches are not present from a previous --gfx1013 build
+    for p in "${GFX1013_PATCHES[@]}"; do
+        if patch -p1 -R --dry-run -s -f < "$p" >/dev/null 2>&1; then
+            patch -p1 -R -s < "$p"
+            echo "$(basename "$p") REVERSED (leftover from a previous --gfx1013 build)"
+        fi
+    done
 fi
 
 step "clock-gating patches (BC-250 idle power) — EXPERIMENTAL, opt-in"

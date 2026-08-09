@@ -120,6 +120,10 @@ persist_detect_and_record_installed() {
     if find "/lib/modules/$(uname -r)/updates" -name 'amdgpu.ko*' 2>/dev/null | grep -q .; then
         persist_state_add "audio"
     fi
+    if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
+       && grep -q "VK_DRIVER_FILES=.*bc250-gfx1013" /etc/environment 2>/dev/null; then
+        persist_state_add "gfx1013"
+    fi
 }
 
 # Snapshots of /etc configuration files (custom CoolerControl curves, CPU/GPU
@@ -2172,7 +2176,7 @@ audio_fix_ensure_mkinitcpio_preset() {
     [[ -e "$expected" ]] && return 0
 
     local actual
-    actual=$(compgen -G "/etc/mkinitcpio.d/linux-neptune-616*.preset" | head -1)
+    actual=$(compgen -G "/etc/mkinitcpio.d/linux-neptune-6*.preset" | head -1)
     [[ -n "$actual" ]] || return 0
 
     print_info "mkinitcpio preset '$expected' missing; linking to '$(basename "$actual")' (non-standard kernel flavor)."
@@ -2263,6 +2267,183 @@ run_revert_audio_fix() {
 
     print_success "DisplayPort audio/video fix reverted to stock amdgpu.ko. Reboot to apply."
     persist_state_remove "audio"
+}
+
+gfx1013_ensure_mesa_build_deps() {
+    # SteamOS's immutable rootfs strips dev headers and .pc files from many
+    # packages to save space, even though pacman's local DB still lists the
+    # package as fully installed (owning those paths). Building Mesa from
+    # source needs those files back. This function force-reinstalls the
+    # packages known to hit this (found empirically building Mesa 26.2 with
+    # -Dplatforms=x11,wayland -Dllvm=disabled -Dvulkan-drivers=amd — x11 is
+    # required so the RADV ICD gets VK_KHR_xcb_surface/xlib_surface; without
+    # it, Proton/Wine games that create their Vulkan surface via XWayland
+    # fail to launch even though the compositor session itself is Wayland),
+    # so a single `pacman -S --overwrite` pass restores everything without
+    # guesswork or repeated failed meson runs.
+    local pkgs=(meson ninja python-mako python-packaging
+                glibc linux-api-headers libdrm wayland wayland-protocols
+                libffi systemd-libs libelf
+                libxcb libx11 libxext libxdamage libxfixes libxrandr
+                libxshmfence libxxf86vm libxrender libxau libxdmcp xorgproto
+                xcb-util xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image)
+    local need_install=0
+    command -v meson >/dev/null 2>&1 || need_install=1
+    command -v ninja >/dev/null 2>&1 || need_install=1
+    python3 -c "import packaging" 2>/dev/null || need_install=1
+    [[ -f /usr/include/stdio.h ]] || need_install=1
+    [[ -f /usr/include/linux/errno.h ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/libdrm.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/wayland-client.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/libffi.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/libudev.pc ]] || need_install=1
+    [[ -f /usr/include/gelf.h ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/xcb.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/x11.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/xrandr.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/xshmfence.pc ]] || need_install=1
+
+    [[ "$need_install" = 1 ]] || return 0
+
+    local root_free_mb
+    root_free_mb=$(df --output=avail -m / 2>/dev/null | tail -1 | tr -d ' ')
+    if [[ -n "$root_free_mb" ]] && (( root_free_mb < 300 )); then
+        print_info "${YELLOW}Warning:${RESET} only ${root_free_mb}MB free on / — restoring headers may fail if it runs out."
+        print_info "If it fails, free space first (e.g. 'sudo pacman -Rns rust' if installed and unused) and retry."
+    fi
+
+    print_info "Restoring dev headers/pkgconfig files SteamOS strips from its image (${pkgs[*]})..."
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || { print_info "Could not disable read-only mode."; return 1; }
+    fi
+    local rc=0
+    sudo pacman -S --needed --noconfirm --overwrite '*' "${pkgs[@]}" || rc=1
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+    return "$rc"
+}
+
+install_gfx1013_fix() {
+    print_step "GFX1013" "Installing GFX1013 Compute Queue Fix"
+
+    echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
+    echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
+    echo -e "  ${DIM}Fixes GPU compute queue lifecycle on BC-250 for async compute support.${RESET}"
+    echo -e "  ${DIM}Includes kernel patches + Mesa/RADV patches for full async compute functionality.${RESET}"
+    echo -e "  ${DIM}Performance gains of +20-25% in async compute workloads (e.g., Cyberpunk 2077).${RESET}"
+    echo ""
+    if ! confirm "Continue with the GFX1013 compute queue fix?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+
+    local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        fail_with_log "bc250-audio-fix directory not found in the fixes repository." "GFX1013 Fix — missing directory"
+        return 1
+    fi
+
+    print_info "Running patch-driver.sh --gfx1013 (fetch-sources.sh && build.sh --gfx1013 && install.sh)..."
+    print_info "This clones the matching Valve kernel source tree and can take several minutes."
+    
+    print_info "Step 1/5: Prefetching kernel headers..."
+    audio_fix_prefetch_headers "$fix_dir"
+    
+    print_info "Step 2/5: Preparing fetch-sources script..."
+    audio_fix_patch_fetch_sources "$fix_dir/fetch-sources.sh" || {
+        fail_with_log "Could not prepare the GFX1013 fix dependency fetch script." "GFX1013 Fix — fetch-sources compatibility patch"
+        return 1
+    }
+    
+    print_info "Step 3/5: Ensuring mkinitcpio preset..."
+    audio_fix_ensure_mkinitcpio_preset
+    
+    print_info "Step 4/5: Setting permissions and resolving kernel commit..."
+    chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
+    local fullsha patch_env=""
+    fullsha=$(audio_fix_resolve_fullsha || true)
+    if [[ -n "$fullsha" ]]; then
+        print_info "Resolved kernel commit ${fullsha:0:12}; passing full SHA to patch-driver.sh."
+        patch_env="export FULLSHA='$fullsha';"
+    else
+        print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
+    fi
+    
+    print_info "Step 5/5: Building and installing kernel module (this may take 5-10 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh --gfx1013"; then
+        fail_with_log "GFX1013 compute queue fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "GFX1013 Fix — patch-driver.sh"
+        return 1
+    fi
+
+    print_info "Kernel patches installed. Now building patched Mesa/RADV..."
+    local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
+    if [[ ! -d "$mesa_dir" ]]; then
+        fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "GFX1013 Fix — missing Mesa directory"
+        return 1
+    fi
+
+    # Check for meson, ninja, and the C build toolchain
+    print_info "Step 6/7: Checking for meson/ninja build tools and dev headers..."
+    if ! gfx1013_ensure_mesa_build_deps; then
+        fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "GFX1013 Fix — missing build deps"
+        return 1
+    fi
+
+    print_info "Step 7/7: Building Mesa/RADV (this may take 10-15 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh"; then
+        fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "GFX1013 Fix — build-mesa.sh"
+        return 1
+    fi
+
+    print_success "GFX1013 compute queue fix installed! Reboot required."
+    persist_state_add "gfx1013"
+    print_info "After reboot, async compute queues are enabled on the BC-250 GPU."
+    print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+    print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
+}
+
+run_revert_gfx1013_fix() {
+    print_step "R-GFX1013" "Revert GFX1013 Compute Queue Fix"
+
+    local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        print_info "Fixes repository not found locally — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will restore the stock amdgpu.ko module and remove patched Mesa. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    audio_fix_ensure_mkinitcpio_preset
+
+    if ! (cd "$fix_dir" && ./rollback.sh); then
+        fail_with_log "Failed to roll back the GFX1013 compute queue fix." "GFX1013 Fix — rollback.sh"
+        return 1
+    fi
+
+    # Remove patched Mesa installation
+    local mesa_dir="/opt/bc250-gfx1013"
+    if [[ -d "$mesa_dir" ]]; then
+        print_info "Removing patched Mesa from ${mesa_dir}..."
+        sudo rm -rf "$mesa_dir"
+    fi
+
+    # Remove VK_DRIVER_FILES from /etc/environment
+    local env_file="/etc/environment"
+    if [[ -f "$env_file" ]] && grep -q "VK_DRIVER_FILES" "$env_file"; then
+        print_info "Removing VK_DRIVER_FILES from ${env_file}..."
+        sudo sed -i '/VK_DRIVER_FILES/d' "$env_file"
+    fi
+
+    print_success "GFX1013 compute queue fix reverted to stock amdgpu.ko. Reboot to apply."
+    persist_state_remove "gfx1013"
 }
 
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
@@ -3626,6 +3807,27 @@ run_status() {
     fi
     echo -e "  ${CYAN}DP Audio/Video Fix${RESET} ${audio_icon} ${audio_color}${audio_label}${RESET}"
 
+    # The kernel side has no runtime marker to check (unlike the upstream
+    # Fedora installer, our direct module-replace approach doesn't add a
+    # /proc/cmdline flag or /sys/module note), so kernel status relies on
+    # persist_state (set by install_gfx1013_fix / detected retroactively by
+    # persist_detect_and_record_installed). Mesa status is verified directly
+    # from disk since the ICD json is a reliable on-disk signal.
+    local gfx1013_icon gfx1013_color gfx1013_label gfx1013_mesa_ok=0
+    compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 && gfx1013_mesa_ok=1
+    if persist_state_has "gfx1013" && (( gfx1013_mesa_ok )); then
+        if [[ "$resolved_amdgpu" == *"/updates/"* ]]; then
+            gfx1013_icon="$ICON_OK"; gfx1013_color="$GREEN"; gfx1013_label="kernel + Mesa/RADV active"
+        else
+            gfx1013_icon="$ICON_WARN"; gfx1013_color="$YELLOW"; gfx1013_label="installed — reboot pending"
+        fi
+    elif persist_state_has "gfx1013" || (( gfx1013_mesa_ok )); then
+        gfx1013_icon="$ICON_WARN"; gfx1013_color="$YELLOW"; gfx1013_label="incomplete (kernel or Mesa half missing)"
+    else
+        gfx1013_icon="$DIM"; gfx1013_color="$DIM"; gfx1013_label="not installed"
+    fi
+    echo -e "  ${CYAN}GFX1013 Compute Fix${RESET} ${gfx1013_icon} ${gfx1013_color}${gfx1013_label}${RESET}"
+
     local wifi_icon wifi_color wifi_label
     if aic8800_installed; then
         wifi_icon="$ICON_OK"; wifi_color="$GREEN"; wifi_label="installed"
@@ -3667,7 +3869,7 @@ run_install_all_step() {
 }
 
 run_install_all() {
-    print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock + CPU Core Unlock + RAM/VRAM Split"
+    print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock + CPU Core Unlock + RAM/VRAM Split + GFX1013 Compute"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -3689,13 +3891,14 @@ run_install_all() {
     run_install_all_step run_cu_live_manager || return 1
     run_install_all_step install_core_unlock auto || return 1
     run_install_all_step install_ram_split auto || return 1
+    run_install_all_step install_gfx1013_fix || return 1
 
     install_all_progress_clear
     print_success "Install All completed!"
 }
 
 run_revert_all() {
-    print_step "00-U" "Revert All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes"
+    print_step "00-U" "Revert All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + GFX1013 Compute"
     run_revert_cpu_governor
     echo ""
     run_revert_gpu_governor
@@ -3713,6 +3916,8 @@ run_revert_all() {
     run_revert_core_unlock
     echo ""
     run_revert_ram_split
+    echo ""
+    run_revert_gfx1013_fix
     echo ""
     run_revert_aic8800_wifi
 }
@@ -3742,6 +3947,8 @@ run_install_manual() {
         print_item "9R" "Revert CPU Core Unlock"          "Remove boot-time re-apply service"
         print_item "10"  "Install RAM/VRAM Split"        "UMA_SIZE=512 + ttm.pages_limit dynamic ceiling"
         print_item "10R" "Revert RAM/VRAM Split"         "Restore stock ${RAM_SPLIT_STOCK_UMA_MB}MB split"
+        print_item "11"  "Install GFX1013 Compute Fix"   "⚠  Kernel + Mesa/RADV: async compute (+20-25% perf)"
+        print_item "11R" "Revert GFX1013 Compute Fix"    "Restore stock amdgpu.ko + Mesa"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3767,6 +3974,8 @@ run_install_manual() {
             9R) run_revert_core_unlock;  press_enter ;;
             10) install_ram_split;       press_enter ;;
             10R) run_revert_ram_split;   press_enter ;;
+            11) install_gfx1013_fix;     press_enter ;;
+            11R) run_revert_gfx1013_fix; press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"

@@ -1,0 +1,41 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# systemd user-environment generator: pin the patched RADV ICD, but only on a
+# boot explicitly carrying the packaged V33 contract marker.
+
+set -eu
+
+grep -qw 'bc250.gfx1013_v33=1' /proc/cmdline || exit 0
+
+state=/etc/bc250-gfx1013/active.env
+[ -r "${state}" ] || exit 0
+
+# This file is written by install.sh and contains only validated release values.
+# shellcheck disable=SC1090
+. "${state}"
+
+case "${BC250_RELEASE_VERSION:-}" in
+    *[!0-9A-Za-z._-]*|'') exit 0 ;;
+esac
+
+icd="/opt/bc250-gfx1013/${BC250_RELEASE_VERSION}/share/vulkan/icd.d/radeon_icd.x86_64.json"
+[ -r "${icd}" ] || exit 0
+
+found=0
+for device_dir in /sys/bus/pci/devices/*; do
+    [ -r "${device_dir}/vendor" ] || continue
+    [ -r "${device_dir}/device" ] || continue
+    [ "$(cat "${device_dir}/vendor")" = '0x1002' ] || continue
+    [ "$(cat "${device_dir}/device")" = '0x13fe' ] || continue
+    found=1
+    break
+done
+
+[ "${found}" -eq 1 ] || exit 0
+
+# The Vulkan loader does not deduplicate ICD manifests: an icd.d drop-in ADDS
+# a second device and applications taking device 0 silently get the stock
+# driver. Pinning VK_DRIVER_FILES is what actually selects the patched RADV.
+printf '%s\n' \
+    "VK_DRIVER_FILES=${icd}" \
+    "VK_ICD_FILENAMES=${icd}"

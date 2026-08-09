@@ -13,6 +13,9 @@
 /external/nct6687d/*.mod.o
 /external/nct6687d/Module.symvers
 /external/nct6687d/modules.order
+/external/nct6687d/[0-9]*/
+/external/bc250-steamos/bc250-gfx1013-fix/build/
+/external/bc250-steamos/bc250-gfx1013-fix/build-mesa/
 /external/bc250-steamos/aic8800/src/USB/driver_fw/drivers/aic8800/steamos-headers/
 /external/bc250-steamos/aic8800/src/USB/driver_fw/drivers/aic8800/**/*.o
 /external/bc250-steamos/aic8800/src/USB/driver_fw/drivers/aic8800/**/*.ko

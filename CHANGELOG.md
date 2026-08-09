@@ -7,6 +7,42 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.1.0 — 2026-08-09
+
+- **Added:** GFX1013 Compute Queue Fix (menu option `11` / revert `11R`),
+  wrapping [DryhoppedIPA/bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix)
+  (vendored at `external/bc250-steamos/bc250-gfx1013-fix/`, plain files, no
+  nested `.git`, mirroring how every other vendored fix is stored). Repairs
+  the GFX1013 compute-queue lifecycle for async compute support: kernel side
+  via three new patches applied through `bc250-audio-fix/build.sh --gfx1013`
+  (new `--gfx1013`/`--audio` flags — `--gfx1013` alone skips the DP-audio
+  patch stack; add `--audio` to apply both), Mesa/RADV side via a separate
+  build (`build-mesa.sh`) that compiles a patched Mesa 26.2.0-rc3 into
+  `/opt/bc250-gfx1013/<version>/` and points `VK_DRIVER_FILES` at its RADV
+  ICD, leaving the system's stock Mesa untouched otherwise. Only the
+  compute-queue-fix Mesa patch is applied by default; the upstream
+  mesh/task-shader patches are left out of the series file per upstream's own
+  GPU-hang warning. New `GFX1013 Compute Fix` line on the main status
+  dashboard, `gfx1013_ensure_mesa_build_deps()` to restore the dev
+  headers/`.pc` files SteamOS's image strips (same class of fix as the
+  audio-fix build's dependency handling), and `persist_state`
+  tracking/auto-detection so the install survives a SteamOS atomic update.
+- **Fixed:** the first cut of `build-mesa.sh` configured Mesa with
+  `-Dplatforms=wayland`, which drops `VK_KHR_xcb_surface`/`VK_KHR_xlib_surface`
+  from the built RADV ICD. Most Proton/Wine games create their Vulkan surface
+  through XWayland (X11/XCB) even inside gamescope's Wayland session, so
+  `vkCreateXcbSurfaceKHR` had no extension to call — games failed to launch
+  (reproduced with Forza Horizon 5; some titles like Mortal Kombat 1 worked
+  regardless, likely via a Wayland-native surface path). Switched to
+  `-Dplatforms=x11,wayland`, matching the upstream installer, and added the
+  X11/XCB dev packages (`libxcb`, `libx11`, `libxrandr`, `xcb-util*`, etc.) to
+  `gfx1013_ensure_mesa_build_deps()`. Also, `VK_DRIVER_FILES` now lists the
+  stock 32-bit `radeon_icd.i686.json` alongside the patched 64-bit ICD
+  (`patched.json:stock-i686.json`) instead of replacing the driver list
+  outright — the patched build is 64-bit only, so without the fallback,
+  32-bit Vulkan processes (some launchers/anti-cheat components) would have
+  had no ICD at all.
+
 ## v1.0.5 — 2026-08-03
 
 - **Fixed:** v1.0.4's full revert of `build.sh` to the 2026-08-01 state

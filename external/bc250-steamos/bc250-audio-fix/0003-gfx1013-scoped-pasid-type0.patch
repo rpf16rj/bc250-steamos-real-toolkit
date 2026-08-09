@@ -1,0 +1,106 @@
+--- a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+@@ -230,18 +230,28 @@ static bool gmc_v10_0_get_atc_vmid_pasid_mapping_info(
+  * Flush the TLB for the requested page table.
+  */
+-static void gmc_v10_0_flush_gpu_tlb(struct amdgpu_device *adev, uint32_t vmid,
+-					uint32_t vmhub, uint32_t flush_type)
++static void gmc_v10_0_flush_gpu_tlb_internal(struct amdgpu_device *adev,
++					     uint32_t vmid, uint32_t vmhub,
++					     uint32_t flush_type,
++					     bool gfx1013_pasid_path)
+ {
+-	bool use_semaphore = gmc_v10_0_use_invalidate_semaphore(adev, vmhub);
++	bool use_semaphore;
+ 	struct amdgpu_vmhub *hub = &adev->vmhub[vmhub];
+-	u32 inv_req = hub->vmhub_funcs->get_invalidate_req(vmid, flush_type);
++	u32 inv_req;
+ 	/* Use register 17 for GART */
+ 	const unsigned int eng = 17;
+ 	unsigned char hub_ip = 0;
+ 	u32 sem, req, ack;
+ 	unsigned int i;
+ 	u32 tmp;
+ 
++	if (gfx1013_pasid_path && vmhub == AMDGPU_GFXHUB(0) &&
++	    flush_type == 2)
++		flush_type = 0;
++
++	use_semaphore = gmc_v10_0_use_invalidate_semaphore(adev, vmhub) ||
++		(gfx1013_pasid_path && vmhub == AMDGPU_GFXHUB(0));
++	inv_req = hub->vmhub_funcs->get_invalidate_req(vmid, flush_type);
++
+ 	sem = hub->vm_inv_eng0_sem + hub->eng_distance * eng;
+ 	req = hub->vm_inv_eng0_req + hub->eng_distance * eng;
+ 	ack = hub->vm_inv_eng0_ack + hub->eng_distance * eng;
+@@ -253,7 +263,8 @@ static void gmc_v10_0_flush_gpu_tlb(struct amdgpu_device *adev, uint32_t vmid,
+ 	/* This is necessary for SRIOV as well as for GFXOFF to function
+ 	 * properly under bare metal
+ 	 */
+-	if (adev->gfx.kiq[0].ring.sched.ready && !adev->enable_mes &&
++	if (!gfx1013_pasid_path &&
++	    adev->gfx.kiq[0].ring.sched.ready && !adev->enable_mes &&
+ 	    (amdgpu_sriov_runtime(adev) || !amdgpu_sriov_vf(adev))) {
+ 		amdgpu_gmc_fw_reg_write_reg_wait(adev, req, ack, inv_req,
+ 						 1 << vmid, GET_INST(GC, 0));
+@@ -314,6 +325,13 @@ static void gmc_v10_0_flush_gpu_tlb(struct amdgpu_device *adev, uint32_t vmid,
+ 			vmhub);
+ }
+ 
++static void gmc_v10_0_flush_gpu_tlb(struct amdgpu_device *adev, uint32_t vmid,
++					uint32_t vmhub, uint32_t flush_type)
++{
++	gmc_v10_0_flush_gpu_tlb_internal(adev, vmid, vmhub, flush_type,
++					   false);
++}
++
+ /**
+  * gmc_v10_0_flush_gpu_tlb_pasid - tlb flush via pasid
+  *
+@@ -332,6 +350,9 @@ static void gmc_v10_0_flush_gpu_tlb_pasid(struct amdgpu_device *adev,
+ {
+ 	uint16_t queried;
+ 	int vmid, i;
++	bool gfx1013_pasid_path =
++		adev->pdev->device == 0x13FE &&
++		amdgpu_ip_version(adev, GC_HWIP, 0) == IP_VERSION(10, 1, 3);
+ 
+ 	for (vmid = 1; vmid < AMDGPU_NUM_VMID; vmid++) {
+ 		bool valid;
+@@ -344,11 +365,21 @@ static void gmc_v10_0_flush_gpu_tlb_pasid(struct amdgpu_device *adev,
+ 		if (all_hub) {
+ 			for_each_set_bit(i, adev->vmhubs_mask,
+ 					 AMDGPU_MAX_VMHUBS)
+-				gmc_v10_0_flush_gpu_tlb(adev, vmid, i,
+-							flush_type);
++				if (gfx1013_pasid_path)
++					gmc_v10_0_flush_gpu_tlb_internal(
++						adev, vmid, i, flush_type, true);
++				else
++					gmc_v10_0_flush_gpu_tlb(
++						adev, vmid, i, flush_type);
+ 		} else {
+-			gmc_v10_0_flush_gpu_tlb(adev, vmid, AMDGPU_GFXHUB(0),
+-						flush_type);
++			if (gfx1013_pasid_path)
++				gmc_v10_0_flush_gpu_tlb_internal(
++					adev, vmid, AMDGPU_GFXHUB(0),
++					flush_type, true);
++			else
++				gmc_v10_0_flush_gpu_tlb(
++					adev, vmid, AMDGPU_GFXHUB(0),
++					flush_type);
+ 		}
+ 	}
+ }
+@@ -978,6 +1009,10 @@ static int gmc_v10_0_hw_init(struct amdgpu_ip_block *ip_block)
+ 		dev_info(adev->dev,
+ 			 "GFX1013/BC-250: using MMIO PASID TLB flushes\n");
+ 
++	if (amdgpu_ip_version(adev, GC_HWIP, 0) == IP_VERSION(10, 1, 3))
++		dev_info(adev->dev,
++			 "GFX1013/BC-250: PASID-only CPU type-0 invalidation\n");
++
+ 	/* The sequence of these two function calls matters.*/
+ 	gmc_v10_0_init_golden_registers(adev);
+ 
