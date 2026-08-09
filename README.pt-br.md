@@ -25,7 +25,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 - Integração com CoolerControl para curvas de fan personalizadas via interface web
 - Plugin Decky Toolkit SteamOS Control pré-compilado, com controles automático/manual/gerenciado da Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
 - Controle de HDMI-CEC / TV e receiver
-- Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800
+- Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, correção da fila de compute GFX1013 (compute assíncrono, kernel + Mesa/RADV patchados)
 - Instalação em um clique, atalho de área de trabalho automático, e lançamentos versionados com changelog — tudo totalmente reversível
 
 ## Sistema Compatível
@@ -36,7 +36,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 ## Instalação Rápida
 
-1. Baixe o [**zip da última release**](https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/latest/download/bc250-steamos-real-toolkit-latest.zip) na sua máquina SteamOS (Modo Desktop).
+1. Baixe o zip na página da [**última release**](https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/latest) na sua máquina SteamOS (Modo Desktop).
 2. Extraia, abra um terminal na pasta extraída (Modo Desktop → Konsole), e execute:
 
 ```bash
@@ -52,6 +52,7 @@ Para atualizar depois, baixe o zip da release mais nova, extraia por cima da pas
 Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um agradecimento enorme a:
 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (correção ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, controle HDMI-CEC)
+- [DryhoppedIPA](https://github.com/DryhoppedIPA) — [bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix) (patches de kernel + Mesa/RADV para a fila de compute GFX1013)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (driver de controle PWM dos fans)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (patch de kernel para o desbloqueio de 40 CUs)
 - [rw-r-r-0644](https://github.com/rw-r-r-0644) — [bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock) (desbloqueio de núcleos de CPU, 6c/12t → 8c/16t)

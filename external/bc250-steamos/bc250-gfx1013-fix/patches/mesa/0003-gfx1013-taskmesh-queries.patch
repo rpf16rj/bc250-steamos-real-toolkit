@@ -1,0 +1,78 @@
+From Mon Sep 17 00:00:00 2001
+From: DryhoppedIPA <DryhoppedIPA@users.noreply.github.com>
+Date: Sat, 8 Aug 2026 04:53:11 +0000
+Subject: [PATCH 3/3] radv: mesh/task pipeline-statistics queries on GFX1013
+
+Reuse RADV's existing GFX10.3 mesh-shader query emulation, retaining the
+device's real GFX10.1 identity and the 14-slot result layout required by
+the task and mesh statistic indices.
+---
+ src/amd/common/ac_gpu_info.c          | 1 +
+ src/amd/common/ac_gpu_info.h          | 1 +
+ src/amd/vulkan/radv_physical_device.c | 4 ++--
+ src/amd/vulkan/radv_query.c           | 3 ++-
+ 4 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/amd/common/ac_gpu_info.c b/src/amd/common/ac_gpu_info.c
+index b607af0..3fc2abb 100644
+--- a/src/amd/common/ac_gpu_info.c
++++ b/src/amd/common/ac_gpu_info.c
+@@ -1039,6 +1039,7 @@ void ac_fill_bug_info(struct radeon_info *info)
+    /* GFX1013 remains a GFX10.1 device; never promote gfx_level. */
+    info->has_gfx1013_mesh_shading = info->family == CHIP_GFX1013;
+    info->has_gfx1013_task_shading = info->has_gfx1013_mesh_shading;
++   info->has_gfx1013_mesh_queries = info->has_gfx1013_task_shading;
+ 
+    info->has_export_conflict_bug = info->gfx_level == GFX11;
+ 
+diff --git a/src/amd/common/ac_gpu_info.h b/src/amd/common/ac_gpu_info.h
+index 0236010..227831e 100644
+--- a/src/amd/common/ac_gpu_info.h
++++ b/src/amd/common/ac_gpu_info.h
+@@ -292,6 +292,7 @@ struct radeon_info {
+    bool has_taskmesh_indirect0_bug;
+    bool has_gfx1013_mesh_shading;
+    bool has_gfx1013_task_shading;
++   bool has_gfx1013_mesh_queries;
+    bool sdma_supports_sparse;      /* Whether SDMA can safely access sparse resources. */
+    bool sdma_supports_compression; /* Whether SDMA supports DCC and HTILE. */
+    bool has_set_context_pairs;
+diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
+index 8794ff8..93adbd4 100644
+--- a/src/amd/vulkan/radv_physical_device.c
++++ b/src/amd/vulkan/radv_physical_device.c
+@@ -1369,7 +1369,7 @@ radv_physical_device_get_features(const struct radv_physical_device *pdev, struc
+       .taskShader = task_en,
+       .multiviewMeshShader = full_mesh_features,
+       .primitiveFragmentShadingRateMeshShader = full_mesh_features,
+-      .meshShaderQueries = false,
++      .meshShaderQueries = pdev->info.has_gfx1013_mesh_queries,
+ 
+       /* VK_EXT_depth_clip_control */
+       .depthClipControl = true,
+@@ -2743,7 +2743,7 @@ radv_physical_device_try_create(struct radv_instance *instance, drmDevicePtr drm
+ 
+    pdev->emulate_ngg_gs_query_pipeline_stat = pdev->use_ngg && pdev->info.gfx_level < GFX11;
+ 
+-   pdev->emulate_mesh_shader_queries = pdev->info.gfx_level == GFX10_3;
++   pdev->emulate_mesh_shader_queries = pdev->info.gfx_level == GFX10_3 || pdev->info.has_gfx1013_mesh_queries;
+ 
+    /* PKT3_LOAD_SH_REG_INDEX is supported on GFX8+, but it hangs with compute queues until GFX10.3. */
+    pdev->load_grid_size_from_user_sgpr = pdev->info.gfx_level >= GFX10_3;
+diff --git a/src/amd/vulkan/radv_query.c b/src/amd/vulkan/radv_query.c
+index bf1ca5b..c7cea5b 100644
+--- a/src/amd/vulkan/radv_query.c
++++ b/src/amd/vulkan/radv_query.c
+@@ -411,7 +411,8 @@ radv_get_pipelinestat_query_size(struct radv_device *device)
+     * invocations, it's easier to use the same size as GFX11.
+     */
+    const struct radv_physical_device *pdev = radv_device_physical(device);
+-   unsigned num_results = pdev->info.gfx_level >= GFX10_3 ? 14 : 11;
++   unsigned num_results =
++      pdev->info.gfx_level >= GFX10_3 || pdev->info.has_gfx1013_mesh_queries ? 14 : 11;
+    return num_results * 8;
+ }
+ 
+-- 
+2.55.0
+

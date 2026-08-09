@@ -1,0 +1,12 @@
+# Mesa patch series for GFX1013 (BC-250), applied in order against
+# pristine mesa-26.2.0-rc3 with `git apply` / `patch -p1`.
+#
+# Comment out a line with '#' to skip that patch. 0001 is the compute
+# fix and is required; 0002 and 0003 are optional features. 0003
+# requires 0002.
+#
+# 0002/0003 are DISABLED: mesh/task shading on GFX1013 can hang the GPU
+# unrecoverably (failed ring reset takes the machine down).
+0001-gfx1013-compute-queue-fix.patch
+#0002-gfx1013-mesh-task-shaders.patch
+#0003-gfx1013-taskmesh-queries.patch

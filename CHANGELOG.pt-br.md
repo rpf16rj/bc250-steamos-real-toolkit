@@ -7,6 +7,46 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.1.0 — 2026-08-09
+
+- **Adicionado:** Correção da Fila de Compute GFX1013 (opção `11` do menu /
+  reverter com `11R`), envolvendo o
+  [DryhoppedIPA/bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix)
+  (vendorizado em `external/bc250-steamos/bc250-gfx1013-fix/`, arquivos
+  simples, sem `.git` aninhado, seguindo o mesmo padrão das outras correções
+  vendorizadas). Corrige o ciclo de vida da fila de compute da GFX1013 para
+  suporte a compute assíncrono: lado kernel via três novos patches aplicados
+  através do `bc250-audio-fix/build.sh --gfx1013` (novas flags
+  `--gfx1013`/`--audio` — `--gfx1013` sozinha pula a stack de patches de
+  áudio DP; adicione `--audio` para aplicar as duas); lado Mesa/RADV via uma
+  build separada (`build-mesa.sh`) que compila um Mesa 26.2.0-rc3 patchado em
+  `/opt/bc250-gfx1013/<versão>/` e aponta o `VK_DRIVER_FILES` para o ICD
+  RADV dele, deixando o Mesa padrão do sistema intocado no resto. Só o patch
+  de correção da fila de compute é aplicado por padrão; os patches upstream
+  de mesh/task shaders ficam de fora da série, conforme o próprio aviso do
+  upstream sobre risco de travar a GPU. Nova linha `GFX1013 Compute Fix` no
+  dashboard de status principal, `gfx1013_ensure_mesa_build_deps()` para
+  restaurar os headers de desenvolvimento/arquivos `.pc` que a imagem do
+  SteamOS remove (mesma classe de correção já usada na build do audio-fix), e
+  rastreamento/auto-detecção via `persist_state` para a instalação sobreviver
+  a uma atualização atômica do SteamOS.
+- **Corrigido:** a primeira versão do `build-mesa.sh` configurava o Mesa com
+  `-Dplatforms=wayland`, o que remove `VK_KHR_xcb_surface`/`VK_KHR_xlib_surface`
+  do ICD RADV gerado. A maioria dos jogos Proton/Wine cria sua superfície
+  Vulkan via XWayland (X11/XCB) mesmo dentro da sessão Wayland do gamescope,
+  então `vkCreateXcbSurfaceKHR` não tinha extensão para chamar — os jogos
+  falhavam ao iniciar (reproduzido com Forza Horizon 5; alguns títulos como
+  Mortal Kombat 1 funcionavam mesmo assim, provavelmente por um caminho de
+  superfície nativo Wayland). Trocado para `-Dplatforms=x11,wayland`, igual
+  ao instalador upstream, e adicionadas as dependências de desenvolvimento
+  X11/XCB (`libxcb`, `libx11`, `libxrandr`, `xcb-util*`, etc.) ao
+  `gfx1013_ensure_mesa_build_deps()`. Além disso, o `VK_DRIVER_FILES` agora
+  lista o ICD stock de 32 bits (`radeon_icd.i686.json`) junto com o ICD
+  patchado de 64 bits (`patchado.json:stock-i686.json`) em vez de substituir
+  a lista de drivers por completo — a build patchada é só 64 bits, então sem
+  esse fallback, processos Vulkan de 32 bits (alguns launchers/componentes
+  de anti-cheat) ficariam sem nenhum ICD.
+
 ## v1.0.5 — 2026-08-03
 
 - **Corrigido:** o revert completo do `build.sh` pro estado de 2026-08-01 na

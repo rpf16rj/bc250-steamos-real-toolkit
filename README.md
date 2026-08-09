@@ -25,7 +25,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 - CoolerControl integration for custom fan curves via a web UI
 - Prebuilt Toolkit SteamOS Control Decky plugin with Pump Fan automatic/manual/managed controls, four-point profiles, and optional LED bar controls
 - HDMI-CEC / TV & receiver control
-- Community-sourced fixes: ACPI power states, DisplayPort audio/video clock fix, AIC8800 WiFi/BT driver
+- Community-sourced fixes: ACPI power states, DisplayPort audio/video clock fix, AIC8800 WiFi/BT driver, GFX1013 compute queue fix (async compute, patched kernel + Mesa/RADV)
 - One-click install, automatic desktop shortcut, and versioned releases with a changelog — everything is fully revertible
 
 ## Compatible System
@@ -36,7 +36,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 ## Quick Start
 
-1. Download the [**latest release zip**](https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/latest/download/bc250-steamos-real-toolkit-latest.zip) on your SteamOS machine (Desktop Mode).
+1. Download the zip from the [**latest release**](https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/latest) on your SteamOS machine (Desktop Mode).
 2. Extract it, open a terminal in the extracted folder (Desktop Mode → Konsole), and run:
 
 ```bash
@@ -52,6 +52,7 @@ To update later, download the newest release zip, extract it over the old folder
 This toolkit builds on top of great work from the BC-250 community. Huge thanks to:
 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (ACPI fix, DisplayPort audio/video fix, AIC8800 WiFi/BT driver, HDMI-CEC control)
+- [DryhoppedIPA](https://github.com/DryhoppedIPA) — [bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix) (GFX1013 compute queue kernel + Mesa/RADV patches)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (PWM fan control driver)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (kernel patch for the 40 CU unlock)
 - [rw-r-r-0644](https://github.com/rw-r-r-0644) — [bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock) (CPU core unlock, 6c/12t → 8c/16t)
