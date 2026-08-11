@@ -7,6 +7,14 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.1.2 — 2026-08-11
+
+- **Corrigido:** a etapa de build do Mesa da correção GFX1013 podia falhar
+  durante o `meson setup` com `Could not get define 'ETIME'` em algumas
+  combinações de glibc/GCC (notavelmente GCC 15.x). O script de build agora
+  detecta o define faltante e injeta um fallback (`-DETIME=ETIMEDOUT`) para
+  que a configuração complete com sucesso.
+
 ## v1.1.1 — 2026-08-11
 
 - **Corrigido:** a correção GFX1013 (e a correção de áudio comum, que usa a

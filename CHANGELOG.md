@@ -7,6 +7,13 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.1.2 — 2026-08-11
+
+- **Fixed:** Mesa build step of the GFX1013 fix could fail during `meson setup`
+  with `Could not get define 'ETIME'` on some glibc/GCC combinations (notably
+  GCC 15.x). The build script now detects the missing define and injects a
+  fallback (`-DETIME=ETIMEDOUT`) so configuration completes successfully.
+
 ## v1.1.1 — 2026-08-11
 
 - **Fixed:** the GFX1013 fix (and the plain audio fix, which shares the same
