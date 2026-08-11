@@ -7,6 +7,13 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.1.1 — 2026-08-11
+
+- **Corrigido:** a correção GFX1013 (e a correção de áudio comum, que usa a
+  mesma etapa de build) podia falhar ao instalar em alguns sistemas por um
+  erro de compilador em uma ferramenta de build do kernel sem relação com a
+  correção, desbloqueando a etapa afetada do build.
+
 ## v1.1.0 — 2026-08-09
 
 - **Novo:** Correção de Compute GFX1013 (opção 11 do menu) — melhora o
