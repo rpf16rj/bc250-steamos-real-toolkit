@@ -78,6 +78,17 @@ if [[ -d build ]]; then
     rm -rf build
 fi
 
+# Mesa's meson.build calls cc.get_define('ETIME', prefix : '#include <errno.h>')
+# and errors out if it can't find it. On some glibc/gcc combinations (notably
+# GCC 15.x with newer glibc), ETIME is only visible under _GNU_SOURCE, which
+# the meson check doesn't set. Detect and inject a fallback define so the
+# configure step doesn't abort.
+EXTRA_MESON_ARGS=()
+if ! echo '#include <errno.h>' | cc -dM -E -x c - 2>/dev/null | grep -qw ETIME; then
+    echo "ETIME not visible to compiler from <errno.h>; adding -DETIME=ETIMEDOUT fallback"
+    EXTRA_MESON_ARGS+=("-Dc_args=-DETIME=ETIMEDOUT")
+fi
+
 meson setup build \
     -Dvulkan-drivers=amd \
     -Dgallium-drivers= \
@@ -85,7 +96,8 @@ meson setup build \
     -Dglx=disabled \
     -Dllvm=disabled \
     -Dbuildtype=release \
-    -Dprefix="$MESA_PREFIX"
+    -Dprefix="$MESA_PREFIX" \
+    "${EXTRA_MESON_ARGS[@]}"
 
 step "Build Mesa"
 ninja -C build
