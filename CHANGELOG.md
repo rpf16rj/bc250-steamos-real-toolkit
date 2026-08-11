@@ -7,6 +7,13 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.1.1 — 2026-08-11
+
+- **Fixed:** the GFX1013 fix (and the plain audio fix, which shares the same
+  build step) could fail to install on some systems with a compiler error
+  deep in an unrelated kernel build tool, unblocking the affected step in
+  the build.
+
 ## v1.1.0 — 2026-08-09
 
 - **New:** GFX1013 Compute Fix (menu option 11) — improves GPU compute

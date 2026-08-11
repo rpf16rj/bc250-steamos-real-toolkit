@@ -36,6 +36,24 @@ REL=$(uname -r)
 die()  { echo "FATAL: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
 
+# modules_prepare builds host-side tools (notably tools/bpf/resolve_btfids,
+# needed when CONFIG_DEBUG_INFO_BTF_MODULES is set) against tools/lib/bpf/,
+# whose Makefile hardcodes -Werror with no WERROR=0 escape hatch (unlike its
+# sibling tools/lib/{subcmd,api}/Makefile, which already guard it). libbpf.c's
+# kallsyms/path-resolution helpers trip -Wdiscarded-qualifiers on some
+# gcc/glibc combinations (varies with the exact kernel commit fetched for the
+# running release, and the host toolchain snapshot), turning a harmless
+# warning in a build-only helper binary into a fatal error that aborts the
+# whole module build before amdgpu is even touched. Relax -Werror for this
+# host tool only; it has no bearing on the compiled amdgpu.ko.
+relax_libbpf_host_tool_werror() {
+    local mk="tools/lib/bpf/Makefile"
+    [ -f "$mk" ] || return 0
+    grep -q '^override CFLAGS += -Werror -Wall$' "$mk" || return 0
+    sed -i 's/^override CFLAGS += -Werror -Wall$/override CFLAGS += -Wall/' "$mk"
+    echo "relaxed -Werror in tools/lib/bpf/Makefile (host-tool build only, does not affect amdgpu.ko)"
+}
+
 WITH_CG=0
 WITH_CG_UNVAL=0
 WITH_GFX1013=0
@@ -238,6 +256,7 @@ fi
 
 if [ "$PREPARE_ONLY" = 1 ]; then
     step "modules_prepare + config re-verify"
+    relax_libbpf_host_tool_werror
     make -j"$(nproc)" modules_prepare
     grep -q '^#define CONFIG_SCHED_CLASS_EXT 1' include/generated/autoconf.h \
         || die "CONFIG_SCHED_CLASS_EXT missing from autoconf.h after modules_prepare"
@@ -402,6 +421,7 @@ else
 fi
 
 step "modules_prepare + config re-verify (runbook step 7)"
+relax_libbpf_host_tool_werror
 make -j"$(nproc)" modules_prepare
 grep -q '^#define CONFIG_SCHED_CLASS_EXT 1' include/generated/autoconf.h \
     || die "CONFIG_SCHED_CLASS_EXT missing from autoconf.h after modules_prepare — syncconfig rewrote the config behind your back; check pahole"
