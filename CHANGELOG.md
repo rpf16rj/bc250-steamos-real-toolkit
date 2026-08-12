@@ -7,6 +7,13 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.1.3 — 2026-08-12
+
+- **Fixed:** Mesa build still failed with `Could not get define 'ETIME'` even
+  with the v1.1.2 fix, because `-Dc_args` doesn't affect Meson's compiler
+  checks. The fallback define is now exported via `CFLAGS` instead, which
+  Meson's `cc.get_define()` actually respects.
+
 ## v1.1.2 — 2026-08-11
 
 - **Fixed:** Mesa build step of the GFX1013 fix could fail during `meson setup`
