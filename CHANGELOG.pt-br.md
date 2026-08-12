@@ -7,6 +7,13 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.1.3 — 2026-08-12
+
+- **Corrigido:** o build do Mesa ainda falhava com `Could not get define 'ETIME'`
+  mesmo com o fix da v1.1.2, porque `-Dc_args` não afeta as verificações de
+  compilador do Meson. O define de fallback agora é exportado via `CFLAGS`,
+  que o `cc.get_define()` do Meson de fato respeita.
+
 ## v1.1.2 — 2026-08-11
 
 - **Corrigido:** a etapa de build do Mesa da correção GFX1013 podia falhar
