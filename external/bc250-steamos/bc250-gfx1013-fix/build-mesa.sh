@@ -81,12 +81,14 @@ fi
 # Mesa's meson.build calls cc.get_define('ETIME', prefix : '#include <errno.h>')
 # and errors out if it can't find it. On some glibc/gcc combinations (notably
 # GCC 15.x with newer glibc), ETIME is only visible under _GNU_SOURCE, which
-# the meson check doesn't set. Detect and inject a fallback define so the
-# configure step doesn't abort.
-EXTRA_MESON_ARGS=()
+# the meson check doesn't set. Meson's get_define() uses CFLAGS from the
+# environment (not -Dc_args, which only applies to project source compilation),
+# so we export CFLAGS with the fallback define before running meson setup.
+# ETIME=ETIMEDOUT is the same fallback Mesa itself uses for systems without
+# ETIME (e.g. FreeBSD).
 if ! echo '#include <errno.h>' | cc -dM -E -x c - 2>/dev/null | grep -qw ETIME; then
-    echo "ETIME not visible to compiler from <errno.h>; adding -DETIME=ETIMEDOUT fallback"
-    EXTRA_MESON_ARGS+=("-Dc_args=-DETIME=ETIMEDOUT")
+    echo "ETIME not visible to compiler from <errno.h>; exporting CFLAGS with -DETIME=ETIMEDOUT fallback"
+    export CFLAGS="${CFLAGS:-} -DETIME=ETIMEDOUT"
 fi
 
 meson setup build \
@@ -96,8 +98,7 @@ meson setup build \
     -Dglx=disabled \
     -Dllvm=disabled \
     -Dbuildtype=release \
-    -Dprefix="$MESA_PREFIX" \
-    "${EXTRA_MESON_ARGS[@]}"
+    -Dprefix="$MESA_PREFIX"
 
 step "Build Mesa"
 ninja -C build
