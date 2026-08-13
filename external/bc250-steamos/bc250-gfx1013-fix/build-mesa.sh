@@ -78,17 +78,19 @@ if [[ -d build ]]; then
     rm -rf build
 fi
 
-# Mesa's meson.build calls cc.get_define('ETIME', prefix : '#include <errno.h>')
-# and errors out if it can't find it. On some glibc/gcc combinations (notably
-# GCC 15.x with newer glibc), ETIME is only visible under _GNU_SOURCE, which
-# the meson check doesn't set. Meson's get_define() uses CFLAGS from the
-# environment (not -Dc_args, which only applies to project source compilation),
-# so we export CFLAGS with the fallback define before running meson setup.
-# ETIME=ETIMEDOUT is the same fallback Mesa itself uses for systems without
-# ETIME (e.g. FreeBSD).
+# Mesa's meson.build has a fallback for systems without ETIME (e.g. FreeBSD):
+#   if cc.get_define('ETIME', prefix : '#include <errno.h>') == ''
+#     pre_args += '-DETIME=ETIMEDOUT'
+#   endif
+# But on Meson 1.8.2 + GCC 15.x + glibc 2.43, cc.get_define() errors out
+# instead of returning '' when the define is missing (glibc hides ETIME behind
+# _GNU_SOURCE). Patch the check to use cc.has_define() which returns a bool
+# instead of throwing, so the fallback actually works.
 if ! echo '#include <errno.h>' | cc -dM -E -x c - 2>/dev/null | grep -qw ETIME; then
-    echo "ETIME not visible to compiler from <errno.h>; exporting CFLAGS with -DETIME=ETIMEDOUT fallback"
-    export CFLAGS="${CFLAGS:-} -DETIME=ETIMEDOUT"
+    echo "ETIME not visible from <errno.h>; patching meson.build to use has_define()"
+    sed -i "/# Support systems without ETIME/,/^endif$/ {
+        s/cc\.get_define('ETIME', prefix : '#include <errno\.h>') == ''/not cc.has_define('ETIME', prefix : '#include <errno.h>')/
+    }" meson.build
 fi
 
 meson setup build \
