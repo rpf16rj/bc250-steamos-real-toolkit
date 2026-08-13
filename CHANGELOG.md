@@ -7,6 +7,15 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.1.4 — 2026-08-13
+
+- **Fixed:** Mesa build still failed with `Could not get define 'ETIME'` on
+  systems with GCC 15.x + glibc 2.43 (e.g. SteamOS 3.8.16). The root cause is
+  that Meson 1.8.2's `cc.get_define()` errors out instead of returning an
+  empty string when a define is missing, breaking Mesa's own ETIME fallback.
+  The build script now patches Mesa's `meson.build` to use `cc.has_define()`
+  (which returns a boolean) instead, so the fallback works as intended.
+
 ## v1.1.3 — 2026-08-12
 
 - **Fixed:** Mesa build still failed with `Could not get define 'ETIME'` even
