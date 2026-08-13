@@ -7,6 +7,15 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.1.4 — 2026-08-13
+
+- **Corrigido:** o build do Mesa ainda falhava com `Could not get define 'ETIME'`
+  em sistemas com GCC 15.x + glibc 2.43 (ex.: SteamOS 3.8.16). A causa raiz é
+  que o `cc.get_define()` do Meson 1.8.2 erroa em vez de retornar string vazia
+  quando o define está faltando, quebrando o próprio fallback do Mesa. O script
+  de build agora patcheia o `meson.build` do Mesa para usar `cc.has_define()`
+  (que retorna booleano), fazendo o fallback funcionar corretamente.
+
 ## v1.1.3 — 2026-08-12
 
 - **Corrigido:** o build do Mesa ainda falhava com `Could not get define 'ETIME'`
