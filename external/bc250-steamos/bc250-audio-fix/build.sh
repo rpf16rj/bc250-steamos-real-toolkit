@@ -285,7 +285,8 @@ if [ "$WITH_AUDIO" = 1 ]; then
     git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
         drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
         drivers/gpu/drm/amd/display/dc/clk_mgr/dcn201/dcn201_clk_mgr.c \
-        drivers/gpu/drm/amd/display/dc/clk_mgr/clk_mgr.c
+        drivers/gpu/drm/amd/display/dc/clk_mgr/clk_mgr.c \
+        drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
 fi
 if [ "$WITH_GFX1013" = 1 ]; then
     git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
@@ -335,17 +336,38 @@ if [ "$WITH_AUDIO" = 1 ]; then
     else
         die "GPU clock query patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
+
+    step "apply DP spread spectrum disable patch (amdgpu_dm)"
+    DM_SS_PATCH=$HERE/bc250-dp-audio-dm-ignore-ss.patch
+    if patch -p1 -R --dry-run -s -f < "$DM_SS_PATCH" >/dev/null 2>&1; then
+        echo "DM spread spectrum patch already applied"
+    elif patch -p1 --dry-run -s -f < "$DM_SS_PATCH" >/dev/null 2>&1; then
+        patch -p1 -s < "$DM_SS_PATCH"
+        echo "DM spread spectrum patch applied"
+    else
+        die "DM spread spectrum patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
+    step "apply tunable gfxclk/activity cache patch"
+    CACHE_PATCH=$HERE/bc250-tunable-gfxclk-activity-cache.patch
+    if patch -p1 -R --dry-run -s -f < "$CACHE_PATCH" >/dev/null 2>&1; then
+        echo "tunable cache patch already applied"
+    elif patch -p1 --dry-run -s -f < "$CACHE_PATCH" >/dev/null 2>&1; then
+        patch -p1 -s < "$CACHE_PATCH"
+        echo "tunable cache patch applied"
+    else
+        die "tunable cache patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 else
     step "skipping audio fix patches (--gfx1013 used without --audio)"
 fi
 
 step "GFX1013 compute queue fix patches (async compute support)"
-# Three patches from bc250-gfx1013-fix that repair compute queue lifecycle
-# on BC-250. Applied in order: mmio-pasid-route, compute-gfxoff-guard,
-# scoped-pasid-type0. Requires matching Mesa/RADV patches for full async
-# compute functionality.
+# Patches that repair compute queue lifecycle on BC-250. The mmio-pasid-route
+# fix (0001) is already in the vendored valve-kernel tree, so only
+# compute-gfxoff-guard and scoped-pasid-type0 are applied here.
+# Requires matching Mesa/RADV patches for full async compute functionality.
 GFX1013_PATCHES=(
-    "$HERE/0001-gfx1013-mmio-pasid-route.patch"
     "$HERE/0002-gfx1013-compute-gfxoff-guard.patch"
     "$HERE/0003-gfx1013-scoped-pasid-type0.patch"
 )

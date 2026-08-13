@@ -1,0 +1,145 @@
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c	2026-08-13 08:26:55.565791200 -0300
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c	2026-08-13 08:27:20.502713446 -0300
+@@ -63,12 +63,43 @@
+ 
+ static uint32_t cyan_skillfish_sclk_default;
+ 
++static uint cs_gfxclk_cache_ms = 200;
++module_param(cs_gfxclk_cache_ms, uint, 0644);
++MODULE_PARM_DESC(cs_gfxclk_cache_ms,
++		"GetGfxclkFrequency mailbox cache window in ms (0 = off)");
++
++static uint cs_activity_cache_ms = 200;
++module_param(cs_activity_cache_ms, uint, 0644);
++MODULE_PARM_DESC(cs_activity_cache_ms,
++		"GPU activity GRBM sample cache window in ms (0 = off)");
++
++struct cyan_skillfish_metrics_cache {
++	SmuMetrics_t metrics;
++	spinlock_t gfxclk_lock;
++	unsigned long gfxclk_time;
++	uint32_t gfxclk;
++	bool gfxclk_valid;
++	spinlock_t gpu_activity_lock;
++	unsigned long gpu_activity_time;
++	uint16_t gpu_activity;
++};
++
+ static uint16_t cyan_skillfish_get_gpu_activity(struct smu_context *smu)
+ {
+ 	struct amdgpu_device *adev = smu->adev;
++	struct cyan_skillfish_metrics_cache *cache = smu->smu_table.metrics_table;
++	unsigned long flags, now = jiffies;
++	uint16_t activity;
+ 	unsigned int busy = 0;
++	unsigned int cache_ms = cs_activity_cache_ms;
+ 	int i;
+ 
++	if (cache_ms && cache->gpu_activity_time &&
++	    time_before(now, cache->gpu_activity_time +
++			msecs_to_jiffies(cache_ms))) {
++		return cache->gpu_activity;
++	}
++
+ 	/* The firmware table has no GFX activity field. Sample GUI_ACTIVE over
+ 	 * a short window so gpu_metrics does not expose the 0xffff sentinel.
+ 	 */
+@@ -79,7 +110,49 @@
+ 			udelay(50);
+ 	}
+ 
+-	return DIV_ROUND_CLOSEST(busy * 10000, 32);
++	activity = DIV_ROUND_CLOSEST(busy * 10000, 32);
++
++	spin_lock_irqsave(&cache->gpu_activity_lock, flags);
++	cache->gpu_activity = activity;
++	cache->gpu_activity_time = jiffies;
++	spin_unlock_irqrestore(&cache->gpu_activity_lock, flags);
++
++	return activity;
++}
++
++static int cyan_skillfish_get_current_gfxclk(struct smu_context *smu,
++							uint32_t *value, uint32_t fallback)
++{
++	struct cyan_skillfish_metrics_cache *cache = smu->smu_table.metrics_table;
++	unsigned long flags, now = jiffies;
++	unsigned int cache_ms = cs_gfxclk_cache_ms;
++	int ret;
++
++	if (cache_ms) {
++		spin_lock_irqsave(&cache->gfxclk_lock, flags);
++		if (cache->gfxclk_valid &&
++		    time_before(now, cache->gfxclk_time +
++					msecs_to_jiffies(cache_ms))) {
++			*value = cache->gfxclk;
++			spin_unlock_irqrestore(&cache->gfxclk_lock, flags);
++			return 0;
++		}
++		spin_unlock_irqrestore(&cache->gfxclk_lock, flags);
++	}
++
++	ret = smu_cmn_send_smc_msg(smu, SMU_MSG_GetGfxclkFrequency, value);
++	if (ret)
++		*value = fallback;
++
++	if (!ret && cache_ms) {
++		spin_lock_irqsave(&cache->gfxclk_lock, flags);
++		cache->gfxclk = *value;
++		cache->gfxclk_time = jiffies;
++		cache->gfxclk_valid = true;
++		spin_unlock_irqrestore(&cache->gfxclk_lock, flags);
++	}
++
++	return ret;
+ }
+ 
+ #define FEATURE_MASK(feature) (1ULL << feature)
+@@ -118,10 +191,16 @@
+ 				PAGE_SIZE,
+ 				AMDGPU_GEM_DOMAIN_VRAM);
+ 
+-	smu_table->metrics_table = kzalloc(sizeof(SmuMetrics_t), GFP_KERNEL);
++	smu_table->metrics_table = kzalloc(sizeof(struct cyan_skillfish_metrics_cache), GFP_KERNEL);
+ 	if (!smu_table->metrics_table)
+ 		goto err0_out;
+ 
++	{
++		struct cyan_skillfish_metrics_cache *metrics_cache = smu_table->metrics_table;
++		spin_lock_init(&metrics_cache->gfxclk_lock);
++		spin_lock_init(&metrics_cache->gpu_activity_lock);
++	}
++
+ 	ret = smu_driver_table_init(smu, SMU_DRIVER_TABLE_GPU_METRICS,
+ 				    sizeof(struct gpu_metrics_v2_2),
+ 				    SMU_GPU_METRICS_CACHE_INTERVAL);
+@@ -164,8 +243,7 @@
+ 
+ 	switch (member) {
+ 	case METRICS_CURR_GFXCLK:
+-		ret = smu_cmn_send_smc_msg(smu, SMU_MSG_GetGfxclkFrequency,
+-					       value);
++		ret = cyan_skillfish_get_current_gfxclk(smu, value, 0);
+ 		break;
+ 	case METRICS_CURR_SOCCLK:
+ 		*value = metrics->Current.SocclkFrequency;
+@@ -227,7 +305,8 @@
+ 		ret = cyan_skillfish_get_smu_metrics_data(smu,
+ 						   METRICS_CURR_GFXCLK,
+ 						   (uint32_t *)data);
+-		*(uint32_t *)data *= 100;
++		if (!ret)
++			*(uint32_t *)data *= 100;
+ 		*size = 4;
+ 		break;
+ 	case AMDGPU_PP_SENSOR_GFX_MCLK:
+@@ -423,8 +502,7 @@
+ 	ret = smu_cmn_get_metrics_table(smu, &metrics, true);
+ 	if (ret)
+ 		return ret;
+-	ret = smu_cmn_send_smc_msg(smu, SMU_MSG_GetGfxclkFrequency,
+-				       &gfxclk);
++	ret = cyan_skillfish_get_current_gfxclk(smu, &gfxclk, 0);
+ 	if (ret)
+ 		return ret;
+ 
