@@ -82,15 +82,33 @@ fi
 #   if cc.get_define('ETIME', prefix : '#include <errno.h>') == ''
 #     pre_args += '-DETIME=ETIMEDOUT'
 #   endif
-# But on Meson 1.8.2 + GCC 15.x + glibc 2.43, cc.get_define() errors out
-# instead of returning '' when the define is missing (glibc hides ETIME behind
-# _GNU_SOURCE). Patch the check to use cc.has_define() which returns a bool
-# instead of throwing, so the fallback actually works.
+# On glibc 2.43, ETIME is hidden behind _GNU_SOURCE. Mesa builds with
+# _GNU_SOURCE (added to pre_args), so ETIME is available at compile time —
+# but Meson's get_define() checks using only the prefix string, which does
+# NOT include _GNU_SOURCE. The preprocessor fails with
+# "Could not get define 'ETIME'" instead of returning empty.
+# cc.has_define() doesn't help because it calls get_define() internally.
+#
+# Strategy:
+# 1. If ETIME is visible without _GNU_SOURCE → no patch needed (our case,
+#    glibc 2.41).
+# 2. If ETIME is visible WITH _GNU_SOURCE → patch the get_define prefix in
+#    meson.build to include '#define _GNU_SOURCE\n' before the #include.
+#    Meson interprets \n in single-quoted strings as a newline. get_define
+#    then finds ETIME=62 and the fallback is not triggered. No redefinition
+#    risk.
+# 3. If ETIME is truly absent (even with _GNU_SOURCE, e.g. FreeBSD) →
+#    replace the block with unconditional -DETIME=ETIMEDOUT.
 if ! echo '#include <errno.h>' | cc -dM -E -x c - 2>/dev/null | grep -qw ETIME; then
-    echo "ETIME not visible from <errno.h>; patching meson.build to use has_define()"
-    sed -i "/# Support systems without ETIME/,/^endif$/ {
-        s/cc\.get_define('ETIME', prefix : '#include <errno\.h>') == ''/not cc.has_define('ETIME', prefix : '#include <errno.h>')/
-    }" meson.build
+    if echo '#define _GNU_SOURCE
+#include <errno.h>' | cc -dM -E -x c - 2>/dev/null | grep -qw ETIME; then
+        echo "ETIME visible only with _GNU_SOURCE; patching meson.build get_define prefix"
+        sed -i "s|cc\.get_define('ETIME', prefix : '#include <errno\.h>')|cc.get_define('ETIME', prefix : '#define _GNU_SOURCE\\\\n#include <errno.h>')|" meson.build
+    else
+        echo "ETIME not visible even with _GNU_SOURCE; replacing check with unconditional -DETIME=ETIMEDOUT"
+        sed -i '/# Support systems without ETIME/,/^endif$/c\
+  pre_args += '"'"'-DETIME=ETIMEDOUT'"'"'' meson.build
+    fi
 fi
 
 meson setup build \

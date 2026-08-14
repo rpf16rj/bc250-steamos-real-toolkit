@@ -7,6 +7,17 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.1.5 — 2026-08-14
+
+- **Corrigido:** o build do Mesa ainda falhava com `Could not get define 'ETIME'`
+  no glibc 2.43 mesmo após o fix da v1.1.4. A causa raiz: `cc.has_define()`
+  chama `cc.get_define()` internamente, então lança o mesmo erro. O script de
+  build agora patcheia o prefix do `get_define` no `meson.build` para incluir
+  `#define _GNU_SOURCE` — o glibc 2.43 esconde o `ETIME` atrás do `_GNU_SOURCE`,
+  e o `get_define` do Meson usa apenas o prefix (não os `pre_args` do projeto).
+  Assim o `get_define` encontra `ETIME=62` diretamente, evitando tanto o erro
+  quanto qualquer conflito de redefinição.
+
 ## v1.1.4 — 2026-08-13
 
 - **Corrigido:** o build do Mesa ainda falhava com `Could not get define 'ETIME'`
