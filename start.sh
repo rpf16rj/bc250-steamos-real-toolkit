@@ -2449,6 +2449,82 @@ run_revert_gfx1013_fix() {
     persist_state_remove "gfx1013"
 }
 
+install_combined_fix() {
+    print_step "COMBO" "Installing DP Audio/Video + GFX1013 Compute Fix (combined build)"
+
+    echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
+    echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
+    echo -e "  ${DIM}Combines both fix sets in a single kernel build:${RESET}"
+    echo -e "  ${DIM}  • DP audio/video clock fix + GPU metrics + DP SS disable + tunable cache${RESET}"
+    echo -e "  ${DIM}  • GFX1013 compute queue fix for async compute support${RESET}"
+    echo -e "  ${DIM}  • Patched Mesa/RADV for full async compute functionality${RESET}"
+    echo -e "  ${DIM}  • Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3${RESET}"
+    echo ""
+    if ! confirm "Continue with the combined DP Audio + GFX1013 fix?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+
+    local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        fail_with_log "bc250-audio-fix directory not found in the fixes repository." "Combined Fix — missing directory"
+        return 1
+    fi
+
+    print_info "Running patch-driver.sh --gfx1013 --audio (single kernel build with both patch sets)..."
+    print_info "This clones the matching Valve kernel source tree and can take several minutes."
+
+    audio_fix_prefetch_headers "$fix_dir"
+    audio_fix_patch_fetch_sources "$fix_dir/fetch-sources.sh" || {
+        fail_with_log "Could not prepare the combined fix dependency fetch script." "Combined Fix — fetch-sources compatibility patch"
+        return 1
+    }
+    audio_fix_ensure_mkinitcpio_preset
+
+    chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
+    local fullsha patch_env=""
+    fullsha=$(audio_fix_resolve_fullsha || true)
+    if [[ -n "$fullsha" ]]; then
+        print_info "Resolved kernel commit ${fullsha:0:12}; passing full SHA to patch-driver.sh."
+        patch_env="export FULLSHA='$fullsha';"
+    else
+        print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
+    fi
+
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh --gfx1013 --audio"; then
+        fail_with_log "Combined fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Combined Fix — patch-driver.sh"
+        return 1
+    fi
+
+    print_info "Kernel patches installed. Now building patched Mesa/RADV..."
+    local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
+    if [[ ! -d "$mesa_dir" ]]; then
+        fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
+        return 1
+    fi
+
+    print_info "Checking for meson/ninja build tools and dev headers..."
+    if ! gfx1013_ensure_mesa_build_deps; then
+        fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
+        return 1
+    fi
+
+    print_info "Building Mesa/RADV (this may take 10-15 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh"; then
+        fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
+        return 1
+    fi
+
+    print_success "Combined DP Audio + GFX1013 fix installed! Reboot required."
+    persist_state_add "audio"
+    persist_state_add "gfx1013"
+    print_info "After reboot: DP audio/video at normal speed + async compute queues enabled."
+    print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+    print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
+}
+
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
 aic8800_installed() {
     [[ -d /sys/module/aic8800_fdrv || -f /etc/modprobe.d/aic8800.conf ]]
@@ -2652,11 +2728,14 @@ run_fixes_menu() {
         echo ""
         print_item "1" "Install ACPI Fix (C/P-states)"     "CPU idle states + cpufreq scaling (800-3200 MHz)"
         print_item "2" "Install DP Audio/Video Fix"        "⚠  Patched amdgpu.ko — DP audio/video clock + GPU metrics + DP SS disable + tunable cache"
-        print_item "3" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "3" "Install GFX1013 Compute Fix"       "⚠  Patched amdgpu.ko + Mesa/RADV — async compute support (+20-25%)"
+        print_item "4" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build (recommended)"
+        print_item "5" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
         echo ""
-        print_item "4" "Revert ACPI Fix"                   ""
-        print_item "5" "Revert DP Audio/Video Fix"         ""
-        print_item "6" "Revert AIC8800 WiFi/BT Driver"     ""
+        print_item "6" "Revert ACPI Fix"                   ""
+        print_item "7" "Revert DP Audio/Video Fix"         ""
+        print_item "8" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
+        print_item "9" "Revert AIC8800 WiFi/BT Driver"     ""
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -2665,10 +2744,13 @@ run_fixes_menu() {
         case "$fix_choice" in
             1) install_acpi_fix;        press_enter ;;
             2) install_audio_fix;       press_enter ;;
-            3) install_aic8800_wifi;    press_enter ;;
-            4) run_revert_acpi_fix;     press_enter ;;
-            5) run_revert_audio_fix;    press_enter ;;
-            6) run_revert_aic8800_wifi; press_enter ;;
+            3) install_gfx1013_fix;     press_enter ;;
+            4) install_combined_fix;    press_enter ;;
+            5) install_aic8800_wifi;    press_enter ;;
+            6) run_revert_acpi_fix;     press_enter ;;
+            7) run_revert_audio_fix;    press_enter ;;
+            8) run_revert_gfx1013_fix;  press_enter ;;
+            9) run_revert_aic8800_wifi; press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$fix_choice'"
@@ -3890,11 +3972,10 @@ run_install_all() {
     run_install_all_step run_configure_swap auto || return 1
     run_install_all_step run_zram_zswap_toggle auto || return 1
     run_install_all_step install_acpi_fix || return 1
-    run_install_all_step install_audio_fix || return 1
+    run_install_all_step install_combined_fix || return 1
     run_install_all_step run_cu_live_manager || return 1
     run_install_all_step install_core_unlock auto || return 1
     run_install_all_step install_ram_split auto || return 1
-    run_install_all_step install_gfx1013_fix || return 1
 
     install_all_progress_clear
     print_success "Install All completed!"
@@ -3952,6 +4033,7 @@ run_install_manual() {
         print_item "10R" "Revert RAM/VRAM Split"         "Restore stock ${RAM_SPLIT_STOCK_UMA_MB}MB split"
         print_item "11"  "Install GFX1013 Compute Fix"   "⚠  Kernel + Mesa/RADV: async compute + RADV_GFX103 opt-in (+20-25% perf)"
         print_item "11R" "Revert GFX1013 Compute Fix"    "Restore stock amdgpu.ko + Mesa"
+        print_item "12"  "Install Combined Audio+GFX1013" "⚠  Both fixes in a single kernel build (recommended)"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3979,6 +4061,7 @@ run_install_manual() {
             10R) run_revert_ram_split;   press_enter ;;
             11) install_gfx1013_fix;     press_enter ;;
             11R) run_revert_gfx1013_fix; press_enter ;;
+            12) install_combined_fix;    press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
