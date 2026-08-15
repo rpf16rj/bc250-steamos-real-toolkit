@@ -7,6 +7,27 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.2.0 — 2026-08-15
+
+- **New:** Combined Audio + GFX1013 install option — builds both fixes in a
+  single kernel module, saving time and avoiding duplicate reboots.
+- **New:** Updated GPU telemetry with 25ms cache (down from 200ms) for more
+  responsive frequency and activity reporting. Includes full telemetry mode
+  (opt-in via `pp_dpm_socclk`) and 8-core hybrid metrics support.
+- **New:** Defensive TTM NULL-page guard — prevents kernel panic on partial
+  GPU memory allocation cleanup. Always applied, no configuration needed.
+- **New:** Optional KFD runlist flush workaround for ROCm/compute users
+  (opt-in via `amdgpu.bc250_flush_by_runlist=1`).
+- **New:** FSR 4 optimized Mesa/RADV — the INT8 dot-product optimization
+  (`imul24_relaxed`) is already included in Mesa 26.2.0-rc3, giving ~42%
+  fewer instructions and ~61% less latency in FSR 4 shaders. Just enable
+  FSR 4 in your games — the driver is already optimized.
+- **Fixed:** Mesa build compatibility across all glibc versions — the ETIME
+  check now detects whether `_GNU_SOURCE` is needed and patches Mesa
+  accordingly, preventing build failures on both older and newer glibc.
+- **Fixed:** Patch application failure when upgrading from a previous version
+  — the kernel header file is now properly reset before applying new patches.
+
 ## v1.1.5 — 2026-08-14
 
 - **Fixed:** Mesa build still failed with `Could not get define 'ETIME'` on

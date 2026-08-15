@@ -1,0 +1,24 @@
+From e90cf398f082dc70080644dbc0a50dc501f0a36d Mon Sep 17 00:00:00 2001
+From: DryhoppedIPA <DryhoppedIPA@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 17:24:30 +0000
+Subject: [PATCH 4/4] radv: add opt-in GFX10.3 override for GFX1013
+
+Allow RADV_GFX103=1 to promote GFX1013 to the GFX10.3 software path. The option defaults to false; without it the device remains GFX10.1 and the experimental mesh/task feature exposure remains disabled.
+---
+ src/amd/vulkan/radv_physical_device.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
+index 1c4271c..66c367c 100644
+--- a/src/amd/vulkan/radv_physical_device.c
++++ b/src/amd/vulkan/radv_physical_device.c
+@@ -2474,6 +2474,9 @@ radv_physical_device_try_create(struct radv_instance *instance, drmDevicePtr drm
+       pdev->vk.supported_sync_types = pdev->ws->get_sync_types(pdev->ws);
+       pdev->ws->query_info(pdev->ws, &pdev->info);
+ 
++      if (pdev->info.family == CHIP_GFX1013 && debug_get_bool_option("RADV_GFX103", false))
++         pdev->info.gfx_level = GFX10_3;
++
+       if (instance->vk.enabled_extensions.KHR_display) {
+          master_fd = open(drm_device->nodes[DRM_NODE_PRIMARY], O_RDWR | O_CLOEXEC);
+          if (master_fd >= 0) {
