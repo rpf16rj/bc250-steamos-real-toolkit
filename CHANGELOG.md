@@ -14,19 +14,35 @@ before the toolkit adopted numbered releases.
 - **New:** Updated GPU telemetry with 25ms cache (down from 200ms) for more
   responsive frequency and activity reporting. Includes full telemetry mode
   (opt-in via `pp_dpm_socclk`) and 8-core hybrid metrics support.
+  Based on [MastaG's BC-250 telemetry patch](https://github.com/MastaG126/bc250-steamos).
 - **New:** Defensive TTM NULL-page guard — prevents kernel panic on partial
   GPU memory allocation cleanup. Always applied, no configuration needed.
+  Based on [MastaG's amdgpu TTM patch](https://github.com/MastaG126/bc250-steamos).
 - **New:** Optional KFD runlist flush workaround for ROCm/compute users
   (opt-in via `amdgpu.bc250_flush_by_runlist=1`).
-- **New:** FSR 4 optimized Mesa/RADV — the INT8 dot-product optimization
-  (`imul24_relaxed`) is already included in Mesa 26.2.0-rc3, giving ~42%
-  fewer instructions and ~61% less latency in FSR 4 shaders. Just enable
-  FSR 4 in your games — the driver is already optimized.
+  Based on [MastaG's KFD flush patch](https://github.com/MastaG126/bc250-steamos).
+- **Improved:** +20-25% GPU compute performance in async compute workloads
+  (e.g. Cyberpunk 2077) thanks to the GFX1013 compute queue fix.
+- **Improved:** FSR 4 shader performance — the INT8 dot-product optimization
+  (`imul24_relaxed`) is included in Mesa 26.2.0-rc3, giving ~42% fewer
+  instructions and ~61% less latency in FSR 4 shaders. Just enable FSR 4 in
+  your games — the driver is already optimized.
+  Based on [dmorazasanchez/bc250-fsr4](https://github.com/dmorazasanchez/bc250-fsr4).
 - **Fixed:** Mesa build compatibility across all glibc versions — the ETIME
   check now detects whether `_GNU_SOURCE` is needed and patches Mesa
   accordingly, preventing build failures on both older and newer glibc.
 - **Fixed:** Patch application failure when upgrading from a previous version
   — the kernel header file is now properly reset before applying new patches.
+
+### Credits
+
+This release integrates patches from the BC-250 community:
+- **MastaG** ([@MastaG126](https://github.com/MastaG126)) — GPU telemetry,
+  TTM NULL-page guard, and KFD runlist flush patches.
+- **dmorazasanchez** ([@dmorazasanchez](https://github.com/dmorazasanchez)) —
+  FSR 4 INT8 dot-product optimization research for BC-250.
+- **keyboardspecialist** ([@keyboardspecialist](https://github.com/keyboardspecialist)) —
+  original BC-250 SteamOS fixes (ACPI, DP audio, WiFi).
 
 ## v1.1.5 — 2026-08-14
 
