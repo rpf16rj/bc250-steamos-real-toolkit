@@ -7,6 +7,31 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.2.0 — 2026-08-15
+
+- **Novo:** Opção de instalação combinada Audio + GFX1013 — compila ambos os
+  fixes num único módulo de kernel, economizando tempo e evitando reboots
+  duplicados.
+- **Novo:** Telemetria de GPU atualizada com cache de 25ms (antes 200ms) para
+  relatórios de frequência e atividade mais responsivos. Inclui modo de
+  telemetria completa (opt-in via `pp_dpm_socclk`) e suporte a métricas
+  híbridas de 8 núcleos.
+- **Novo:** Guarda defensiva TTM NULL-page — previne kernel panic na
+  limpeza parcial de alocação de memória da GPU. Sempre aplicado, sem
+  configuração necessária.
+- **Novo:** Workaround opcional de flush de runlist KFD para usuários de
+  ROCm/compute (opt-in via `amdgpu.bc250_flush_by_runlist=1`).
+- **Novo:** Mesa/RADV otimizada para FSR 4 — a otimização de dot-product INT8
+  (`imul24_relaxed`) já está incluída no Mesa 26.2.0-rc3, resultando em ~42%
+  menos instruções e ~61% menos latência nos shaders do FSR 4. Basta ativar
+  o FSR 4 nos jogos — o driver já está otimizado.
+- **Corrigido:** Compatibilidade do build do Mesa com todas as versões do
+  glibc — a verificação de ETIME agora usa sempre o caminho seguro
+  `has_define()`, prevenindo falhas de build em glibc antigo e novo.
+- **Corrigido:** Falha na aplicação de patches ao atualizar de uma versão
+  anterior — o arquivo de header do kernel agora é corretamente resetado
+  antes de aplicar novos patches.
+
 ## v1.1.4 — 2026-08-13
 
 - **Corrigido:** o build do Mesa ainda falhava com `Could not get define 'ETIME'`
