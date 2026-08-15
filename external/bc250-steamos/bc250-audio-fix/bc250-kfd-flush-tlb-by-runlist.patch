@@ -1,0 +1,118 @@
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c b/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+index 4f7f9d0..b694e1d 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+@@ -1476,8 +1476,17 @@ static int kfd_ioctl_unmap_memory_from_gpu(struct file *filep,
+ 		peer_pdd = kfd_process_device_data_by_id(p, devices_arr[i]);
+ 		if (WARN_ON_ONCE(!peer_pdd))
+ 			continue;
+-		if (flush_tlb)
++		if (flush_tlb) {
+ 			kfd_flush_tlb(peer_pdd);
++			/*
++			 * The BC-250 HWS path does not expose a usable PASID ->
++			 * VMID mapping to the normal gfx10 TLB flush. The optional
++			 * workaround below rebuilds an already-active runlist,
++			 * which is the invalidation path measured to work on this
++			 * device. This ioctl holds p->mutex, but not dqm_lock.
++			 */
++			kfd_bc250_flush_tlb_by_runlist(peer_pdd->dev);
++		}
+ 
+ 		/* Remove dma mapping after tlb flush to avoid IO_PAGE_FAULT */
+ 		err = amdgpu_amdkfd_gpuvm_dmaunmap_mem(mem, peer_pdd->drm_priv);
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c b/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
+index 10a5916..7a308f7 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
+@@ -24,6 +24,7 @@
+ 
+ #include <linux/ratelimit.h>
+ #include <linux/printk.h>
++#include <linux/module.h>
+ #include <linux/slab.h>
+ #include <linux/list.h>
+ #include <linux/types.h>
+@@ -2489,6 +2490,70 @@ static int execute_queues_cpsch(struct device_queue_manager *dqm,
+ 	return retval;
+ }
+ 
++/*
++ * BC-250/gfx1013: rebuild the HWS runlist after a KFD GPU mapping is
++ * unmapped. Under HWS the driver does not populate the gfx10
++ * ATC_VMID*_PASID_MAPPING registers used by the normal PASID TLB flush, so
++ * stale compute translations can survive VA reuse. Rebuilding an active
++ * runlist forces the firmware through the VMID reassignment path that has
++ * been measured to invalidate those translations on the BC-250.
++ *
++ * This is deliberately opt-in. It is only valid for the BC-250 under the
++ * CP hardware scheduler and must never be called while dqm_lock is held.
++ */
++#define BC250_PCI_DEVICE_ID 0x13FE
++
++static bool bc250_flush_by_runlist;
++module_param(bc250_flush_by_runlist, bool, 0644);
++MODULE_PARM_DESC(bc250_flush_by_runlist,
++	"BC-250: rebuild the KFD HWS runlist after GPU memory unmap to flush stale compute TLB entries");
++
++int kfd_bc250_flush_tlb_by_runlist(struct kfd_node *dev)
++{
++	struct device_queue_manager *dqm;
++	int r = 0;
++
++	if (!bc250_flush_by_runlist || !dev || !dev->kfd || !dev->adev ||
++	    !dev->adev->pdev)
++		return 0;
++
++	if (dev->adev->pdev->device != BC250_PCI_DEVICE_ID ||
++	    KFD_GC_VERSION(dev) != IP_VERSION(10, 1, 3))
++		return 0;
++
++	dqm = dev->dqm;
++	if (!dqm)
++		return 0;
++	if (dqm->sched_policy == KFD_SCHED_POLICY_NO_HWS) {
++		dev_warn_once(dev->adev->dev,
++			"BC-250: bc250_flush_by_runlist requires KFD hardware scheduling\n");
++		return 0;
++	}
++	if (dev->kfd->shared_resources.enable_mes) {
++		dev_warn_once(dev->adev->dev,
++			"BC-250: bc250_flush_by_runlist does not support MES\n");
++		return 0;
++	}
++
++	/*
++	 * Preserve scheduler state. If there is no active runlist, there is
++	 * nothing to rebuild and execute_queues_cpsch() could otherwise map an
++	 * inactive runlist as a side effect.
++	 */
++	dqm_lock(dqm);
++	if (dqm->active_runlist)
++		r = execute_queues_cpsch(dqm,
++				KFD_UNMAP_QUEUES_FILTER_DYNAMIC_QUEUES, 0,
++				USE_DEFAULT_GRACE_PERIOD);
++	dqm_unlock(dqm);
++
++	if (r)
++		dev_err_ratelimited(dev->adev->dev,
++			"BC-250: KFD runlist rebuild failed during TLB flush (%d)\n", r);
++
++	return r;
++}
++
+ static int wait_on_destroy_queue(struct device_queue_manager *dqm,
+ 				 struct queue *q)
+ {
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h b/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
+index 4a1dcae..0981d84 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
+@@ -310,6 +310,7 @@ unsigned int get_num_sdma_queues(struct device_queue_manager *dqm);
+ unsigned int get_num_xgmi_sdma_queues(struct device_queue_manager *dqm);
+ int reserve_debug_trap_vmid(struct device_queue_manager *dqm,
+ 			struct qcm_process_device *qpd);
++int kfd_bc250_flush_tlb_by_runlist(struct kfd_node *dev);
+ int release_debug_trap_vmid(struct device_queue_manager *dqm,
+ 			struct qcm_process_device *qpd);
+ int suspend_queues(struct kfd_process *p,

@@ -291,8 +291,15 @@ fi
 if [ "$WITH_GFX1013" = 1 ]; then
     git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
         drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c \
-        drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c
+        drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c \
+        drivers/gpu/drm/amd/amdkfd/kfd_chardev.c \
+        drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c \
+        drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
 fi
+
+# 0007 TTM NULL-page guard is always applied (defensive, no module param)
+git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
+    drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
 
 if [ "$WITH_AUDIO" = 1 ]; then
     step "apply DP-audio patch (runbook step 7)"
@@ -390,6 +397,28 @@ else
             echo "$(basename "$p") REVERSED (leftover from a previous --gfx1013 build)"
         fi
     done
+fi
+
+step "apply TTM NULL-page guard patch (defensive)"
+TTM_PATCH=$HERE/bc250-ttm-null-page-guard.patch
+if patch -p1 -R --dry-run -s -f < "$TTM_PATCH" >/dev/null 2>&1; then
+    echo "TTM NULL-page guard already applied"
+elif patch -p1 --dry-run -s -f < "$TTM_PATCH" >/dev/null 2>&1; then
+    patch -p1 -s < "$TTM_PATCH"
+    echo "TTM NULL-page guard applied"
+else
+    die "TTM NULL-page guard neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+fi
+
+step "apply KFD flush-TLB-by-runlist patch (opt-in ROCm/KFD workaround)"
+KFD_PATCH=$HERE/bc250-kfd-flush-tlb-by-runlist.patch
+if patch -p1 -R --dry-run -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
+    echo "KFD flush-TLB-by-runlist patch already applied"
+elif patch -p1 --dry-run -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
+    patch -p1 -s < "$KFD_PATCH"
+    echo "KFD flush-TLB-by-runlist patch applied"
+else
+    die "KFD flush-TLB-by-runlist patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
 step "clock-gating patches (BC-250 idle power) — EXPERIMENTAL, opt-in"
