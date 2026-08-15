@@ -2526,6 +2526,81 @@ install_combined_fix() {
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
 }
 
+install_fsr4_mesa() {
+    print_step "FSR4" "Installing FSR 4 Optimized Mesa/RADV"
+
+    echo -e "  ${DIM}Rebuilds Mesa/RADV with optimized INT8 dot-product lowering for FSR 4.${RESET}"
+    echo -e "  ${DIM}Uses imul24_relaxed instead of imul — ~42% fewer instructions, ~61% less latency.${RESET}"
+    echo -e "  ${DIM}Requires GFX1013 or Combined fix to already be installed (kernel patches).${RESET}"
+    echo -e "  ${DIM}Does NOT install FSR 4 or OptiScaler — just optimizes the RADV driver for them.${RESET}"
+    echo ""
+    if ! confirm "Continue with the FSR 4 optimized Mesa rebuild?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+
+    local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
+    if [[ ! -d "$mesa_dir" ]]; then
+        fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "FSR4 Mesa — missing directory"
+        return 1
+    fi
+
+    print_info "Checking for meson/ninja build tools and dev headers..."
+    if ! gfx1013_ensure_mesa_build_deps; then
+        fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "FSR4 Mesa — missing build deps"
+        return 1
+    fi
+
+    print_info "Building Mesa/RADV with FSR 4 optimization (this may take 10-15 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh --fsr4"; then
+        fail_with_log "Mesa build failed. Your existing Mesa installation is unchanged." "FSR4 Mesa — build-mesa.sh"
+        return 1
+    fi
+
+    print_success "FSR 4 optimized Mesa/RADV installed!"
+    persist_state_add "fsr4"
+    print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+    print_info "Use FSR 4 in games that support it (e.g., Cyberpunk 2077 via OptiScaler)."
+    print_info "${YELLOW}If anything misbehaves:${RESET} re-run the GFX1013 or Combined fix to restore standard Mesa."
+}
+
+revert_fsr4_mesa() {
+    print_step "R-FSR4" "Revert FSR 4 Optimized Mesa"
+
+    echo -e "  ${DIM}Rebuilds Mesa/RADV without the FSR 4 optimization patch.${RESET}"
+    echo -e "  ${DIM}Restores the standard GFX1013 Mesa build.${RESET}"
+    echo ""
+    if ! confirm "Continue with the FSR 4 Mesa revert?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+
+    local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
+    if [[ ! -d "$mesa_dir" ]]; then
+        fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "FSR4 Revert — missing directory"
+        return 1
+    fi
+
+    print_info "Checking for meson/ninja build tools and dev headers..."
+    if ! gfx1013_ensure_mesa_build_deps; then
+        fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "FSR4 Revert — missing build deps"
+        return 1
+    fi
+
+    print_info "Rebuilding Mesa/RADV without FSR 4 optimization (this may take 10-15 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh"; then
+        fail_with_log "Mesa rebuild failed. Your existing Mesa installation is unchanged." "FSR4 Revert — build-mesa.sh"
+        return 1
+    fi
+
+    persist_state_remove "fsr4"
+    print_success "FSR 4 optimization reverted. Standard GFX1013 Mesa restored."
+}
+
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
 aic8800_installed() {
     [[ -d /sys/module/aic8800_fdrv || -f /etc/modprobe.d/aic8800.conf ]]
@@ -2731,12 +2806,14 @@ run_fixes_menu() {
         print_item "2" "Install DP Audio/Video Fix"        "⚠  Patched amdgpu.ko — DP audio/video clock + GPU metrics + DP SS disable + tunable cache + TTM guard"
         print_item "3" "Install GFX1013 Compute Fix"       "⚠  Patched amdgpu.ko + Mesa/RADV — async compute support (+20-25%)"
         print_item "4" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build (recommended)"
-        print_item "5" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "5" "Install FSR 4 Optimized Mesa"     "Rebuilds RADV with imul24_relaxed dot-product (~42% fewer instrs)"
+        print_item "6" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
         echo ""
-        print_item "6" "Revert ACPI Fix"                   ""
-        print_item "7" "Revert DP Audio/Video Fix"         ""
-        print_item "8" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
-        print_item "9" "Revert AIC8800 WiFi/BT Driver"     ""
+        print_item "7" "Revert ACPI Fix"                   ""
+        print_item "8" "Revert DP Audio/Video Fix"         ""
+        print_item "9" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
+        print_item "R" "Revert FSR 4 Mesa"                 "Rebuilds standard GFX1013 Mesa (removes FSR4 patch)"
+        print_item "A" "Revert AIC8800 WiFi/BT Driver"     ""
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -2747,11 +2824,13 @@ run_fixes_menu() {
             2) install_audio_fix;       press_enter ;;
             3) install_gfx1013_fix;     press_enter ;;
             4) install_combined_fix;    press_enter ;;
-            5) install_aic8800_wifi;    press_enter ;;
-            6) run_revert_acpi_fix;     press_enter ;;
-            7) run_revert_audio_fix;    press_enter ;;
-            8) run_revert_gfx1013_fix;  press_enter ;;
-            9) run_revert_aic8800_wifi; press_enter ;;
+            5) install_fsr4_mesa;     press_enter ;;
+            6) install_aic8800_wifi;    press_enter ;;
+            7) run_revert_acpi_fix;     press_enter ;;
+            8) run_revert_audio_fix;    press_enter ;;
+            9) run_revert_gfx1013_fix;  press_enter ;;
+            R|r) revert_fsr4_mesa;    press_enter ;;
+            A|a) run_revert_aic8800_wifi; press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$fix_choice'"
@@ -4035,6 +4114,8 @@ run_install_manual() {
         print_item "11"  "Install GFX1013 Compute Fix"   "⚠  Kernel + Mesa/RADV: async compute + RADV_GFX103 opt-in (+20-25% perf)"
         print_item "11R" "Revert GFX1013 Compute Fix"    "Restore stock amdgpu.ko + Mesa"
         print_item "12"  "Install Combined Audio+GFX1013" "⚠  Both fixes in a single kernel build (recommended)"
+        print_item "13"  "Install FSR 4 Optimized Mesa"   "Rebuilds RADV with imul24_relaxed dot-product for FSR 4"
+        print_item "13R" "Revert FSR 4 Mesa"              "Rebuilds standard GFX1013 Mesa (removes FSR4 patch)"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -4063,6 +4144,8 @@ run_install_manual() {
             11) install_gfx1013_fix;     press_enter ;;
             11R) run_revert_gfx1013_fix; press_enter ;;
             12) install_combined_fix;    press_enter ;;
+            13) install_fsr4_mesa;     press_enter ;;
+            13R) revert_fsr4_mesa;    press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"

@@ -14,6 +14,13 @@ MESA_PREFIX="/opt/bc250-gfx1013/${VERSION}"
 die() { echo "FATAL: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
 
+WITH_FSR4=0
+for a in "$@"; do
+    case "$a" in
+        --fsr4) WITH_FSR4=1 ;;
+    esac
+done
+
 # Check dependencies
 for cmd in meson ninja sha256sum; do
     command -v "$cmd" >/dev/null 2>&1 || die "required command missing: $cmd"
@@ -54,6 +61,14 @@ if [[ ! -f "$SERIES_FILE" ]]; then
     die "Mesa series file not found: $SERIES_FILE"
 fi
 
+# Build the effective series: uncomment the FSR4 patch if --fsr4 was passed
+if [ "$WITH_FSR4" = 1 ]; then
+    echo "FSR4 optimization enabled (--fsr4)"
+    EFFECTIVE_SERIES=$(sed 's/^#0005-bc250-fsr4-i24.patch/0005-bc250-fsr4-i24.patch/' "$SERIES_FILE")
+else
+    EFFECTIVE_SERIES=$(cat "$SERIES_FILE")
+fi
+
 while IFS= read -r patch_file; do
     [[ "$patch_file" =~ ^# ]] && continue
     [[ -z "$patch_file" ]] && continue
@@ -70,7 +85,7 @@ while IFS= read -r patch_file; do
     else
         die "Patch neither applies nor reverses cleanly: $patch_file"
     fi
-done < "$SERIES_FILE"
+done <<< "$EFFECTIVE_SERIES"
 
 step "Configure Mesa build"
 if [[ -d build ]]; then

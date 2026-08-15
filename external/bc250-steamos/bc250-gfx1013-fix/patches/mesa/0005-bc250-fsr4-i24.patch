@@ -1,0 +1,22 @@
+diff --git a/src/compiler/nir/nir_opt_algebraic.py b/src/compiler/nir/nir_opt_algebraic.py
+index 4ad4193..1d88f67 100644
+--- a/src/compiler/nir/nir_opt_algebraic.py
++++ b/src/compiler/nir/nir_opt_algebraic.py
+@@ -408,10 +408,13 @@ for sz in (16, 32, 64):
+ 
+ # Shorthand for the expansion of just the dot product part of the [iu]dp4a
+ # instructions.
+-sdot_4x8_a_b = ('iadd', ('iadd', ('imul', ('extract_i8', a, 0), ('extract_i8', b, 0)),
+-                                 ('imul', ('extract_i8', a, 1), ('extract_i8', b, 1))),
+-                        ('iadd', ('imul', ('extract_i8', a, 2), ('extract_i8', b, 2)),
+-                                 ('imul', ('extract_i8', a, 3), ('extract_i8', b, 3))))
++sdot_4x8_a_b = ('iadd',
++                    ('imul24_relaxed', ('extract_i8', a, 3), ('extract_i8', b, 3)),
++                    ('iadd',
++                     ('imul24_relaxed', ('extract_i8', a, 2), ('extract_i8', b, 2)),
++                     ('iadd',
++                      ('imul24_relaxed', ('extract_i8', a, 1), ('extract_i8', b, 1)),
++                      ('imul24_relaxed', ('extract_i8', a, 0), ('extract_i8', b, 0)))))
+ udot_4x8_a_b = ('iadd', ('iadd', ('imul', ('extract_u8', a, 0), ('extract_u8', b, 0)),
+                                  ('imul', ('extract_u8', a, 1), ('extract_u8', b, 1))),
+                         ('iadd', ('imul', ('extract_u8', a, 2), ('extract_u8', b, 2)),
