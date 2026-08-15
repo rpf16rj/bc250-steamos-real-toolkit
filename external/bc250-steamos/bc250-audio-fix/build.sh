@@ -284,6 +284,7 @@ step "reset patched files to pristine before applying the patch stack"
 if [ "$WITH_AUDIO" = 1 ]; then
     git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
         drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
+        drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu11_driver_if_cyan_skillfish.h \
         drivers/gpu/drm/amd/display/dc/clk_mgr/dcn201/dcn201_clk_mgr.c \
         drivers/gpu/drm/amd/display/dc/clk_mgr/clk_mgr.c \
         drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
