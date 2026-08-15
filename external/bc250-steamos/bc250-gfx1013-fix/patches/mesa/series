@@ -12,12 +12,10 @@
 # GFX10.3 software path. Safe by itself — only activates when the user
 # explicitly sets the env var. Requires 0002/0003 to be useful.
 #
-# 0005 optimizes the signed 4x8 INT8 dot-product lowering for FSR 4.
-# Uses imul24_relaxed instead of imul, generating cheaper GFX10 code.
-# ~42% fewer instructions, ~61% less latency in FSR 4 shaders.
-# Applied only when --fsr4 is passed to build-mesa.sh.
+# Note: The FSR 4 INT8 dot-product optimization (imul24_relaxed in
+# sdot_4x8_a_b) from dmorazasanchez/bc250-fsr4 is already upstream
+# in mesa-26.2.0-rc3. No additional patch needed.
 0001-gfx1013-compute-queue-fix.patch
 #0002-gfx1013-mesh-task-shaders.patch
 #0003-gfx1013-taskmesh-queries.patch
 0004-radv-gfx103.patch
-#0005-bc250-fsr4-i24.patch
