@@ -82,16 +82,14 @@ fi
 #   if cc.get_define('ETIME', prefix : '#include <errno.h>') == ''
 #     pre_args += '-DETIME=ETIMEDOUT'
 #   endif
-# But on Meson 1.8.2 + GCC 15.x + glibc 2.43, cc.get_define() errors out
-# instead of returning '' when the define is missing (glibc hides ETIME behind
-# _GNU_SOURCE). Patch the check to use cc.has_define() which returns a bool
-# instead of throwing, so the fallback actually works.
-if ! echo '#include <errno.h>' | cc -dM -E -x c - 2>/dev/null | grep -qw ETIME; then
-    echo "ETIME not visible from <errno.h>; patching meson.build to use has_define()"
-    sed -i "/# Support systems without ETIME/,/^endif$/ {
-        s/cc\.get_define('ETIME', prefix : '#include <errno\.h>') == ''/not cc.has_define('ETIME', prefix : '#include <errno.h>')/
-    }" meson.build
-fi
+# But on some glibc + Meson combinations, cc.get_define() errors out
+# instead of returning '' when the define is behind _GNU_SOURCE.
+# Always patch the check to use cc.has_define() which returns a bool
+# instead of throwing, so the fallback works on all glibc versions.
+echo "Patching meson.build ETIME check to use has_define() for glibc compatibility"
+sed -i "/# Support systems without ETIME/,/^endif$/ {
+    s/cc\.get_define('ETIME', prefix : '#include <errno\.h>') == ''/not cc.has_define('ETIME', prefix : '#include <errno.h>')/
+}" meson.build
 
 meson setup build \
     -Dvulkan-drivers=amd \
