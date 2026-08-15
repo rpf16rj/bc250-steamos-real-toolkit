@@ -1,0 +1,12 @@
+--- a/src/amd/vulkan/radv_physical_device.c	2026-08-13 08:24:46.506787658 -0300
++++ b/src/amd/vulkan/radv_physical_device.c	2026-08-13 08:24:46.513375384 -0300
+@@ -2599,6 +2599,9 @@
+    }
+ 
+    memcpy(&pdev->info, &winsys_info.base, sizeof(pdev->info));
++
++   if (pdev->info.family == CHIP_GFX1013 && debug_get_bool_option("RADV_GFX103", false))
++      pdev->info.gfx_level = GFX10_3;
+    memcpy(&pdev->syncobj_sync_type, &winsys_info.syncobj_sync_type, sizeof(pdev->syncobj_sync_type));
+ 
+    for (uint32_t p = RADEON_CTX_PRIORITY_LOW; p <= RADEON_CTX_PRIORITY_REALTIME; p++) {

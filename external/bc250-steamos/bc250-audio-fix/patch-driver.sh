@@ -149,16 +149,18 @@ flock 9
 
 WITH_CG=()
 WITH_GFX1013=()
+WITH_AUDIO=()
 ARGS=()
 for a in "$@"; do
     case "$a" in
         --cg)             WITH_CG=(--cg) ;;
         --cg-unvalidated) WITH_CG=(--cg-unvalidated) ;;
         --gfx1013)        WITH_GFX1013=(--gfx1013) ;;
+        --audio)          WITH_AUDIO=(--audio) ;;
         *)                ARGS+=("$a") ;;
     esac
 done
 
 "$HERE/fetch-sources.sh" "${ARGS[@]}"
-"$HERE/build.sh" "${WITH_CG[@]}" "${WITH_GFX1013[@]}" "${ARGS[@]}"
+"$HERE/build.sh" "${WITH_CG[@]}" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${ARGS[@]}"
 sudo "$HERE/install.sh"
