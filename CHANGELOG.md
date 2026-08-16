@@ -7,6 +7,18 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.2.1 — 2026-08-16
+
+- **Fixed:** Audio stuttering under high load — GRBM polling reduced from
+  32 to 16 samples and cache window increased from 25ms to 100ms, cutting
+  CPU overhead 8x (from ~6.2% to ~0.78%).
+- **Fixed:** Patch application failure on SteamOS 3.8.16 — added `--fuzz=3`
+  to all patch commands for greater tolerance of line number offsets.
+- **Fixed:** AUR package installation failure in Portuguese locales —
+  validity-check errors are now detected as retryable network errors,
+  with automatic cache cleanup before retry.
+- **Fixed:** Corrected MastaG repository URL in credits.
+
 ## v1.2.0 — 2026-08-15
 
 - **New:** Combined Audio + GFX1013 install option — builds both fixes in a

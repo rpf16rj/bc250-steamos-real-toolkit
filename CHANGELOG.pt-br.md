@@ -7,6 +7,19 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.2.1 — 2026-08-16
+
+- **Corrigido:** Stuttering de áudio sob alto load — amostragem GRBM reduzida
+  de 32 para 16 iterações e cache aumentado de 25ms para 100ms, reduzindo
+  overhead de CPU em 8x (de ~6.2% para ~0.78%).
+- **Corrigido:** Falha na aplicação de patches no SteamOS 3.8.16 — adicionado
+  `--fuzz=3` a todos os comandos de patch para maior tolerância a offsets de
+  linha.
+- **Corrigido:** Falha na instalação de pacotes AUR em locales em português —
+  erros de verificação de validade agora são detectados como erros de rede
+  recuperáveis, com limpeza automática do cache antes de tentar novamente.
+- **Corrigido:** URL do repositório do MastaG corrigida nos créditos.
+
 ## v1.2.0 — 2026-08-15
 
 - **Novo:** Opção de instalação combinada Audio + GFX1013 — compila ambos os
