@@ -16,14 +16,14 @@ como histórico datado de antes da adoção de versões numeradas.
   relatórios de frequência e atividade mais responsivos. Inclui modo de
   telemetria completa (opt-in via `pp_dpm_socclk`) e suporte a métricas
   híbridas de 8 núcleos.
-  Baseado no [patch de telemetria do MastaG](https://github.com/MastaG126/bc250-steamos).
+  Baseado no [patch de telemetria do MastaG](https://github.com/MastaG/linux-cachyos-bc250).
 - **Novo:** Guarda defensiva TTM NULL-page — previne kernel panic na
   limpeza parcial de alocação de memória da GPU. Sempre aplicado, sem
   configuração necessária.
-  Baseado no [patch TTM do MastaG](https://github.com/MastaG126/bc250-steamos).
+  Baseado no [patch TTM do MastaG](https://github.com/MastaG/linux-cachyos-bc250).
 - **Novo:** Workaround opcional de flush de runlist KFD para usuários de
   ROCm/compute (opt-in via `amdgpu.bc250_flush_by_runlist=1`).
-  Baseado no [patch KFD do MastaG](https://github.com/MastaG126/bc250-steamos).
+  Baseado no [patch KFD do MastaG](https://github.com/MastaG/linux-cachyos-bc250).
 - **Melhoria:** +20-25% de performance de GPU em workloads de compute assíncrono
   (ex.: Cyberpunk 2077) graças à correção de fila de compute GFX1013.
 - **Melhoria:** Performance de shaders FSR 4 — a otimização de dot-product INT8
@@ -42,7 +42,7 @@ como histórico datado de antes da adoção de versões numeradas.
 ### Agradecimentos
 
 Este release integra patches da comunidade BC-250:
-- **MastaG** ([@MastaG126](https://github.com/MastaG126)) — patches de telemetria
+- **MastaG** ([@MastaG](https://github.com/MastaG)) — patches de telemetria
   de GPU, guarda TTM NULL-page e flush de runlist KFD.
 - **dmorazasanchez** ([@dmorazasanchez](https://github.com/dmorazasanchez)) —
   pesquisa e otimização de dot-product INT8 para FSR 4 no BC-250.
