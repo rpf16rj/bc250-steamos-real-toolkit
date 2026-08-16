@@ -11,9 +11,10 @@ before the toolkit adopted numbered releases.
 
 - **New:** Combined Audio + GFX1013 install option — builds both fixes in a
   single kernel module, saving time and avoiding duplicate reboots.
-- **New:** Updated GPU telemetry with 25ms cache (down from 200ms) for more
-  responsive frequency and activity reporting. Includes full telemetry mode
-  (opt-in via `pp_dpm_socclk`) and 8-core hybrid metrics support.
+- **New:** Updated GPU telemetry with 100ms cache and 16-sample GRBM polling
+  for responsive frequency and activity reporting without audio stuttering
+  under high load. Includes full telemetry mode (opt-in via `pp_dpm_socclk`)
+  and 8-core hybrid metrics support.
   Based on [MastaG's BC-250 telemetry patch](https://github.com/MastaG/linux-cachyos-bc250).
 - **New:** Defensive TTM NULL-page guard — prevents kernel panic on partial
   GPU memory allocation cleanup. Always applied, no configuration needed.

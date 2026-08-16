@@ -63,12 +63,12 @@
  
  static uint32_t cyan_skillfish_sclk_default;
  
-+static uint cs_gfxclk_cache_ms = 25;
++static uint cs_gfxclk_cache_ms = 100;
 +module_param(cs_gfxclk_cache_ms, uint, 0644);
 +MODULE_PARM_DESC(cs_gfxclk_cache_ms,
 +		"GetGfxclkFrequency mailbox cache window in ms (0 = off)");
 +
-+static uint cs_activity_cache_ms = 25;
++static uint cs_activity_cache_ms = 100;
 +module_param(cs_activity_cache_ms, uint, 0644);
 +MODULE_PARM_DESC(cs_activity_cache_ms,
 +		"GPU activity GRBM sample cache window in ms (0 = off)");
@@ -140,7 +140,7 @@
 -	 * a short window so gpu_metrics does not expose the 0xffff sentinel.
 +	/*
 +	 * Sensor and GPU Metrics consumers can request activity back-to-back.
-+	 * Reuse a very recent sample so those reads do not each spend ~1.55 ms
++	 * Reuse a very recent sample so those reads do not each spend ~775 µs
 +	 * busy-waiting on the same GUI_ACTIVE sampling window. Keep the lock
 +	 * outside that sampling window; concurrent misses may sample twice but
 +	 * cannot corrupt the cached value.
@@ -159,14 +159,14 @@
 +	 * Cyan Skillfish does not publish GFX activity in SmuMetrics_t.
 +	 * Sample GUI_ACTIVE over a bounded window and export centipercent.
  	 */
- 	for (i = 0; i < 32; i++) {
+ 	for (i = 0; i < 16; i++) {
  		busy += !!(RREG32_SOC15(GC, 0, mmGRBM_STATUS) &
 @@ -79,7 +169,51 @@
  			udelay(50);
  	}
  
--	return DIV_ROUND_CLOSEST(busy * 10000, 32);
-+	activity = DIV_ROUND_CLOSEST(busy * 10000, 32);
+-	return DIV_ROUND_CLOSEST(busy * 10000, 16);
++	activity = DIV_ROUND_CLOSEST(busy * 10000, 16);
 +
 +	spin_lock_irqsave(&cache->gpu_activity_lock, flags);
 +	cache->gpu_activity = activity;

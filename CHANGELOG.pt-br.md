@@ -12,10 +12,10 @@ como histórico datado de antes da adoção de versões numeradas.
 - **Novo:** Opção de instalação combinada Audio + GFX1013 — compila ambos os
   fixes num único módulo de kernel, economizando tempo e evitando reboots
   duplicados.
-- **Novo:** Telemetria de GPU atualizada com cache de 25ms (antes 200ms) para
-  relatórios de frequência e atividade mais responsivos. Inclui modo de
-  telemetria completa (opt-in via `pp_dpm_socclk`) e suporte a métricas
-  híbridas de 8 núcleos.
+- **Novo:** Telemetria de GPU atualizada com cache de 100ms e amostragem GRBM
+  de 16 iterações para relatórios de frequência e atividade responsivos sem
+  stuttering de áudio sob alto load. Inclui modo de telemetria completa
+  (opt-in via `pp_dpm_socclk`) e suporte a métricas híbridas de 8 núcleos.
   Baseado no [patch de telemetria do MastaG](https://github.com/MastaG/linux-cachyos-bc250).
 - **Novo:** Guarda defensiva TTM NULL-page — previne kernel panic na
   limpeza parcial de alocação de memória da GPU. Sempre aplicado, sem
