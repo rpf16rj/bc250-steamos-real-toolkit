@@ -7,23 +7,36 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.2.1 — 2026-08-16
+
+- **Corrigido:** Stuttering de áudio sob alto load — amostragem GRBM reduzida
+  de 32 para 16 iterações e cache aumentado de 25ms para 100ms, reduzindo
+  overhead de CPU em 8x (de ~6.2% para ~0.78%).
+- **Corrigido:** Falha na aplicação de patches no SteamOS 3.8.16 — adicionado
+  `--fuzz=3` a todos os comandos de patch para maior tolerância a offsets de
+  linha.
+- **Corrigido:** Falha na instalação de pacotes AUR em locales em português —
+  erros de verificação de validade agora são detectados como erros de rede
+  recuperáveis, com limpeza automática do cache antes de tentar novamente.
+- **Corrigido:** URL do repositório do MastaG corrigida nos créditos.
+
 ## v1.2.0 — 2026-08-15
 
 - **Novo:** Opção de instalação combinada Audio + GFX1013 — compila ambos os
   fixes num único módulo de kernel, economizando tempo e evitando reboots
   duplicados.
-- **Novo:** Telemetria de GPU atualizada com cache de 25ms (antes 200ms) para
-  relatórios de frequência e atividade mais responsivos. Inclui modo de
-  telemetria completa (opt-in via `pp_dpm_socclk`) e suporte a métricas
-  híbridas de 8 núcleos.
-  Baseado no [patch de telemetria do MastaG](https://github.com/MastaG126/bc250-steamos).
+- **Novo:** Telemetria de GPU atualizada com cache de 100ms e amostragem GRBM
+  de 16 iterações para relatórios de frequência e atividade responsivos sem
+  stuttering de áudio sob alto load. Inclui modo de telemetria completa
+  (opt-in via `pp_dpm_socclk`) e suporte a métricas híbridas de 8 núcleos.
+  Baseado no [patch de telemetria do MastaG](https://github.com/MastaG/linux-cachyos-bc250).
 - **Novo:** Guarda defensiva TTM NULL-page — previne kernel panic na
   limpeza parcial de alocação de memória da GPU. Sempre aplicado, sem
   configuração necessária.
-  Baseado no [patch TTM do MastaG](https://github.com/MastaG126/bc250-steamos).
+  Baseado no [patch TTM do MastaG](https://github.com/MastaG/linux-cachyos-bc250).
 - **Novo:** Workaround opcional de flush de runlist KFD para usuários de
   ROCm/compute (opt-in via `amdgpu.bc250_flush_by_runlist=1`).
-  Baseado no [patch KFD do MastaG](https://github.com/MastaG126/bc250-steamos).
+  Baseado no [patch KFD do MastaG](https://github.com/MastaG/linux-cachyos-bc250).
 - **Melhoria:** +20-25% de performance de GPU em workloads de compute assíncrono
   (ex.: Cyberpunk 2077) graças à correção de fila de compute GFX1013.
 - **Melhoria:** Performance de shaders FSR 4 — a otimização de dot-product INT8
@@ -42,7 +55,7 @@ como histórico datado de antes da adoção de versões numeradas.
 ### Agradecimentos
 
 Este release integra patches da comunidade BC-250:
-- **MastaG** ([@MastaG126](https://github.com/MastaG126)) — patches de telemetria
+- **MastaG** ([@MastaG](https://github.com/MastaG)) — patches de telemetria
   de GPU, guarda TTM NULL-page e flush de runlist KFD.
 - **dmorazasanchez** ([@dmorazasanchez](https://github.com/dmorazasanchez)) —
   pesquisa e otimização de dot-product INT8 para FSR 4 no BC-250.

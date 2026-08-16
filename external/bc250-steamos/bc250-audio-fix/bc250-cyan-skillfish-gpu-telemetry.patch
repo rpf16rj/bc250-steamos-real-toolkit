@@ -32,14 +32,14 @@ index a9db4c451bb5..8bd054d55179 100644
 +	/* The firmware table has no GFX activity field. Sample GUI_ACTIVE over
 +	 * a short window so gpu_metrics does not expose the 0xffff sentinel.
 +	 */
-+	for (i = 0; i < 32; i++) {
++	for (i = 0; i < 16; i++) {
 +		busy += !!(RREG32_SOC15(GC, 0, mmGRBM_STATUS) &
 +			  GRBM_STATUS__GUI_ACTIVE_MASK);
-+		if (i != 31)
++		if (i != 15)
 +			udelay(50);
 +	}
 +
-+	return DIV_ROUND_CLOSEST(busy * 10000, 32);
++	return DIV_ROUND_CLOSEST(busy * 10000, 16);
 +}
 +
  #define FEATURE_MASK(feature) (1ULL << feature)
