@@ -416,7 +416,7 @@ repair_pacman_keyring() {
 
 is_network_error() {
     local output="$1"
-    grep -qiE "operation too slow|timeout|timed out|connection refused|connection reset|could not resolve|network is unreachable|temporary failure in name resolution|failed to download|failed to retrieve|erro.*baixar|erro.*obter|download.*failed|http.*error|curl.*error|git.*unable to access|git.*failed to connect|socket timed out|transfer closed" <<< "$output"
+    grep -qiE "operation too slow|timeout|timed out|connection refused|connection reset|could not resolve|network is unreachable|temporary failure in name resolution|failed to download|failed to retrieve|erro.*baixar|erro.*obter|download.*failed|http.*error|curl.*error|git.*unable to access|git.*failed to connect|socket timed out|transfer closed|validity check|verificação.*validade|não passou|did not pass" <<< "$output"
 }
 
 prompt_retry_or_abort() {
@@ -456,6 +456,12 @@ run_with_retry() {
         fi
         # If it looks like a transient network/download error, ask the user.
         if is_network_error "$output"; then
+            # Clean AUR cache on validity-check failures to avoid stale downloads
+            if echo "$output" | grep -qiE "validity check|verificação.*validade|não passou|did not pass"; then
+                local pkg
+                pkg=$(echo "$output" | grep -oiE "cyan-skillfish-governor[a-z-]*" | head -1)
+                [[ -n "$pkg" ]] && aur_clean_cache "$pkg"
+            fi
             prompt_retry_or_abort "$context" || return 1
             print_info "Retrying ${context}..."
             continue
@@ -520,6 +526,20 @@ aur_install() {
         paru)   sudo -u "$REAL_USER" paru -S --noconfirm "$package" ;;
         yay)    sudo -u "$REAL_USER" yay -S --noconfirm "$package" ;;
     esac
+}
+
+aur_clean_cache() {
+    local package="$1" helper cache_dir
+    if ! helper="$(aur_helper)"; then return 0; fi
+    case "$helper" in
+        paru) cache_dir="${REAL_HOME}/.cache/paru/clone/${package}" ;;
+        yay)  cache_dir="${REAL_HOME}/.cache/yay/${package}" ;;
+        *)    return 0 ;;  # shelly manages its own cache
+    esac
+    if [[ -d "$cache_dir" ]]; then
+        print_info "Cleaning stale AUR cache for $package..."
+        rm -rf "$cache_dir"
+    fi
 }
 
 aur_remove() {
@@ -676,6 +696,7 @@ run_gpu_governor() {
 
     print_info "Installing cyan-skillfish-governor-smu via AUR helper..."
     ensure_build_deps || return 1
+    aur_clean_cache cyan-skillfish-governor-smu
     steamos_writable 'aur_install cyan-skillfish-governor-smu' || {
         fail_with_log "Failed to install GPU governor." "GPU Governor Install — aur_install"
         return 1
