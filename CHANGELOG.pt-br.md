@@ -21,7 +21,10 @@ como histórico datado de antes da adoção de versões numeradas.
   de marca). Latência zero adicionada, ~1-2% de overhead de CPU. Conteúdo
   stereo é automaticamente upmixado para 5.1. O sink permanece ativo por
   1 hora após o último som para evitar que o receiver volte para PCM.
-  Disponível como opção 13/13R no menu.
+  Após instalar, selecione "HD-Audio Generic Digital Surround 5.1
+  (HDMI/AC3)" nas configurações de dispositivo de áudio do KDE (Modo
+  Desktop) para ativar a saída Dolby Digital. Disponível como opção
+  13/13R no menu.
 
 ## v1.2.2 — 2026-08-16
 
