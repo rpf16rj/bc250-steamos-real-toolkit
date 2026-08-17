@@ -20,7 +20,9 @@ before the toolkit adopted numbered releases.
   adapter (not brand-specific). Zero added latency, ~1-2% CPU overhead.
   Stereo content is automatically upmixed to 5.1. The sink stays active
   for 1 hour after the last sound to prevent the receiver from falling
-  back to PCM. Available as menu option 13/13R.
+  back to PCM. After installing, select "HD-Audio Generic Digital Surround
+  5.1 (HDMI/AC3)" in the KDE audio device settings (Desktop Mode) to
+  activate Dolby Digital output. Available as menu option 13/13R.
 
 ## v1.2.2 — 2026-08-16
 
