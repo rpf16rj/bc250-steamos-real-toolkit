@@ -15,14 +15,17 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
 
 # Check dependencies
-for cmd in meson ninja sha256sum; do
+for cmd in meson ninja sha256sum wget cc; do
     command -v "$cmd" >/dev/null 2>&1 || die "required command missing: $cmd"
 done
 
-# Check Python packaging module
-if ! python3 -c "import packaging" 2>/dev/null; then
-    die "Python packaging module not found. Install it with: sudo pacman -S python-packaging"
-fi
+# Check Python modules required by Mesa's meson build
+for mod in mako packaging yaml; do
+    python3 -c "import $mod" 2>/dev/null || die "Python module '$mod' not found. Install it with: sudo pacman -S python-mako python-packaging python-yaml"
+done
+
+# Check for glslangValidator (needed for shader compilation)
+command -v glslangValidator >/dev/null 2>&1 || die "glslangValidator not found. Install it with: sudo pacman -S glslang"
 
 step "Download Mesa ${MESA_VERSION}"
 mkdir -p "$BUILD_ROOT"

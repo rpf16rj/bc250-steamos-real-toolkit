@@ -7,6 +7,16 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.2.2 — 2026-08-16
+
+- **Corrigido:** Falha na compilação do Mesa em alguns sistemas SteamOS —
+  dependências de build ausentes (`zstd`, `glslang`, `python-yaml`) agora
+  são instaladas automaticamente, e a flag `--needed` foi removida para
+  que o pacman reinstale pacotes cujos arquivos `.pc` e headers foram
+  removidos da imagem do SteamOS.
+- **Corrigido:** Verificação pós-instalação agora confirma que os
+  arquivos pkgconfig críticos estão presentes antes de tentar o build.
+
 ## v1.2.1 — 2026-08-16
 
 - **Corrigido:** Stuttering de áudio sob alto load — amostragem GRBM reduzida

@@ -7,6 +7,16 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.2.2 — 2026-08-16
+
+- **Fixed:** Mesa build failure on some SteamOS systems — missing build
+  dependencies (`zstd`, `glslang`, `python-yaml`) are now installed
+  automatically, and the `--needed` flag was removed so pacman
+  force-reinstalls packages whose `.pc` files and headers were stripped
+  from the SteamOS image.
+- **Fixed:** Post-install verification now checks that critical pkgconfig
+  files are actually present before attempting the Mesa build.
+
 ## v1.2.1 — 2026-08-16
 
 - **Fixed:** Audio stuttering under high load — GRBM polling reduced from

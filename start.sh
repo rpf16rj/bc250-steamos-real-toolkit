@@ -2304,16 +2304,19 @@ gfx1013_ensure_mesa_build_deps() {
     # fail to launch even though the compositor session itself is Wayland),
     # so a single `pacman -S --overwrite` pass restores everything without
     # guesswork or repeated failed meson runs.
-    local pkgs=(meson ninja python-mako python-packaging
+    local pkgs=(meson ninja python-mako python-packaging python-yaml
                 glibc linux-api-headers libdrm wayland wayland-protocols
-                libffi systemd-libs libelf
+                libffi systemd-libs libelf zlib zstd expat glslang
                 libxcb libx11 libxext libxdamage libxfixes libxrandr
                 libxshmfence libxxf86vm libxrender libxau libxdmcp xorgproto
                 xcb-util xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image)
     local need_install=0
     command -v meson >/dev/null 2>&1 || need_install=1
     command -v ninja >/dev/null 2>&1 || need_install=1
+    command -v cc >/dev/null 2>&1 || need_install=1
+    command -v glslangValidator >/dev/null 2>&1 || need_install=1
     python3 -c "import packaging" 2>/dev/null || need_install=1
+    python3 -c "import yaml" 2>/dev/null || need_install=1
     [[ -f /usr/include/stdio.h ]] || need_install=1
     [[ -f /usr/include/linux/errno.h ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/libdrm.pc ]] || need_install=1
@@ -2325,6 +2328,10 @@ gfx1013_ensure_mesa_build_deps() {
     [[ -f /usr/lib/pkgconfig/x11.pc ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/xrandr.pc ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/xshmfence.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/zlib.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/libzstd.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/expat.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/wayland-scanner.pc ]] || need_install=1
 
     [[ "$need_install" = 1 ]] || return 0
 
@@ -2342,11 +2349,29 @@ gfx1013_ensure_mesa_build_deps() {
         steamos-readonly disable || { print_info "Could not disable read-only mode."; return 1; }
     fi
     local rc=0
-    sudo pacman -S --needed --noconfirm --overwrite '*' "${pkgs[@]}" || rc=1
+    # Use --overwrite '*' to restore files SteamOS stripped from the image.
+    # Drop --needed so pacman reinstalls even when the DB thinks the package
+    # is already present (the local DB lists the package as fully installed
+    # but the actual .pc files and headers were removed from the image).
+    sudo pacman -S --noconfirm --overwrite '*' "${pkgs[@]}" || rc=1
     if (( was_steamos )); then
         steamos-readonly enable || true
     fi
-    return "$rc"
+    if (( rc != 0 )); then
+        return "$rc"
+    fi
+    # Verify critical .pc files are now present
+    local missing_pc=()
+    for pc in wayland-client wayland-scanner libudev libdrm libffi zlib libzstd expat; do
+        [[ -f "/usr/lib/pkgconfig/${pc}.pc" ]] || missing_pc+=("$pc")
+    done
+    if (( ${#missing_pc[@]} > 0 )); then
+        print_error "Some pkgconfig files are still missing after reinstall: ${missing_pc[*]}"
+        print_info "This may happen if the SteamOS image was updated and package versions changed."
+        print_info "Try running: sudo pacman -Syu --overwrite '*' ${pkgs[*]}"
+        return 1
+    fi
+    return 0
 }
 
 install_gfx1013_fix() {
