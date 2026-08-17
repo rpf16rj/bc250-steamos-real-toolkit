@@ -2306,7 +2306,7 @@ gfx1013_ensure_mesa_build_deps() {
     # guesswork or repeated failed meson runs.
     local pkgs=(meson ninja python-mako python-packaging python-yaml
                 glibc linux-api-headers libdrm wayland wayland-protocols
-                libffi systemd-libs libelf zlib libzstd expat glslang
+                libffi systemd-libs libelf zlib zstd expat glslang
                 libxcb libx11 libxext libxdamage libxfixes libxrandr
                 libxshmfence libxxf86vm libxrender libxau libxdmcp xorgproto
                 xcb-util xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image)
