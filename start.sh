@@ -120,6 +120,7 @@ persist_detect_and_record_installed() {
     if find "/lib/modules/$(uname -r)/updates" -name 'amdgpu.ko*' 2>/dev/null | grep -q .; then
         persist_state_add "audio"
     fi
+    ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
     if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
        && grep -q "VK_DRIVER_FILES=.*bc250-gfx1013" /etc/environment 2>/dev/null; then
         persist_state_add "gfx1013"
@@ -2292,6 +2293,208 @@ run_revert_audio_fix() {
     persist_state_remove "audio"
 }
 
+# --- HDMI AC-3 Surround Encoding (Dolby Digital via eARC) --------------------
+# The BC-250's DMI identifies as "AMD BC-250" instead of "OEM F7F", so
+# SteamOS's valve-fremont hardware profile (which enables AC3 profiles) is
+# never loaded. This installs a udev rule + WirePlumber config to enable the
+# hdmi-ac3.conf profile set, giving a 5.1 sink that encodes to AC-3 via the
+# a52 ALSA plugin. Zero latency, minimal CPU overhead (libavcodec a52enc).
+# Requires: alsa-plugins (a52 plugin), ffmpeg (libavcodec for encoding).
+AC3_UDEV_RULE="/etc/udev/rules.d/91-ac3-audio.rules"
+AC3_WP_CONF_DIR="${REAL_HOME}/.config/wireplumber/wireplumber.conf.d"
+AC3_WP_CONF="$AC3_WP_CONF_DIR/ac3-profile.conf"
+
+ac3_surround_installed() {
+    [[ -f "$AC3_UDEV_RULE" ]] && [[ -f "$AC3_WP_CONF" ]]
+}
+
+install_ac3_surround() {
+    print_step "AC3" "Installing HDMI AC-3 Surround Encoding (Dolby Digital)"
+
+    echo -e "  ${DIM}Enables AC-3 (Dolby Digital) encoding over HDMI/DP for 5.1 surround${RESET}"
+    echo -e "  ${DIM}via eARC. Bypasses TV LPCM downmix — receiver gets true 5.1 DD.${RESET}"
+    echo -e "  ${DIM}Zero latency, minimal CPU overhead (hardware a52 encoding).${RESET}"
+    echo -e "  ${DIM}Requires: alsa-plugins (a52), ffmpeg (libavcodec).${RESET}"
+    echo ""
+
+    # Check dependencies
+    local missing=()
+    [[ -f /usr/lib/alsa-lib/libasound_module_pcm_a52.so ]] || missing+=("alsa-plugins")
+    ldconfig -p 2>/dev/null | grep -q libavcodec || missing+=("ffmpeg")
+    [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]] || missing+=("alsa-card-profile")
+    if (( ${#missing[@]} > 0 )); then
+        print_error "Missing packages: ${missing[*]}"
+        print_info "Install with: sudo pacman -S ${missing[*]}"
+        return 1
+    fi
+
+    # Check that an HDMI audio card exists
+    if ! pactl list cards 2>/dev/null | grep -q "HDA ATI HDMI"; then
+        print_error "No HDA ATI HDMI card found. Connect a display via HDMI/DP first."
+        return 1
+    fi
+
+    if ! confirm "Continue with AC-3 Surround Encoding installation?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    # 1. Install udev rule to set ACP_PROFILE_SET for the HDMI audio card
+    print_info "Installing udev rule for ACP_PROFILE_SET=hdmi-ac3.conf..."
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }
+    fi
+    echo 'SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="hdmi-ac3.conf"' > "$AC3_UDEV_RULE"
+    sudo udevadm control --reload-rules 2>/dev/null || true
+    sudo udevadm trigger /sys/class/sound/card0 2>/dev/null || true
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+
+    # 2. Install WirePlumber config
+    print_info "Installing WirePlumber config for AC-3 profiles..."
+    mkdir -p "$AC3_WP_CONF_DIR"
+    cat > "$AC3_WP_CONF" << 'WPEOF'
+# Enable AC-3 (Dolby Digital) encoding profiles for HDMI/DP audio.
+# The BC-250 DMI identifies as "AMD BC-250" instead of "OEM F7F", so
+# SteamOS's valve-fremont hardware profile (which sets device.profile-set
+# to hdmi-ac3.conf) is never loaded. This config replicates those rules.
+monitor.alsa.rules = [
+  {
+    matches = [
+      {
+        device.name = "~alsa_card.pci-.*"
+        device.nick = "HDA ATI HDMI"
+      }
+    ]
+    actions = {
+      update-props = {
+        device.profile-set = "hdmi-ac3.conf"
+        api.alsa.use-acp = false
+      }
+    }
+  }
+  {
+    matches = [
+      {
+        node.name = "~alsa_output.pci-.*hdmi.*"
+      }
+    ]
+    actions = {
+      update-props = {
+        # Keep sink alive for 1 hour after last sound to prevent receiver
+        # from falling back to PCM between tracks/dialogue pauses.
+        session.suspend-timeout-seconds = 3600
+      }
+    }
+  }
+  {
+    matches = [
+      {
+        node.name = "~alsa_output.pci-.*hdmi.*"
+        alsa.name = "~a52.*"
+      }
+    ]
+    actions = {
+      update-props = {
+        # Collect one AC3 frame (1536 samples) before starting playback,
+        # else the a52 plugin EPIPEs on startup.
+        api.alsa.start-delay = 1536
+        # Buffer tuning: period-size=768 (one AC3 half-frame at 48kHz),
+        # period-num=4 gives 64ms buffer — low latency for gamescope.
+        api.alsa.period-size = 768
+        api.alsa.period-num = 4
+      }
+    }
+  }
+]
+WPEOF
+    chown -R "$REAL_USER":"$REAL_USER" "$AC3_WP_CONF_DIR" 2>/dev/null || true
+
+    # 3. Restart WirePlumber and select the AC3 profile
+    print_info "Restarting WirePlumber and selecting AC-3 profile..."
+    systemctl --user restart wireplumber 2>/dev/null
+    sleep 3
+
+    # Find and select the AC3 surround profile
+    local card_name="alsa_card.pci-0000_01_00.1"
+    if ! pactl set-card-profile "$card_name" output:hdmi-ac3-surround 2>/dev/null; then
+        # Try to find the card name dynamically
+        card_name=$(pactl list cards 2>/dev/null | grep "alsa_card.pci-.*HDMI" -B1 | grep "Name:" | awk '{print $2}')
+        if [[ -n "$card_name" ]]; then
+            pactl set-card-profile "$card_name" output:hdmi-ac3-surround 2>/dev/null || true
+        fi
+    fi
+    sleep 1
+
+    # Set the AC3 sink as default
+    local ac3_sink
+    ac3_sink=$(pactl list sinks short 2>/dev/null | grep "hdmi-ac3-surround" | awk '{print $2}' | head -1)
+    if [[ -n "$ac3_sink" ]]; then
+        pactl set-default-sink "$ac3_sink" 2>/dev/null
+        print_success "AC-3 Surround Encoding installed! Profile: output:hdmi-ac3-surround"
+        print_info "Default sink set to: $ac3_sink"
+        print_info "Receiver should show Dolby Digital (DD/DD+) when audio plays."
+        print_info "The sink stays active for 1 hour after last sound to prevent PCM fallback."
+    else
+        print_error "AC-3 profile was selected but no sink was created."
+        print_info "Check: pactl list cards | grep ac3"
+        print_info "Try manually: pactl set-card-profile $card_name output:hdmi-ac3-surround"
+        return 1
+    fi
+
+    persist_state_add "ac3"
+}
+
+run_revert_ac3_surround() {
+    print_step "R-AC3" "Revert HDMI AC-3 Surround Encoding"
+
+    if ! ac3_surround_installed; then
+        print_info "AC-3 Surround Encoding is not installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will restore the default HDMI stereo profile. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    # Remove udev rule
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        steamos-readonly disable || true
+    fi
+    rm -f "$AC3_UDEV_RULE"
+    sudo udevadm control --reload-rules 2>/dev/null || true
+    sudo udevadm trigger /sys/class/sound/card0 2>/dev/null || true
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+
+    # Remove WirePlumber config
+    rm -f "$AC3_WP_CONF"
+
+    # Restart WirePlumber and restore default profile
+    systemctl --user restart wireplumber 2>/dev/null
+    sleep 3
+
+    local card_name="alsa_card.pci-0000_01_00.1"
+    pactl set-card-profile "$card_name" output:hdmi-stereo 2>/dev/null || true
+    sleep 1
+
+    local stereo_sink
+    stereo_sink=$(pactl list sinks short 2>/dev/null | grep "hdmi-stereo" | awk '{print $2}' | head -1)
+    if [[ -n "$stereo_sink" ]]; then
+        pactl set-default-sink "$stereo_sink" 2>/dev/null
+    fi
+
+    print_success "AC-3 Surround Encoding reverted. HDMI stereo profile restored."
+    persist_state_remove "ac3"
+}
+
 gfx1013_ensure_mesa_build_deps() {
     # SteamOS's immutable rootfs strips dev headers and .pc files from many
     # packages to save space, even though pacman's local DB still lists the
@@ -4044,6 +4247,8 @@ run_revert_all() {
     echo ""
     run_revert_audio_fix
     echo ""
+    run_revert_ac3_surround
+    echo ""
     run_revert_core_unlock
     echo ""
     run_revert_ram_split
@@ -4081,6 +4286,8 @@ run_install_manual() {
         print_item "11"  "Install GFX1013 Compute Fix"   "⚠  Kernel + Mesa/RADV: async compute + RADV_GFX103 opt-in (+20-25% perf)"
         print_item "11R" "Revert GFX1013 Compute Fix"    "Restore stock amdgpu.ko + Mesa"
         print_item "12"  "Install Combined Audio+GFX1013" "⚠  Both fixes in a single kernel build (recommended)"
+        print_item "13"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
+        print_item "13R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -4109,6 +4316,8 @@ run_install_manual() {
             11) install_gfx1013_fix;     press_enter ;;
             11R) run_revert_gfx1013_fix; press_enter ;;
             12) install_combined_fix;    press_enter ;;
+            13) install_ac3_surround;      press_enter ;;
+            13R) run_revert_ac3_surround;  press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
@@ -4260,6 +4469,7 @@ reapply_installed_components() {
             zswap)      run_zram_zswap_toggle auto || print_error "ZSWAP reapply failed" ;;
             acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
             audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
+            ac3)        install_ac3_surround || print_error "AC-3 surround reapply failed" ;;
             cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;
             core_unlock) print_info "CPU Core Unlock boot service persists via the atomic-update keep list — skipped in unattended re-apply." ;;
             ram_split)  print_info "RAM/VRAM split persists on its own (CMOS is hardware state; GRUB config is in the atomic-update keep list) — skipped in unattended re-apply." ;;
