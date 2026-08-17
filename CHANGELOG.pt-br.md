@@ -7,6 +7,22 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.3.0 — 2026-08-17
+
+- **Novo:** Codificação AC-3 Surround via HDMI — ativa codificação Dolby
+  Digital 5.1 em tempo real por HDMI/DisplayPort via eARC. Antes era
+  impossível no SteamOS com o BC-250 porque o perfil de hardware que
+  carrega os perfis de áudio AC-3 nunca era ativado (o DMI do BC-250
+  identifica como "AMD BC-250" em vez de "OEM F7F" da Valve). Isso
+  instala uma regra udev e uma configuração do WirePlumber que ativa o
+  conjunto de perfis `hdmi-ac3.conf` nativo, criando um sink 5.1 que
+  codifica todo o áudio para AC-3 via o plugin `a52` do ALSA. Funciona
+  com qualquer adaptador DisplayPort-para-HDMI ativo (não é específico
+  de marca). Latência zero adicionada, ~1-2% de overhead de CPU. Conteúdo
+  stereo é automaticamente upmixado para 5.1. O sink permanece ativo por
+  1 hora após o último som para evitar que o receiver volte para PCM.
+  Disponível como opção 13/13R no menu.
+
 ## v1.2.2 — 2026-08-16
 
 - **Corrigido:** Falha na compilação do Mesa em alguns sistemas SteamOS —
