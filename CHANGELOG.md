@@ -7,6 +7,21 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.3.0 — 2026-08-17
+
+- **New:** HDMI AC-3 Surround Encoding — enables real-time Dolby Digital
+  5.1 encoding over HDMI/DisplayPort via eARC. Previously impossible on
+  SteamOS with the BC-250 because the hardware profile that loads the
+  AC-3 audio profiles was never triggered (the BC-250's DMI identifies
+  as "AMD BC-250" instead of Valve's "OEM F7F"). This installs a udev
+  rule and WirePlumber config that activates the built-in `hdmi-ac3.conf`
+  profile set, giving a 5.1 sink that encodes all audio to AC-3 via the
+  native ALSA `a52` plugin. Works with any active DisplayPort-to-HDMI
+  adapter (not brand-specific). Zero added latency, ~1-2% CPU overhead.
+  Stereo content is automatically upmixed to 5.1. The sink stays active
+  for 1 hour after the last sound to prevent the receiver from falling
+  back to PCM. Available as menu option 13/13R.
+
 ## v1.2.2 — 2026-08-16
 
 - **Fixed:** Mesa build failure on some SteamOS systems — missing build

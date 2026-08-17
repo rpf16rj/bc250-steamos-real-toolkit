@@ -25,6 +25,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 - CoolerControl integration for custom fan curves via a web UI
 - Prebuilt Toolkit SteamOS Control Decky plugin with Pump Fan automatic/manual/managed controls, four-point profiles, and optional LED bar controls
 - HDMI-CEC / TV & receiver control
+- HDMI AC-3 Surround Encoding — Dolby Digital 5.1 over HDMI/DP via eARC, previously impossible on SteamOS with the BC-250; works with any active DP-to-HDMI adapter
 - Community-sourced fixes: ACPI power states, DisplayPort audio/video clock fix, AIC8800 WiFi/BT driver, GFX1013 compute queue fix (async compute, patched kernel + Mesa/RADV)
 - One-click install, automatic desktop shortcut, and versioned releases with a changelog — everything is fully revertible
 

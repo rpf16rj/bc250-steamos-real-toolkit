@@ -25,6 +25,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 - Integração com CoolerControl para curvas de fan personalizadas via interface web
 - Plugin Decky Toolkit SteamOS Control pré-compilado, com controles automático/manual/gerenciado da Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
 - Controle de HDMI-CEC / TV e receiver
+- Codificação AC-3 Surround via HDMI — Dolby Digital 5.1 por HDMI/DP via eARC, antes impossível no SteamOS com o BC-250; funciona com qualquer adaptador DP-para-HDMI ativo
 - Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, correção da fila de compute GFX1013 (compute assíncrono, kernel + Mesa/RADV patchados)
 - Instalação em um clique, atalho de área de trabalho automático, e lançamentos versionados com changelog — tudo totalmente reversível
 
