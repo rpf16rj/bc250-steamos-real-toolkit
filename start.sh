@@ -2304,16 +2304,19 @@ gfx1013_ensure_mesa_build_deps() {
     # fail to launch even though the compositor session itself is Wayland),
     # so a single `pacman -S --overwrite` pass restores everything without
     # guesswork or repeated failed meson runs.
-    local pkgs=(meson ninja python-mako python-packaging
+    local pkgs=(meson ninja python-mako python-packaging python-yaml
                 glibc linux-api-headers libdrm wayland wayland-protocols
-                libffi systemd-libs libelf zlib libzstd expat
+                libffi systemd-libs libelf zlib libzstd expat glslang
                 libxcb libx11 libxext libxdamage libxfixes libxrandr
                 libxshmfence libxxf86vm libxrender libxau libxdmcp xorgproto
                 xcb-util xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image)
     local need_install=0
     command -v meson >/dev/null 2>&1 || need_install=1
     command -v ninja >/dev/null 2>&1 || need_install=1
+    command -v cc >/dev/null 2>&1 || need_install=1
+    command -v glslangValidator >/dev/null 2>&1 || need_install=1
     python3 -c "import packaging" 2>/dev/null || need_install=1
+    python3 -c "import yaml" 2>/dev/null || need_install=1
     [[ -f /usr/include/stdio.h ]] || need_install=1
     [[ -f /usr/include/linux/errno.h ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/libdrm.pc ]] || need_install=1
@@ -2328,6 +2331,7 @@ gfx1013_ensure_mesa_build_deps() {
     [[ -f /usr/lib/pkgconfig/zlib.pc ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/libzstd.pc ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/expat.pc ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/wayland-scanner.pc ]] || need_install=1
 
     [[ "$need_install" = 1 ]] || return 0
 
@@ -2358,7 +2362,7 @@ gfx1013_ensure_mesa_build_deps() {
     fi
     # Verify critical .pc files are now present
     local missing_pc=()
-    for pc in wayland-client libudev libdrm libffi zlib libzstd expat; do
+    for pc in wayland-client wayland-scanner libudev libdrm libffi zlib libzstd expat; do
         [[ -f "/usr/lib/pkgconfig/${pc}.pc" ]] || missing_pc+=("$pc")
     done
     if (( ${#missing_pc[@]} > 0 )); then
