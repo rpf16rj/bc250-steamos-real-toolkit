@@ -7,6 +7,26 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.3.1 — 2026-08-17
+
+- **Corrigido:** Instalação/reversão do AC-3 Surround agora funciona
+  corretamente quando o toolkit é executado via `sudo`. Comandos do
+  PipeWire e WirePlumber são executados em um script separado de sessão
+  de usuário (`ac3-user-setup.sh`) como o usuário real, corrigindo
+  falhas e travamentos na detecção da placa de áudio que ocorriam quando
+  `pactl`/`systemctl --user` eram chamados como root.
+- **Corrigido:** Configuração do WirePlumber corrigida para usar
+  `api.acp.disable-pro-audio` em vez de `api.alsa.use-acp`, correspondendo
+  ao perfil de hardware valve-fremont da Valve. A configuração anterior
+  impedia o carregamento do conjunto de perfis `hdmi-ac3.conf`, deixando
+  apenas perfis genéricos `on`/`off`.
+- **Novo:** Status do AC-3 Surround agora exibido em "Verificar Minha
+  Instalação" (opção V) com uma seção de Áudio dedicada mostrando se o
+  AC-3 está instalado e se o perfil está atualmente ativo.
+- **Alterado:** Logs do toolkit (trace, execução, erro, diagnóstico) agora
+  salvos em `<diretório-toolkit>/logs/` em vez de `~/.bc250-toolkit/logs/`.
+  Logs de erro ainda são copiados para a Área de Trabalho em caso de falha.
+
 ## v1.3.0 — 2026-08-17
 
 - **Novo:** Codificação AC-3 Surround via HDMI — ativa codificação Dolby

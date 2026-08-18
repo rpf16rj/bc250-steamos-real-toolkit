@@ -50,14 +50,17 @@ steps taken). Follow these steps:
    git push origin develop
    ```
 
-6. Merge into `main` and tag:
+6. Merge into `main` and tag (the tag message includes the changelog entry
+   so it's always visible in `git show vX.Y.Z` and on the GitHub tag page):
    ```bash
    git checkout main
    git pull origin main
    git merge --no-ff develop -m "release: vX.Y.Z"
-   git tag -a vX.Y.Z -m "vX.Y.Z"
+   # Extract the changelog section for this version into the tag message
+   TAG_NOTES=$(sed -n "/^## v$(cat VERSION)/,/^## v/{/^## v$(cat VERSION)/!{/^## v/!p}}" CHANGELOG.md)
+   git tag -a "v$(cat VERSION)" -m "v$(cat VERSION)" -m "$TAG_NOTES"
    git push origin main
-   git push origin vX.Y.Z
+   git push origin "v$(cat VERSION)"
    git checkout develop
    ```
 
