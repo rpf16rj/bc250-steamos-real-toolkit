@@ -252,10 +252,18 @@ do_install() {
         fi
     fi
 
-    # Check that an HDMI audio card exists
-    if ! pactl list cards 2>/dev/null | grep -q "HDA ATI HDMI"; then
-        print_error "No HDA ATI HDMI card found. Connect a display via HDMI/DP first."
-        print_info "If your HDMI audio card has a different name, edit the WirePlumber"
+    # Check that an HDMI/DP audio card exists
+    # The BC-250's HDA card is named "HD-Audio Generic" (not "HDA ATI HDMI"),
+    # and audio goes through DisplayPort (possibly via an active DP-to-HDMI adapter).
+    local hdmi_card_name
+    hdmi_card_name=$(pactl list cards 2>/dev/null | grep -B1 "alsa.mixer_name = \"ATI R6xx HDMI\"" | grep "Name:" | awk '{print $2}' | head -1)
+    if [[ -z "$hdmi_card_name" ]]; then
+        # Broader fallback: any card with HDMI in the PCM device names
+        hdmi_card_name=$(pactl list cards 2>/dev/null | grep -B5 "HDMI / DisplayPort" | grep "Name:" | awk '{print $2}' | head -1)
+    fi
+    if [[ -z "$hdmi_card_name" ]]; then
+        print_error "No HDMI/DP audio card found."
+        print_info "If your audio card has a different name, edit the WirePlumber"
         print_info "config device.nick match after installation."
         return 1
     fi
@@ -292,13 +300,15 @@ monitor.alsa.rules = [
     matches = [
       {
         device.name = "~alsa_card.pci-.*"
-        device.nick = "HDA ATI HDMI"
+        device.nick = "~HD-Audio Generic"
       }
     ]
     actions = {
       update-props = {
+        device.description = "HDMI / DisplayPort"
+        api.acp.disable-pro-audio = true
         device.profile-set = "hdmi-ac3.conf"
-        api.alsa.use-acp = false
+        device.routes.default-sink-volume = 1.0
       }
     }
   }
@@ -328,10 +338,6 @@ monitor.alsa.rules = [
         # Collect one AC3 frame (1536 samples) before starting playback,
         # else the a52 plugin EPIPEs on startup.
         api.alsa.start-delay = 1536
-        # Buffer tuning: period-size=768 (one AC3 half-frame at 48kHz),
-        # period-num=4 gives 64ms buffer — low latency for gamescope.
-        api.alsa.period-size = 768
-        api.alsa.period-num = 4
       }
     }
   }
@@ -355,10 +361,9 @@ WPEOF
 
     # Find and select the AC3 surround profile
     local card_name
-    card_name=$(pactl list cards 2>/dev/null | grep -B1 "HDA ATI HDMI" | grep "Name:" | awk '{print $2}' | head -1)
+    card_name=$(pactl list cards 2>/dev/null | grep -B5 "hdmi-ac3-surround" | grep "Name:" | awk '{print $2}' | head -1)
     if [[ -z "$card_name" ]]; then
-        # Fallback: try common BC-250 card name
-        card_name="alsa_card.pci-0000_01_00.1"
+        card_name="$hdmi_card_name"
     fi
 
     pactl set-card-profile "$card_name" output:hdmi-ac3-surround 2>/dev/null || true
@@ -421,10 +426,7 @@ do_revert() {
 
     # Restore default HDMI stereo profile
     local card_name
-    card_name=$(pactl list cards 2>/dev/null | grep -B1 "HDA ATI HDMI" | grep "Name:" | awk '{print $2}' | head -1)
-    if [[ -z "$card_name" ]]; then
-        card_name="alsa_card.pci-0000_01_00.1"
-    fi
+    card_name=$(pactl list cards 2>/dev/null | grep -B5 "hdmi-ac3-surround\|hdmi-stereo" | grep "Name:" | awk '{print $2}' | head -1)
 
     pactl set-card-profile "$card_name" output:hdmi-stereo 2>/dev/null || true
     sleep 1

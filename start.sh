@@ -170,8 +170,9 @@ persist_restore_all_configs() {
 # ==============================================================================
 # Capture a hidden trace of every command plus stdout/stderr so the diagnostic
 # log can show exactly what the script ran and printed when an error occurs.
-LOG_DIR="${REAL_HOME}/.bc250-toolkit/logs"
+LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
+chown "$REAL_USER":"$REAL_USER" "$LOG_DIR" 2>/dev/null || true
 TOOLKIT_RUN_LOG="${LOG_DIR}/bc250-toolkit-run-$(date +%Y%m%d-%H%M%S)-$$.log"
 TOOLKIT_TRACE_LOG="${LOG_DIR}/bc250-toolkit-trace-$(date +%Y%m%d-%H%M%S)-$$.log"
 INSTALL_ALL_PROGRESS="${LOG_DIR}/install-all-progress"
@@ -334,7 +335,7 @@ is_steamos() {
 save_error_log() {
     local context="${1:-Unknown step}"
     local detail="${2:-}"
-    local logfile="${REAL_HOME}/bc250-toolkit-error-$(date +%Y%m%d-%H%M%S).log"
+    local logfile="$LOG_DIR/bc250-toolkit-error-$(date +%Y%m%d-%H%M%S).log"
     {
         echo "BC-250 SteamOS Real Toolkit — Error Report"
         echo "Generated : $(date)"
@@ -389,9 +390,9 @@ save_error_log() {
     fi
 
     print_info "A diagnostic log was saved to: ${BOLD}${logfile}${RESET}"
-    print_info "Please attach this log when asking for help:"
-    print_info "  • SteamOS/BC-250 community (Discord/forums)"
-    print_info "  • GitHub Issue: ${CYAN}https://github.com/rpf16rj/bc250-steamos-real-toolkit/issues/new${RESET}"
+    print_info "Please share this log when asking for help:"
+    print_info "  Discord: BC-250 community channel"
+    print_info "  GitHub:  ${CYAN}https://github.com/rpf16rj/bc250-steamos-real-toolkit/issues/new${RESET}"
 }
 
 fail_with_log() {
@@ -2308,16 +2309,43 @@ ac3_surround_installed() {
     [[ -f "$AC3_UDEV_RULE" ]] && [[ -f "$AC3_WP_CONF" ]]
 }
 
+ac3_profile_active() {
+    ac3_pactl list cards 2>/dev/null | grep "Active Profile" | grep -q "ac3"
+}
+
+ac3_pactl() {
+    local uid
+    uid=$(id -u "$REAL_USER")
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" pactl "$@"
+}
+
+AC3_USER_SCRIPT="$SCRIPT_DIR/extras/hdmi-ac3-encoding/ac3-user-setup.sh"
+
 install_ac3_surround() {
     print_step "AC3" "Installing HDMI AC-3 Surround Encoding (Dolby Digital)"
 
     echo -e "  ${DIM}Enables AC-3 (Dolby Digital) encoding over HDMI/DP for 5.1 surround${RESET}"
     echo -e "  ${DIM}via eARC. Bypasses TV LPCM downmix — receiver gets true 5.1 DD.${RESET}"
-    echo -e "  ${DIM}Zero latency, minimal CPU overhead (hardware a52 encoding).${RESET}"
-    echo -e "  ${DIM}Requires: alsa-plugins (a52), ffmpeg (libavcodec).${RESET}"
+    echo -e "  ${DIM}Zero latency, minimal CPU overhead (native a52 encoding).${RESET}"
+    echo -e "  ${DIM}Requires: DP Audio/Video Fix (option 7), alsa-plugins (a52), ffmpeg (libavcodec).${RESET}"
     echo ""
 
+    # Check that the DP Audio/Video Fix is installed (this feature depends on it)
+    print_info "Checking DP Audio/Video Fix (amdgpu patched module)..."
+    local resolved_amdgpu
+    resolved_amdgpu=$(modinfo -F filename amdgpu 2>/dev/null || echo "")
+    if [[ "$resolved_amdgpu" != *"/updates/"* ]]; then
+        print_error "The DisplayPort Audio/Video Fix (option 7) is required for AC-3 Surround."
+        print_info "The BC-250 has no native HDMI output — audio goes through DisplayPort,"
+        print_info "and the DP Audio Fix patches the amdgpu driver to fix audio clock issues."
+        print_info "Please install option 7 (DP Audio/Video Fix) first, reboot, then try again."
+        fail_with_log "DP Audio/Video Fix not installed — AC-3 Surround requires it" "AC-3 install — missing DP audio patch"
+        return 1
+    fi
+    print_info "DP Audio/Video Fix detected: $resolved_amdgpu"
+
     # Check and install dependencies
+    print_info "Checking dependencies (alsa-plugins, ffmpeg)..."
     local missing=()
     [[ -f /usr/lib/alsa-lib/libasound_module_pcm_a52.so ]] || missing+=("alsa-plugins")
     ldconfig -p 2>/dev/null | grep -q libavcodec || missing+=("ffmpeg")
@@ -2334,13 +2362,26 @@ install_ac3_surround() {
             return 1
         fi
         (( was_steamos_deps )) && steamos-readonly enable || true
+    else
+        print_info "All dependencies already installed."
     fi
 
-    # Check that an HDMI audio card exists
-    if ! pactl list cards 2>/dev/null | grep -q "HDA ATI HDMI"; then
-        print_error "No HDA ATI HDMI card found. Connect a display via HDMI/DP first."
+    # Check that an HDMI/DP audio card exists
+    print_info "Detecting HDMI/DP audio card..."
+    local uid
+    uid=$(id -u "$REAL_USER")
+    local detect_output
+    detect_output=$(sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" bash "$AC3_USER_SCRIPT" detect 2>/dev/null || true)
+    local hdmi_card_name
+    hdmi_card_name=$(echo "$detect_output" | grep "^CARD=" | cut -d= -f2)
+    if [[ -z "$hdmi_card_name" ]]; then
+        print_error "No HDMI/DP audio card found."
+        print_info "The BC-250 outputs audio through DisplayPort. If you're using a"
+        print_info "DP-to-HDMI adapter, make sure it's an active adapter and is connected."
+        fail_with_log "No HDMI/DP audio card found" "AC-3 install — no audio card"
         return 1
     fi
+    print_info "Found audio card: $hdmi_card_name"
 
     if ! confirm "Continue with AC-3 Surround Encoding installation?"; then
         print_info "Cancelled."
@@ -2355,101 +2396,32 @@ install_ac3_surround() {
         steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }
     fi
     echo 'SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="hdmi-ac3.conf"' > "$AC3_UDEV_RULE"
-    sudo udevadm control --reload-rules 2>/dev/null || true
-    sudo udevadm trigger /sys/class/sound/card0 2>/dev/null || true
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger /sys/class/sound/card0 2>/dev/null || true
     if (( was_steamos )); then
         steamos-readonly enable || true
     fi
 
-    # 2. Install WirePlumber config
-    print_info "Installing WirePlumber config for AC-3 profiles..."
-    mkdir -p "$AC3_WP_CONF_DIR"
-    cat > "$AC3_WP_CONF" << 'WPEOF'
-# Enable AC-3 (Dolby Digital) encoding profiles for HDMI/DP audio.
-# The BC-250 DMI identifies as "AMD BC-250" instead of "OEM F7F", so
-# SteamOS's valve-fremont hardware profile (which sets device.profile-set
-# to hdmi-ac3.conf) is never loaded. This config replicates those rules.
-monitor.alsa.rules = [
-  {
-    matches = [
-      {
-        device.name = "~alsa_card.pci-.*"
-        device.nick = "HDA ATI HDMI"
-      }
-    ]
-    actions = {
-      update-props = {
-        device.profile-set = "hdmi-ac3.conf"
-        api.alsa.use-acp = false
-      }
-    }
-  }
-  {
-    matches = [
-      {
-        node.name = "~alsa_output.pci-.*hdmi.*"
-      }
-    ]
-    actions = {
-      update-props = {
-        # Keep sink alive for 1 hour after last sound to prevent receiver
-        # from falling back to PCM between tracks/dialogue pauses.
-        session.suspend-timeout-seconds = 3600
-      }
-    }
-  }
-  {
-    matches = [
-      {
-        node.name = "~alsa_output.pci-.*hdmi.*"
-        alsa.name = "~a52.*"
-      }
-    ]
-    actions = {
-      update-props = {
-        # Collect one AC3 frame (1536 samples) before starting playback,
-        # else the a52 plugin EPIPEs on startup.
-        api.alsa.start-delay = 1536
-        # Buffer tuning: period-size=768 (one AC3 half-frame at 48kHz),
-        # period-num=4 gives 64ms buffer — low latency for gamescope.
-        api.alsa.period-size = 768
-        api.alsa.period-num = 4
-      }
-    }
-  }
-]
-WPEOF
-    chown -R "$REAL_USER":"$REAL_USER" "$AC3_WP_CONF_DIR" 2>/dev/null || true
+    # 2-4. Run user-session setup (WirePlumber config, restart, profile selection)
+    #    These must run as the real user to access PipeWire.
+    print_info "Installing WirePlumber config and selecting AC-3 profile..."
+    local user_output
+    user_output=$(sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" bash "$AC3_USER_SCRIPT" install 2>&1 || true)
+    echo "$user_output" | grep -v "^CARD=\|^SINK=\|^SUCCESS=\|^ERROR=\|^REVERTED=" || true
 
-    # 3. Restart WirePlumber and select the AC3 profile
-    print_info "Restarting WirePlumber and selecting AC-3 profile..."
-    systemctl --user restart wireplumber 2>/dev/null
-    sleep 3
+    local card_name ac3_sink
+    card_name=$(echo "$user_output" | grep "^CARD=" | cut -d= -f2)
+    ac3_sink=$(echo "$user_output" | grep "^SINK=" | cut -d= -f2)
 
-    # Find and select the AC3 surround profile
-    local card_name="alsa_card.pci-0000_01_00.1"
-    if ! pactl set-card-profile "$card_name" output:hdmi-ac3-surround 2>/dev/null; then
-        # Try to find the card name dynamically
-        card_name=$(pactl list cards 2>/dev/null | grep "alsa_card.pci-.*HDMI" -B1 | grep "Name:" | awk '{print $2}')
-        if [[ -n "$card_name" ]]; then
-            pactl set-card-profile "$card_name" output:hdmi-ac3-surround 2>/dev/null || true
-        fi
-    fi
-    sleep 1
-
-    # Set the AC3 sink as default
-    local ac3_sink
-    ac3_sink=$(pactl list sinks short 2>/dev/null | grep "hdmi-ac3-surround" | awk '{print $2}' | head -1)
-    if [[ -n "$ac3_sink" ]]; then
-        pactl set-default-sink "$ac3_sink" 2>/dev/null
+    if echo "$user_output" | grep -q "^SUCCESS"; then
         print_success "AC-3 Surround Encoding installed! Profile: output:hdmi-ac3-surround"
         print_info "Default sink set to: $ac3_sink"
         print_info "Receiver should show Dolby Digital (DD/DD+) when audio plays."
         print_info "The sink stays active for 1 hour after last sound to prevent PCM fallback."
     else
-        print_error "AC-3 profile was selected but no sink was created."
-        print_info "Check: pactl list cards | grep ac3"
-        print_info "Try manually: pactl set-card-profile $card_name output:hdmi-ac3-surround"
+        print_error "AC-3 installation failed."
+        echo "$user_output" | grep "^ERROR:" | sed 's/^ERROR:/  Error:/' || true
+        fail_with_log "AC-3 install failed" "${user_output}"
         return 1
     fi
 
@@ -2474,9 +2446,11 @@ ac3_post_install_test() {
     print_info "Your receiver should display Dolby Digital / DD during the test."
     echo ""
 
-    # Run speaker-test for 2 seconds per channel on the AC3 sink
+    # Run speaker-test as the real user (needs PipeWire access)
+    local uid
+    uid=$(id -u "$REAL_USER")
     local test_output
-    test_output=$(timeout 15 speaker-test -D "$ac3_sink" -c 6 -t sine -l 1 -p 1 2>&1 || true)
+    test_output=$(sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" bash "$AC3_USER_SCRIPT" test "$ac3_sink" 2>&1 || true)
     echo "$test_output" | tail -5
 
     echo ""
@@ -2499,20 +2473,20 @@ ac3_auto_diagnose() {
     print_step "AC3-DIAG" "Auto-diagnosis"
 
     # Check 1: Is the sink still there?
-    if ! pactl list sinks short 2>/dev/null | grep -q "$ac3_sink"; then
+    if ! ac3_pactl list sinks short 2>/dev/null | grep -q "$ac3_sink"; then
         issues+=("AC-3 sink '$ac3_sink' not found — it may have been removed after WirePlumber restart")
     fi
 
     # Check 2: Is the profile still active?
     local active_profile
-    active_profile=$(pactl list cards 2>/dev/null | grep -A20 "Name: $card_name" | grep "Active Profile" | awk -F': ' '{print $2}')
+    active_profile=$(ac3_pactl list cards 2>/dev/null | grep -A20 "Name: $card_name" | grep "Active Profile" | awk -F': ' '{print $2}')
     if [[ "$active_profile" != *"ac3"* ]]; then
         issues+=("Active profile is '$active_profile' (expected output:hdmi-ac3-surround)")
     fi
 
     # Check 3: Is the sink the default?
     local default_sink
-    default_sink=$(pactl get-default-sink 2>/dev/null)
+    default_sink=$(ac3_pactl get-default-sink 2>/dev/null)
     if [[ "$default_sink" != *"$ac3_sink"* ]]; then
         issues+=("Default sink is '$default_sink' (expected $ac3_sink)")
     fi
@@ -2530,7 +2504,9 @@ ac3_auto_diagnose() {
     fi
 
     # Check 6: Is WirePlumber running?
-    if ! systemctl --user is-active wireplumber 2>/dev/null | grep -q "active"; then
+    local uid
+    uid=$(id -u "$REAL_USER")
+    if ! sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user is-active wireplumber 2>/dev/null | grep -q "active"; then
         issues+=("WirePlumber service is not active")
     fi
 
@@ -2590,7 +2566,7 @@ ac3_auto_diagnose() {
 ac3_generate_diagnostic_log() {
     local card_name="$1" ac3_sink="$2" active_profile="$3"
     local -n diag_issues="$4"
-    local logfile="${REAL_HOME}/bc250-ac3-diagnostic-$(date +%Y%m%d-%H%M%S).log"
+    local logfile="$LOG_DIR/bc250-ac3-diagnostic-$(date +%Y%m%d-%H%M%S).log"
 
     {
         echo "BC-250 SteamOS Real Toolkit — AC-3 Surround Diagnostic Report"
@@ -2616,29 +2592,19 @@ ac3_generate_diagnostic_log() {
             echo "(none recorded)"
         fi
         echo ""
-        echo "== Audio Card =="
-        pactl list cards 2>/dev/null | grep -A30 "HDA ATI HDMI" || echo "No HDA ATI HDMI card found"
+        echo "== Audio Card / PipeWire / WirePlumber (user session) =="
+        local uid
+        uid=$(id -u "$REAL_USER")
+        sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" bash "$AC3_USER_SCRIPT" diag 2>/dev/null || echo "N/A"
         echo ""
         echo "== Active Profile =="
         echo "Card: $card_name"
         echo "Profile: ${active_profile:-unknown}"
         echo ""
-        echo "== AC-3 Sink =="
-        pactl list sinks 2>/dev/null | grep -A20 "$ac3_sink" || echo "Sink not found"
-        echo ""
-        echo "== Default Sink =="
-        pactl get-default-sink 2>/dev/null || echo "N/A"
-        echo ""
         echo "== ALSA HDMI Device Status =="
         cat /proc/asound/card0/pcm3p/sub0/status 2>/dev/null || echo "Device not accessible"
         echo ""
         cat /proc/asound/card0/pcm3p/sub0/hw_params 2>/dev/null || echo "No hw_params (device not open)"
-        echo ""
-        echo "== PipeWire Sinks =="
-        pactl list sinks short 2>/dev/null || echo "N/A"
-        echo ""
-        echo "== WirePlumber Status =="
-        systemctl --user status wireplumber --no-pager 2>&1 | head -15 || true
         echo ""
         echo "== Udev Rule =="
         [[ -f "$AC3_UDEV_RULE" ]] && cat "$AC3_UDEV_RULE" || echo "Not installed"
@@ -2699,9 +2665,13 @@ ac3_generate_diagnostic_log() {
 run_revert_ac3_surround() {
     print_step "R-AC3" "Revert HDMI AC-3 Surround Encoding"
 
-    if ! ac3_surround_installed; then
+    if ! ac3_surround_installed && ! ac3_profile_active; then
         print_info "AC-3 Surround Encoding is not installed — nothing to revert."
         return 0
+    fi
+
+    if ! ac3_surround_installed && ac3_profile_active; then
+        print_info "Config files not found, but AC-3 profile is still active — will revert profile."
     fi
 
     if ! confirm "This will restore the default HDMI stereo profile. Proceed?"; then
@@ -2716,28 +2686,20 @@ run_revert_ac3_surround() {
         steamos-readonly disable || true
     fi
     rm -f "$AC3_UDEV_RULE"
-    sudo udevadm control --reload-rules 2>/dev/null || true
-    sudo udevadm trigger /sys/class/sound/card0 2>/dev/null || true
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger /sys/class/sound/card0 2>/dev/null || true
     if (( was_steamos )); then
         steamos-readonly enable || true
     fi
 
-    # Remove WirePlumber config
-    rm -f "$AC3_WP_CONF"
-
-    # Restart WirePlumber and restore default profile
-    systemctl --user restart wireplumber 2>/dev/null
-    sleep 3
-
-    local card_name="alsa_card.pci-0000_01_00.1"
-    pactl set-card-profile "$card_name" output:hdmi-stereo 2>/dev/null || true
-    sleep 1
-
-    local stereo_sink
-    stereo_sink=$(pactl list sinks short 2>/dev/null | grep "hdmi-stereo" | awk '{print $2}' | head -1)
-    if [[ -n "$stereo_sink" ]]; then
-        pactl set-default-sink "$stereo_sink" 2>/dev/null
-    fi
+    # Remove WirePlumber config, restart WP, restore stereo profile
+    # (runs as real user to access PipeWire)
+    print_info "Reverting WirePlumber config and restoring HDMI stereo profile..."
+    local uid
+    uid=$(id -u "$REAL_USER")
+    local revert_output
+    revert_output=$(sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" bash "$AC3_USER_SCRIPT" revert 2>&1 || true)
+    echo "$revert_output" | grep -v "^REVERTED$" || true
 
     print_success "AC-3 Surround Encoding reverted. HDMI stereo profile restored."
     persist_state_remove "ac3"
@@ -4426,6 +4388,24 @@ run_status() {
         cec_icon="$DIM"; cec_color="$DIM"; cec_label="not configured"
     fi
     echo -e "  ${CYAN}HDMI-CEC / TV Control${RESET} ${cec_icon} ${cec_color}${cec_label}${RESET}"
+
+    echo ""
+    print_section "Audio"
+
+    local ac3_icon ac3_color ac3_label
+    if ac3_surround_installed; then
+        local uid ac3_active
+        uid=$(id -u "$REAL_USER")
+        ac3_active=$(sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" bash "$AC3_USER_SCRIPT" detect 2>/dev/null | grep "^AC3_ACTIVE=" | cut -d= -f2)
+        if [[ "$ac3_active" == "yes" ]]; then
+            ac3_icon="$ICON_OK"; ac3_color="$GREEN"; ac3_label="installed — AC-3 profile active"
+        else
+            ac3_icon="$ICON_WARN"; ac3_color="$YELLOW"; ac3_label="installed — profile not active (stereo)"
+        fi
+    else
+        ac3_icon="$DIM"; ac3_color="$DIM"; ac3_label="not installed"
+    fi
+    echo -e "  ${CYAN}AC-3 Surround${RESET}      ${ac3_icon} ${ac3_color}${ac3_label}${RESET}"
 
     echo ""
     echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
