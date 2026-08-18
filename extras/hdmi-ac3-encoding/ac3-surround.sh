@@ -231,10 +231,25 @@ do_install() {
     [[ -f /usr/lib/alsa-lib/libasound_module_pcm_a52.so ]] || missing+=("alsa-plugins")
     ldconfig -p 2>/dev/null | grep -q libavcodec || missing+=("ffmpeg")
     if (( ${#missing[@]} > 0 )); then
-        print_error "Missing packages: ${missing[*]}"
-        print_info "Install with: sudo pacman -S ${missing[*]}"
-        print_info "On Debian/Ubuntu: sudo apt install libasound2-plugins ffmpeg"
-        return 1
+        print_info "Installing missing dependencies: ${missing[*]}"
+        if command -v pacman &>/dev/null; then
+            pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5 || {
+                print_error "Failed to install dependencies: ${missing[*]}"
+                return 1
+            }
+        elif command -v apt &>/dev/null; then
+            local apt_pkgs=()
+            [[ " ${missing[*]} " == *" alsa-plugins "* ]] && apt_pkgs+=("libasound2-plugins")
+            [[ " ${missing[*]} " == *" ffmpeg "* ]] && apt_pkgs+=("ffmpeg")
+            apt-get update -qq && apt-get install -y "${apt_pkgs[@]}" 2>&1 | tail -5 || {
+                print_error "Failed to install dependencies: ${apt_pkgs[*]}"
+                return 1
+            }
+        else
+            print_error "Missing packages: ${missing[*]}"
+            print_info "Install manually with your package manager."
+            return 1
+        fi
     fi
 
     # Check that an HDMI audio card exists
