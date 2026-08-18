@@ -2317,15 +2317,23 @@ install_ac3_surround() {
     echo -e "  ${DIM}Requires: alsa-plugins (a52), ffmpeg (libavcodec).${RESET}"
     echo ""
 
-    # Check dependencies
+    # Check and install dependencies
     local missing=()
     [[ -f /usr/lib/alsa-lib/libasound_module_pcm_a52.so ]] || missing+=("alsa-plugins")
     ldconfig -p 2>/dev/null | grep -q libavcodec || missing+=("ffmpeg")
-    [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]] || missing+=("alsa-card-profile")
     if (( ${#missing[@]} > 0 )); then
-        print_error "Missing packages: ${missing[*]}"
-        print_info "Install with: sudo pacman -S ${missing[*]}"
-        return 1
+        print_info "Installing missing dependencies: ${missing[*]}"
+        local was_steamos_deps=0
+        if is_steamos; then
+            was_steamos_deps=1
+            steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }
+        fi
+        if ! pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+            print_error "Failed to install dependencies: ${missing[*]}"
+            (( was_steamos_deps )) && steamos-readonly enable || true
+            return 1
+        fi
+        (( was_steamos_deps )) && steamos-readonly enable || true
     fi
 
     # Check that an HDMI audio card exists
