@@ -2454,6 +2454,246 @@ WPEOF
     fi
 
     persist_state_add "ac3"
+
+    # Post-install audio test
+    ac3_post_install_test "$card_name" "$ac3_sink"
+}
+
+ac3_post_install_test() {
+    local card_name="$1" ac3_sink="$2"
+
+    echo ""
+    if ! confirm "Would you like to run a quick audio test to verify Dolby Digital is working?"; then
+        print_info "Skipping audio test. You can test later by playing any audio."
+        print_info "Make sure your receiver is set to the HDMI input and shows Dolby Digital."
+        return 0
+    fi
+
+    print_step "AC3-TEST" "Running 5.1 surround audio test..."
+    print_info "You should hear a tone on each speaker (Left, Right, Center, LFE, Rear Left, Rear Right)."
+    print_info "Your receiver should display Dolby Digital / DD during the test."
+    echo ""
+
+    # Run speaker-test for 2 seconds per channel on the AC3 sink
+    local test_output
+    test_output=$(timeout 15 speaker-test -D "$ac3_sink" -c 6 -t sine -l 1 -p 1 2>&1 || true)
+    echo "$test_output" | tail -5
+
+    echo ""
+    if confirm "Did you hear audio from the test?"; then
+        print_success "AC-3 Surround Encoding is working correctly!"
+        print_info "Your receiver should be showing Dolby Digital."
+        return 0
+    fi
+
+    # Audio test failed — run auto-diagnosis
+    print_error "No audio detected. Running auto-diagnosis..."
+    ac3_auto_diagnose "$card_name" "$ac3_sink"
+}
+
+ac3_auto_diagnose() {
+    local card_name="$1" ac3_sink="$2"
+    local issues=()
+
+    echo ""
+    print_step "AC3-DIAG" "Auto-diagnosis"
+
+    # Check 1: Is the sink still there?
+    if ! pactl list sinks short 2>/dev/null | grep -q "$ac3_sink"; then
+        issues+=("AC-3 sink '$ac3_sink' not found — it may have been removed after WirePlumber restart")
+    fi
+
+    # Check 2: Is the profile still active?
+    local active_profile
+    active_profile=$(pactl list cards 2>/dev/null | grep -A20 "Name: $card_name" | grep "Active Profile" | awk -F': ' '{print $2}')
+    if [[ "$active_profile" != *"ac3"* ]]; then
+        issues+=("Active profile is '$active_profile' (expected output:hdmi-ac3-surround)")
+    fi
+
+    # Check 3: Is the sink the default?
+    local default_sink
+    default_sink=$(pactl get-default-sink 2>/dev/null)
+    if [[ "$default_sink" != *"$ac3_sink"* ]]; then
+        issues+=("Default sink is '$default_sink' (expected $ac3_sink)")
+    fi
+
+    # Check 4: Is the ALSA device actually open?
+    local alsa_status
+    alsa_status=$(cat /proc/asound/card0/pcm3p/sub0/status 2>/dev/null | head -1 || echo "N/A")
+    if [[ "$alsa_status" == "N/A" || "$alsa_status" == "" ]]; then
+        issues+=("ALSA HDMI device /proc/asound/card0/pcm3p not accessible")
+    fi
+
+    # Check 5: Is the a52 plugin loaded?
+    if ! [[ -f /usr/lib/alsa-lib/libasound_module_pcm_a52.so ]]; then
+        issues+=("a52 ALSA plugin not found at /usr/lib/alsa-lib/libasound_module_pcm_a52.so")
+    fi
+
+    # Check 6: Is WirePlumber running?
+    if ! systemctl --user is-active wireplumber 2>/dev/null | grep -q "active"; then
+        issues+=("WirePlumber service is not active")
+    fi
+
+    # Check 7: Is the udev rule in place?
+    if ! [[ -f "$AC3_UDEV_RULE" ]]; then
+        issues+=("Udev rule $AC3_UDEV_RULE not found")
+    fi
+
+    # Check 8: Is the WirePlumber config in place?
+    if ! [[ -f "$AC3_WP_CONF" ]]; then
+        issues+=("WirePlumber config $AC3_WP_CONF not found")
+    fi
+
+    # Check 9: Is the hdmi-ac3.conf profile set present?
+    if ! [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]]; then
+        issues+=("hdmi-ac3.conf profile set not found in /usr/share/alsa-card-profile/mixer/profile-sets/")
+    fi
+
+    # Check 10: Check receiver connection
+    local display_connected
+    display_connected=$(cat /sys/class/drm/card*/status 2>/dev/null | grep -c "connected" || echo "0")
+    if [[ "$display_connected" -eq 0 ]]; then
+        issues+=("No connected display detected in /sys/class/drm/")
+    fi
+
+    # Report findings
+    echo ""
+    if (( ${#issues[@]} == 0 )); then
+        print_info "All checks passed — configuration looks correct."
+        print_info "The issue may be on the receiver/TV side:"
+        echo ""
+        echo -e "    ${DIM}- Verify your receiver is set to the correct HDMI input${RESET}"
+        echo -e "    ${DIM}- Check that eARC is enabled in your TV settings${RESET}"
+        echo -e "    ${DIM}- Try power-cycling the receiver${RESET}"
+        echo -e "    ${DIM}- Some TVs need 'Audio Format' set to 'Auto' or 'Bitstream' in their audio settings${RESET}"
+        echo -e "    ${DIM}- Make sure the TV is not forcing PCM output${RESET}"
+    else
+        print_error "Found ${#issues[@]} issue(s):"
+        for issue in "${issues[@]}"; do
+            echo -e "    ${RED}- $issue${RESET}"
+        done
+    fi
+
+    # Generate diagnostic log
+    echo ""
+    ac3_generate_diagnostic_log "$card_name" "$ac3_sink" "$active_profile" issues[@]
+
+    echo ""
+    if confirm "Would you like to revert AC-3 Surround Encoding and restore HDMI stereo?"; then
+        run_revert_ac3_surround
+    else
+        print_info "AC-3 Surround Encoding remains installed."
+        print_info "You can revert later from the menu (option 13R) or re-run the test."
+    fi
+}
+
+ac3_generate_diagnostic_log() {
+    local card_name="$1" ac3_sink="$2" active_profile="$3"
+    local -n diag_issues="$4"
+    local logfile="${REAL_HOME}/bc250-ac3-diagnostic-$(date +%Y%m%d-%H%M%S).log"
+
+    {
+        echo "BC-250 SteamOS Real Toolkit — AC-3 Surround Diagnostic Report"
+        echo "Generated   : $(date)"
+        echo "Toolkit     : $TOOLKIT_VERSION"
+        echo "Option      : 13 (Install AC-3 Surround Encoding)"
+        echo ""
+        echo "== Operating System =="
+        [[ -f /etc/os-release ]] && cat /etc/os-release || echo "Unknown"
+        echo ""
+        echo "== Kernel =="
+        uname -r
+        uname -a
+        echo ""
+        echo "== Build Info =="
+        echo "Kernel build: $(uname -v 2>/dev/null || echo 'N/A')"
+        echo "GCC: $(gcc --version 2>/dev/null | head -1 || echo 'N/A')"
+        echo ""
+        echo "== Installed Toolkit Components =="
+        if [[ -f "$PERSIST_STATE_FILE" ]]; then
+            cat "$PERSIST_STATE_FILE"
+        else
+            echo "(none recorded)"
+        fi
+        echo ""
+        echo "== Audio Card =="
+        pactl list cards 2>/dev/null | grep -A30 "HDA ATI HDMI" || echo "No HDA ATI HDMI card found"
+        echo ""
+        echo "== Active Profile =="
+        echo "Card: $card_name"
+        echo "Profile: ${active_profile:-unknown}"
+        echo ""
+        echo "== AC-3 Sink =="
+        pactl list sinks 2>/dev/null | grep -A20 "$ac3_sink" || echo "Sink not found"
+        echo ""
+        echo "== Default Sink =="
+        pactl get-default-sink 2>/dev/null || echo "N/A"
+        echo ""
+        echo "== ALSA HDMI Device Status =="
+        cat /proc/asound/card0/pcm3p/sub0/status 2>/dev/null || echo "Device not accessible"
+        echo ""
+        cat /proc/asound/card0/pcm3p/sub0/hw_params 2>/dev/null || echo "No hw_params (device not open)"
+        echo ""
+        echo "== PipeWire Sinks =="
+        pactl list sinks short 2>/dev/null || echo "N/A"
+        echo ""
+        echo "== WirePlumber Status =="
+        systemctl --user status wireplumber --no-pager 2>&1 | head -15 || true
+        echo ""
+        echo "== Udev Rule =="
+        [[ -f "$AC3_UDEV_RULE" ]] && cat "$AC3_UDEV_RULE" || echo "Not installed"
+        echo ""
+        echo "== WirePlumber AC-3 Config =="
+        [[ -f "$AC3_WP_CONF" ]] && cat "$AC3_WP_CONF" || echo "Not installed"
+        echo ""
+        echo "== hdmi-ac3.conf Profile Set =="
+        [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]] && \
+            head -30 /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf || \
+            echo "Not found"
+        echo ""
+        echo "== a52 Plugin =="
+        ls -la /usr/lib/alsa-lib/libasound_module_pcm_a52.so 2>/dev/null || echo "Not found"
+        echo ""
+        echo "== ffmpeg/libavcodec =="
+        ldconfig -p 2>/dev/null | grep libavcodec || echo "libavcodec not found"
+        echo ""
+        echo "== Display/Connection =="
+        for f in /sys/class/drm/card*/status; do
+            [[ -f "$f" ]] && echo "$(basename "$(dirname "$f")"): $(cat "$f")"
+        done 2>/dev/null || echo "N/A"
+        echo ""
+        echo "== Diagnosis Issues =="
+        if (( ${#diag_issues[@]} > 0 )); then
+            for issue in "${diag_issues[@]}"; do
+                echo "  - $issue"
+            done
+        else
+            echo "  (no issues detected by auto-diagnosis)"
+        fi
+        echo ""
+        echo "== Recent dmesg (audio/HDMI related, last 30) =="
+        dmesg 2>/dev/null | grep -i "hdmi\|audio\|snd\|hda\|drm" | tail -30 || echo "dmesg not accessible"
+    } > "$logfile" 2>/dev/null
+
+    chown "$REAL_USER":"$REAL_USER" "$logfile" 2>/dev/null || true
+
+    # Copy to Desktop if available
+    local desktop_dir
+    desktop_dir="$(sudo -u "$REAL_USER" xdg-user-dir DESKTOP 2>/dev/null || echo "")"
+    [[ -n "$desktop_dir" ]] || desktop_dir="${REAL_HOME}/Desktop"
+    if [[ -d "$desktop_dir" ]]; then
+        local desktop_log="$desktop_dir/$(basename "$logfile")"
+        if cp -f "$logfile" "$desktop_log" 2>/dev/null; then
+            chown "$REAL_USER":"$REAL_USER" "$desktop_log" 2>/dev/null || true
+            print_info "Diagnostic log copied to Desktop: ${BOLD}${desktop_log}${RESET}"
+        fi
+    fi
+
+    print_info "Diagnostic log saved to: ${BOLD}${logfile}${RESET}"
+    echo ""
+    print_info "Please share this log when reporting the issue:"
+    print_info "  Discord: BC-250 community channel"
+    print_info "  GitHub:  ${CYAN}https://github.com/rpf16rj/bc250-steamos-real-toolkit/issues/new${RESET}"
 }
 
 run_revert_ac3_surround() {
