@@ -14,11 +14,6 @@ como histórico datado de antes da adoção de versões numeradas.
 - **Novo:** Otimização FSR4 dp4a agora usa abordagem seletiva — evita
   register spilling catastrófico em shaders patológicos mantendo o ganho
   de performance na maioria dos kernels.
-- **Novo:** Script experimental de trial de display
-  (`extras/display-trial/`) para testar EDID forçado e habilitação de
-  DP-1 — reverte automaticamente no 2º reboot se não confirmado. Útil
-  para diagnosticar perda de vídeo no boot e na troca de sessão com
-  adaptador DP-to-HDMI.
 - **Novo:** Guia de implementação de encoding AC-3 via HDMI para outros
   sistemas operacionais (documenta o plugin ALSA a52 + PipeWire).
 - **Corrigido:** Instalação do adaptador Xbox (xone-dkms) agora detecta
