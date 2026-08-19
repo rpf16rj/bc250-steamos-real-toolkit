@@ -5,18 +5,13 @@
 # running kernel, extract the dep packages into deps/); this script verifies
 # their results and refuses to continue on any mismatch.
 #
-#   ./build.sh [--cg|--cg-unvalidated] [--prepare-only]
+#   ./build.sh [--prepare-only]
 #              [--allow-missing-symvers] [kernel-tree]
 #
 # --prepare-only stops after producing an exact external-module Kbuild tree;
 # AIC8800 uses this when Valve omitted the matching headers package.
 # --allow-missing-symvers is the AIC8800-only fast path. It requires
 # --prepare-only and is safe only when CONFIG_MODVERSIONS is disabled.
-#
-# --cg applies the GFX-only clock-gating patch (bc250-cg-flags.patch, idle
-# power) — navi1x-validated, EXPERIMENTAL, off by default. --cg-unvalidated
-# adds bc250-cg-flags-unvalidated.patch on top (MC/SDMA/ATHUB/HDP/NBIO on
-# unvalidated register maps — can black-screen; bisect with amdgpu.cg_mask).
 #
 # --gfx1013 applies the GFX1013 compute queue fix patches (3 patches from
 # bc250-gfx1013-fix): repairs compute queue lifecycle on BC-250 for async
@@ -54,8 +49,6 @@ relax_libbpf_host_tool_werror() {
     echo "relaxed -Werror in tools/lib/bpf/Makefile (host-tool build only, does not affect amdgpu.ko)"
 }
 
-WITH_CG=0
-WITH_CG_UNVAL=0
 WITH_GFX1013=0
 WITH_AUDIO=0
 PREPARE_ONLY=0
@@ -63,8 +56,6 @@ ALLOW_MISSING_SYMVERS=0
 ARGS=()
 for a in "$@"; do
     case "$a" in
-        --cg)             WITH_CG=1 ;;
-        --cg-unvalidated) WITH_CG=1; WITH_CG_UNVAL=1 ;;  # implies --cg
         --gfx1013)        WITH_GFX1013=1 ;;
         --audio)          WITH_AUDIO=1 ;;
         --prepare-only)   PREPARE_ONLY=1 ;;
@@ -79,7 +70,7 @@ if [ "$WITH_GFX1013" = 1 ] && [ "$WITH_AUDIO" = 0 ]; then
 else
     WITH_AUDIO=1
 fi
-[ "${#ARGS[@]}" -le 1 ] || die "usage: $0 [--cg|--cg-unvalidated] [--prepare-only] [--allow-missing-symvers] [kernel-tree]"
+[ "${#ARGS[@]}" -le 1 ] || die "usage: $0 [--prepare-only] [--allow-missing-symvers] [kernel-tree]"
 [ "$ALLOW_MISSING_SYMVERS" = 0 ] || [ "$PREPARE_ONLY" = 1 ] \
     || die "--allow-missing-symvers requires --prepare-only"
 TREE_ARG=${ARGS[0]:-$HERE/valve-kernel}
@@ -298,9 +289,10 @@ if [ "$WITH_GFX1013" = 1 ]; then
         drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
 fi
 
-# 0007 TTM NULL-page guard is always applied (defensive, no module param)
+# 0007 TTM NULL-page guard and 0008 SCLK range are always applied
 git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
-    drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+    drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c \
+    drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
 
 if [ "$WITH_AUDIO" = 1 ]; then
     step "apply DP-audio patch (runbook step 7)"
@@ -411,6 +403,17 @@ else
     die "TTM NULL-page guard neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
+step "apply Cyan Skillfish SCLK range patch (350-2230 MHz)"
+SCLK_PATCH=$HERE/bc250-sclk-range.patch
+if patch -p1 -R --dry-run --fuzz=3 -s -f < "$SCLK_PATCH" >/dev/null 2>&1; then
+    echo "SCLK range patch already applied"
+elif patch -p1 --dry-run --fuzz=3 -s -f < "$SCLK_PATCH" >/dev/null 2>&1; then
+    patch -p1 --fuzz=3 -s < "$SCLK_PATCH"
+    echo "SCLK range patch applied"
+else
+    die "SCLK range patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+fi
+
 step "apply KFD flush-TLB-by-runlist patch (opt-in ROCm/KFD workaround)"
 KFD_PATCH=$HERE/bc250-kfd-flush-tlb-by-runlist.patch
 if patch -p1 -R --dry-run --fuzz=3 -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
@@ -420,56 +423,6 @@ elif patch -p1 --dry-run --fuzz=3 -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
     echo "KFD flush-TLB-by-runlist patch applied"
 else
     die "KFD flush-TLB-by-runlist patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-fi
-
-step "clock-gating patches (BC-250 idle power) — EXPERIMENTAL, opt-in"
-# Two layers, both off by default (a leftover copy from a previous build is
-# actively reversed, not tolerated):
-#   bc250-cg-flags.patch              --cg              GFX MGCG/CGCG only.
-#                                                       navi1x-validated path.
-#   bc250-cg-flags-unvalidated.patch  --cg-unvalidated  MC/SDMA/ATHUB/HDP/NBIO
-#                                                       on unvalidated register
-#                                                       maps — can black-screen
-#                                                       the box; bisect at boot
-#                                                       with amdgpu.cg_mask.
-# Layer 2's cg_flags hunk sits after external_rev_id (disjoint from layer 1),
-# but to keep the tree self-consistent the order is fixed: apply 1 then 2,
-# reverse 2 then 1. Version-independent code; if a kernel bump makes a hunk
-# fail, they are small — refresh against the new tree.
-CGPATCH=$HERE/bc250-cg-flags.patch
-CGPATCH_UNVAL=$HERE/bc250-cg-flags-unvalidated.patch
-
-apply_patch() {  # $1=patch file  $2=label
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$1" >/dev/null 2>&1; then
-        echo "$2 already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$1" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$1"; echo "$2 applied"
-    else
-        die "$2 neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-    fi
-}
-reverse_if_present() {  # $1=patch file  $2=label
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$1" >/dev/null 2>&1; then
-        patch -p1 -R --fuzz=3 -s < "$1"; echo "$2 REVERSED (leftover from a previous build)"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$1" >/dev/null 2>&1; then
-        : # pristine w.r.t. this layer — nothing to do
-    else
-        die "tree in unknown state w.r.t. $2 (neither applied nor pristine) — inspect by hand"
-    fi
-}
-
-if [ "$WITH_CG_UNVAL" = 1 ]; then
-    apply_patch "$CGPATCH"       "cg-flags (GFX)"
-    apply_patch "$CGPATCH_UNVAL" "cg-flags-unvalidated (MC/SDMA/ATHUB/NBIO)"
-    echo "WARNING: unvalidated CG layer applied — if the display goes dark, boot with"
-    echo "         amdgpu.cg_mask=0x5 (GFX-only) and bisect from there; cg_mask=0 = stock."
-elif [ "$WITH_CG" = 1 ]; then
-    reverse_if_present "$CGPATCH_UNVAL" "cg-flags-unvalidated"   # drop layer 2 before touching layer 1
-    apply_patch        "$CGPATCH"       "cg-flags (GFX)"
-else
-    reverse_if_present "$CGPATCH_UNVAL" "cg-flags-unvalidated"   # layer 2 first (it stacks on layer 1)
-    reverse_if_present "$CGPATCH"       "cg-flags (GFX)"
-    echo "clock-gating: not applied (opt in with --cg, or --cg-unvalidated for the experimental MC/SDMA layer)"
 fi
 
 step "modules_prepare + config re-verify (runbook step 7)"

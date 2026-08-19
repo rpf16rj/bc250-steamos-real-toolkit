@@ -1,0 +1,23 @@
+BC-250 / Cyan Skillfish: widen SMU SCLK range to 350–2230 MHz
+
+AMD ships cyan skillfish with SCLK_MIN=1000 and SCLK_MAX=2000, well
+inside the hardware's actual 350–2230 MHz envelope. This widens the
+constants so userspace SMU-based governors (e.g. cyan-skillfish-governor)
+can drive the full clock range. Does not change default behavior — only
+expands the validated limits.
+
+From MastaG/linux-cachyos-bc250 kernel-7.1 patch set.
+
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
+@@ -45,8 +45,8 @@
+ #undef pr_debug
+ 
+ /* unit: MHz */
+-#define CYAN_SKILLFISH_SCLK_MIN			1000
+-#define CYAN_SKILLFISH_SCLK_MAX			2000
++#define CYAN_SKILLFISH_SCLK_MIN			350
++#define CYAN_SKILLFISH_SCLK_MAX			2230
+ 
+ /* unit: mV */
+ #define CYAN_SKILLFISH_VDDC_MIN			700
