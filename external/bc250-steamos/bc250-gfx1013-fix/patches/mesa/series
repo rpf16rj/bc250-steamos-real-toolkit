@@ -5,17 +5,24 @@
 # fix and is required; 0002 and 0003 are optional features. 0003
 # requires 0002.
 #
-# 0002/0003 are DISABLED: mesh/task shading on GFX1013 can hang the GPU
-# unrecoverably (failed ring reset takes the machine down).
+# 0002/0003 enable mesh/task shading on GFX1013. The user-visible
+# feature path stays disabled unless 0004 sees RADV_GFX103=1 at
+# runtime. Mesh shaders work (FF7 Rebirth tested); task shaders are
+# still not working correctly — games that rely on task shaders may
+# render incorrectly, hang or crash. Do not export RADV_GFX103=1
+# globally; enable it only per-game.
 #
 # 0004 adds an opt-in RADV_GFX103=1 env var to promote GFX1013 to the
 # GFX10.3 software path. Safe by itself — only activates when the user
 # explicitly sets the env var. Requires 0002/0003 to be useful.
 #
-# Note: The FSR 4 INT8 dot-product optimization (imul24_relaxed in
-# sdot_4x8_a_b) from dmorazasanchez/bc250-fsr4 is already upstream
-# in mesa-26.2.0-rc3. No additional patch needed.
+# 0005 selectively reassociates the NIR fallback for the signed 4x8
+# dot product (sdot_4x8_iadd). When the accumulator is a constant,
+# keeps the balanced tree (avoids register pressure); otherwise uses
+# the right-leaning chain for fewer instructions. Always active
+# regardless of environment variables (from dmorazasanchez/bc250-fsr4 v2).
 0001-gfx1013-compute-queue-fix.patch
-#0002-gfx1013-mesh-task-shaders.patch
-#0003-gfx1013-taskmesh-queries.patch
+0002-gfx1013-mesh-task-shaders.patch
+0003-gfx1013-taskmesh-queries.patch
 0004-radv-gfx103.patch
+0005-bc250-fsr4-selective-sdot4x8.patch

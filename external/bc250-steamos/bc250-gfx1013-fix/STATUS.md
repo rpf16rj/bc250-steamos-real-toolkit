@@ -3,9 +3,13 @@
 Regenerated drop. Versus the previous state of this repo:
 
 - **Patch set regenerated from the shipping tree.** One coherent Mesa series
-  (`patches/mesa/series`, 3 patches against pristine `mesa-26.2.0-rc3`) replaces the previous
+  (`patches/mesa/series`, 5 patches against pristine `mesa-26.2.0-rc3`) replaces the previous
   overlapping set; every patch applies in order and the result builds. Kernel set is the three
-  V33 patches only.
+  V33 patches plus the Cyan Skillfish SCLK range widening patch (350–2230 MHz).
+  - 0001: compute queue fix (always active)
+  - 0002/0003: mesh/task shaders + queries (applied, gated by RADV_GFX103=1 at runtime)
+  - 0004: RADV_GFX103 env var promotion
+  - 0005: FSR4 sdot_4x8 dp4a selective reassociation (always active, from dmorazasanchez/bc250-fsr4 v2)
 - **Zero environment variables.** The `AMD_GFX1013_V33_*` gates are gone from the driver;
   feature selection happens by commenting patches out of the series before building.
 - **`install.sh` rewritten as a source build.** No binary payloads, no stable/preview channels;

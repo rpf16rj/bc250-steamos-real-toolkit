@@ -3,13 +3,10 @@
 # SteamOS update. Run as the normal user; sudo is invoked for missing build
 # prerequisites and installation.
 #
-#   ./patch-driver.sh [--cg|--cg-unvalidated|--gfx1013] [kernel-tree]  (default: ./valve-kernel)
+#   ./patch-driver.sh [--gfx1013] [kernel-tree]  (default: ./valve-kernel)
 #   ./patch-driver.sh status
 #   ./patch-driver.sh uninstall
 #
-# --cg / --cg-unvalidated are forwarded to build.sh (EXPERIMENTAL clock-gating
-# patches, see build.sh); fetch-sources.sh doesn't know them, so they're
-# filtered out there.
 # --gfx1013 is forwarded to build.sh (GFX1013 compute queue fix patches for
 # async compute support on BC-250). When --gfx1013 is used alone, audio fix
 # patches are NOT applied. Use --gfx1013 --audio to apply both sets of patches.
@@ -19,7 +16,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 
 usage() {
     cat <<EOF
-Usage: $0 [--cg|--cg-unvalidated|--gfx1013] [kernel-tree]
+Usage: $0 [--gfx1013] [kernel-tree]
        $0 status
        $0 uninstall
 
@@ -147,14 +144,11 @@ command -v flock >/dev/null || { echo "flock is required" >&2; exit 1; }
 exec 9>"$HERE/.prepare-kernel.lock"
 flock 9
 
-WITH_CG=()
 WITH_GFX1013=()
 WITH_AUDIO=()
 ARGS=()
 for a in "$@"; do
     case "$a" in
-        --cg)             WITH_CG=(--cg) ;;
-        --cg-unvalidated) WITH_CG=(--cg-unvalidated) ;;
         --gfx1013)        WITH_GFX1013=(--gfx1013) ;;
         --audio)          WITH_AUDIO=(--audio) ;;
         *)                ARGS+=("$a") ;;
@@ -162,5 +156,5 @@ for a in "$@"; do
 done
 
 "$HERE/fetch-sources.sh" "${ARGS[@]}"
-"$HERE/build.sh" "${WITH_CG[@]}" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${ARGS[@]}"
+"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${ARGS[@]}"
 sudo "$HERE/install.sh"

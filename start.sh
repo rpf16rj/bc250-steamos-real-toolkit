@@ -1780,6 +1780,25 @@ install_xbox_adapter() {
 
     ensure_build_deps || return 1
 
+    local headers_pkg
+    if ! headers_pkg="$(detect_kernel_headers_package)"; then
+        fail_with_log "Could not determine the running kernel package for header lookup." "Xbox Adapter Install — kernel detection"
+        return 1
+    fi
+    print_info "Detected kernel headers package: $headers_pkg"
+    if ! pacman -Qq "$headers_pkg" &>/dev/null; then
+        steamos_writable "pacman -Syu --noconfirm '$headers_pkg'" || {
+            fail_with_log "Failed to install kernel headers ($headers_pkg). A matching headers package may not exist yet for this kernel." "Xbox Adapter Install — headers"
+            return 1
+        }
+    else
+        print_info "Kernel headers already installed."
+    fi
+    if [[ ! -d "/usr/lib/modules/$(uname -r)/build" ]]; then
+        fail_with_log "Kernel build directory not found after installing headers." "Xbox Adapter Install — build dir missing"
+        return 1
+    fi
+
     print_info "Installing xone-dkms via AUR helper..."
     steamos_writable 'aur_install xone-dkms' || {
         fail_with_log "Failed to install xone-dkms." "Xbox Adapter Install — xone-dkms"
@@ -2794,7 +2813,10 @@ install_gfx1013_fix() {
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
     echo -e "  ${DIM}Fixes GPU compute queue lifecycle on BC-250 for async compute support.${RESET}"
     echo -e "  ${DIM}Includes kernel patches + Mesa/RADV patches for full async compute functionality.${RESET}"
-    echo -e "  ${DIM}Adds opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3 (mesh/task shaders).${RESET}"
+    echo -e "  ${DIM}Kernel: compute GFXOFF guard, PASID TLB fix, KFD runlist flush, TTM guard,${RESET}"
+    echo -e "  ${DIM}  widened SMU SCLK range (350-2230 MHz) for userspace governors.${RESET}"
+    echo -e "  ${DIM}Mesa: async compute fix, mesh/task shaders (opt-in via RADV_GFX103=1),${RESET}"
+    echo -e "  ${DIM}  FSR4 dp4a reassociation optimization (always active).${RESET}"
     echo -e "  ${DIM}Performance gains of +20-25% in async compute workloads (e.g., Cyberpunk 2077).${RESET}"
     echo ""
     if ! confirm "Continue with the GFX1013 compute queue fix?"; then
@@ -2917,7 +2939,8 @@ install_combined_fix() {
     echo -e "  ${DIM}  • DP audio/video clock fix + GPU metrics + DP SS disable + tunable cache${RESET}"
     echo -e "  ${DIM}  • GFX1013 compute queue fix for async compute support${RESET}"
     echo -e "  ${DIM}  • TTM NULL-page guard + opt-in KFD runlist flush (ROCm)${RESET}"
-    echo -e "  ${DIM}  • Patched Mesa/RADV for full async compute functionality${RESET}"
+    echo -e "  ${DIM}  • Widened SMU SCLK range (350-2230 MHz) for userspace governors${RESET}"
+    echo -e "  ${DIM}  • Patched Mesa/RADV: async compute + FSR4 dp4a opt + mesh/task (opt-in)${RESET}"
     echo -e "  ${DIM}  • Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3${RESET}"
     echo ""
     if ! confirm "Continue with the combined DP Audio + GFX1013 fix?"; then
@@ -3188,8 +3211,8 @@ run_fixes_menu() {
         echo ""
         print_item "1" "Install ACPI Fix (C/P-states)"     "CPU idle states + cpufreq scaling (800-3200 MHz)"
         print_item "2" "Install DP Audio/Video Fix"        "⚠  Patched amdgpu.ko — DP audio/video clock + GPU metrics + DP SS disable + tunable cache + TTM guard"
-        print_item "3" "Install GFX1013 Compute Fix"       "⚠  Patched amdgpu.ko + Mesa/RADV — async compute support (+20-25%)"
-        print_item "4" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build (recommended)"
+        print_item "3" "Install GFX1013 Compute Fix"       "⚠  Patched amdgpu.ko + Mesa/RADV — async compute + FSR4 opt + SCLK range"
+        print_item "4" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build + FSR4 opt + SCLK range"
         print_item "5" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
         echo ""
         print_item "6" "Revert ACPI Fix"                   ""
