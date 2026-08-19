@@ -7,6 +7,25 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.4.0 — 2026-08-19
+
+- **New:** SMU SCLK range widened to 350–2230 MHz (from MastaG's kernel
+  patch set), allowing userspace governors to drive the full clock range.
+- **New:** FSR4 dp4a reassociation optimization now uses a selective
+  approach — avoids catastrophic register spilling in pathological
+  shaders while keeping the performance win on most kernels.
+- **New:** Experimental display trial script (`extras/display-trial/`)
+  for testing forced EDID and DP-1 enable — auto-reverts on 2nd reboot
+  if unconfirmed. Useful for diagnosing boot video and session-switch
+  display loss on DP-to-HDMI adapter setups.
+- **New:** HDMI AC-3 encoding implementation guide for other operating
+  systems (documents the ALSA a52 plugin + PipeWire approach).
+- **Fixed:** Xbox adapter (xone-dkms) install now detects and installs
+  the correct kernel headers package before building the DKMS module.
+- **Removed:** GFX clock gating (`--cg`/`--cg-unvalidated`) flags and
+  patches removed from the combined fix — the feature was experimental
+  and unvalidated on BC-250 hardware.
+
 ## v1.3.1 — 2026-08-17
 
 - **Fixed:** AC-3 Surround install/revert now works correctly when the
