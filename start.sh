@@ -121,6 +121,7 @@ persist_detect_and_record_installed() {
         persist_state_add "audio"
     fi
     ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
+    ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
     if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
        && grep -q "VK_DRIVER_FILES=.*bc250-gfx1013" /etc/environment 2>/dev/null; then
         persist_state_add "gfx1013"
@@ -2313,6 +2314,91 @@ run_revert_audio_fix() {
     persist_state_remove "audio"
 }
 
+# --- DS5 Bridge PS Button Fix (patched hid-playstation.ko) --------------------
+# The DS5-Linux-Bridge (https://github.com/kungaa/DS5-Linux-Bridge/) presents
+# the DualSense via USB with VID 054c/PID 0ce6 but does not implement feature
+# report 0x09 (pairing info). The hid-playstation driver aborts probing on
+# this failure, falling back to generic usbhid — which doesn't declare BTN_MODE
+# in the evdev capabilities, preventing Steam/Gamescope chord combos like
+# Guide+A (Quick Access Menu) from working. This patches hid-playstation to
+# make the pairing info, firmware info, and calibration feature reports
+# non-fatal, allowing the driver to bind and expose BTN_MODE correctly.
+ds5_bridge_fix_installed() {
+    local rel marker module
+    rel=$(uname -r)
+    marker="/usr/lib/modules/$rel/updates/.bc250-ds5-bridge-fix"
+    module="/usr/lib/modules/$rel/updates/hid-playstation.ko.zst"
+    [[ -f "$module" ]] && [[ -f "$marker" ]]
+}
+
+install_ds5_bridge_fix() {
+    print_step "DS5-BRIDGE" "Installing DS5 Bridge PS Button Fix (patched hid-playstation.ko)"
+
+    echo -e "  ${YELLOW}⚠  This builds and installs a patched hid-playstation.ko kernel module.${RESET}"
+    echo -e "  ${YELLOW}⚠  A bad build can prevent the DualSense driver from loading at boot.${RESET}"
+    echo -e "  ${DIM}Fixes: DS5-Linux-Bridge PS button not working for chord combos (Guide+A for QAM).${RESET}"
+    echo -e "  ${DIM}The hid-playstation driver currently fails to probe the bridge device because${RESET}"
+    echo -e "  ${DIM}it doesn't implement feature report 0x09 (pairing info). This patch makes${RESET}"
+    echo -e "  ${DIM}that and two other feature reports non-fatal, allowing the driver to bind${RESET}"
+    echo -e "  ${DIM}and expose BTN_MODE correctly for Steam/Gamescope chord combos.${RESET}"
+    echo ""
+    if ! confirm "Continue with the DS5 Bridge PS Button fix?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+
+    local fix_dir="$FIXES_REPO_DIR/ds5-bridge-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        fail_with_log "ds5-bridge-fix directory not found in the fixes repository." "DS5 Bridge Fix — missing directory"
+        return 1
+    fi
+
+    print_info "Running patch-driver.sh (fetch sources && build && install)..."
+    print_info "This reuses the audio fix's kernel source tree and can take several minutes."
+    chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ./patch-driver.sh"; then
+        fail_with_log "DS5 Bridge PS Button fix build/install failed." "DS5 Bridge Fix — patch-driver.sh"
+        return 1
+    fi
+
+    print_success "DS5 Bridge PS Button fix installed! Reboot required."
+    persist_state_add "ds5_bridge"
+    print_info "After reboot, connect the DS5 Bridge and verify:"
+    print_info "  ${CYAN}lsmod | grep hid_playstation${RESET}    (should show 1 user)"
+    print_info "  ${CYAN}evtest /dev/input/eventN${RESET}        (BTN_MODE should be in capabilities)"
+    print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
+}
+
+run_revert_ds5_bridge_fix() {
+    print_step "R-DS5-BRIDGE" "Revert DS5 Bridge PS Button Fix"
+
+    local fix_dir="$FIXES_REPO_DIR/ds5-bridge-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        print_info "Fixes repository not found locally — nothing to revert."
+        return 0
+    fi
+
+    if ! ds5_bridge_fix_installed; then
+        print_info "DS5 Bridge fix is not installed."
+        return 0
+    fi
+
+    if ! confirm "This will restore the stock hid-playstation.ko module. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    if ! (cd "$fix_dir" && ./patch-driver.sh uninstall); then
+        fail_with_log "Failed to roll back the DS5 Bridge PS Button fix." "DS5 Bridge Fix — uninstall"
+        return 1
+    fi
+
+    print_success "DS5 Bridge PS Button fix reverted to stock hid-playstation.ko. Reboot to apply."
+    persist_state_remove "ds5_bridge"
+}
+
 # --- HDMI AC-3 Surround Encoding (Dolby Digital via eARC) --------------------
 # The BC-250's DMI identifies as "AMD BC-250" instead of "OEM F7F", so
 # SteamOS's valve-fremont hardware profile (which enables AC3 profiles) is
@@ -3214,26 +3300,30 @@ run_fixes_menu() {
         print_item "3" "Install GFX1013 Compute Fix"       "⚠  Patched amdgpu.ko + Mesa/RADV — async compute + FSR4 opt + SCLK range"
         print_item "4" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build + FSR4 opt + SCLK range"
         print_item "5" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "6" "Install DS5 Bridge PS Button Fix"  "⚠  Patched hid-playstation.ko — PS button for chord combos (Guide+A QAM)"
         echo ""
-        print_item "6" "Revert ACPI Fix"                   ""
-        print_item "7" "Revert DP Audio/Video Fix"         ""
-        print_item "8" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
-        print_item "9" "Revert AIC8800 WiFi/BT Driver"     ""
+        print_item "7" "Revert ACPI Fix"                   ""
+        print_item "8" "Revert DP Audio/Video Fix"         ""
+        print_item "9" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
+        print_item "A" "Revert AIC8800 WiFi/BT Driver"     ""
+        print_item "B" "Revert DS5 Bridge PS Button Fix"   "Restore stock hid-playstation.ko"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
         read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" fix_choice
 
-        case "$fix_choice" in
+        case "${fix_choice^^}" in
             1) install_acpi_fix;        press_enter ;;
             2) install_audio_fix;       press_enter ;;
             3) install_gfx1013_fix;     press_enter ;;
             4) install_combined_fix;    press_enter ;;
             5) install_aic8800_wifi;    press_enter ;;
-            6) run_revert_acpi_fix;     press_enter ;;
-            7) run_revert_audio_fix;    press_enter ;;
-            8) run_revert_gfx1013_fix;  press_enter ;;
-            9) run_revert_aic8800_wifi; press_enter ;;
+            6) install_ds5_bridge_fix;  press_enter ;;
+            7) run_revert_acpi_fix;     press_enter ;;
+            8) run_revert_audio_fix;    press_enter ;;
+            9) run_revert_gfx1013_fix;  press_enter ;;
+            A) run_revert_aic8800_wifi; press_enter ;;
+            B) run_revert_ds5_bridge_fix; press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$fix_choice'"
@@ -4404,6 +4494,19 @@ run_status() {
     fi
     echo -e "  ${CYAN}AIC8800 WiFi Driver${RESET} ${wifi_icon} ${wifi_color}${wifi_label}${RESET}"
 
+    local ds5_icon ds5_color ds5_label resolved_hp
+    resolved_hp=$(modinfo -F filename hid_playstation 2>/dev/null || echo "")
+    if ds5_bridge_fix_installed; then
+        if [[ "$resolved_hp" == *"/updates/"* ]]; then
+            ds5_icon="$ICON_OK"; ds5_color="$GREEN"; ds5_label="patched module active"
+        else
+            ds5_icon="$ICON_WARN"; ds5_color="$YELLOW"; ds5_label="installed — reboot pending"
+        fi
+    else
+        ds5_icon="$DIM"; ds5_color="$DIM"; ds5_label="not installed"
+    fi
+    echo -e "  ${CYAN}DS5 Bridge Fix${RESET}     ${ds5_icon} ${ds5_color}${ds5_label}${RESET}"
+
     local cec_icon cec_color cec_label
     if cec_control_installed; then
         cec_icon="$ICON_OK"; cec_color="$GREEN"; cec_label="configured"
@@ -4500,6 +4603,8 @@ run_revert_all() {
     echo ""
     run_revert_ac3_surround
     echo ""
+    run_revert_ds5_bridge_fix
+    echo ""
     run_revert_core_unlock
     echo ""
     run_revert_ram_split
@@ -4539,6 +4644,8 @@ run_install_manual() {
         print_item "12"  "Install Combined Audio+GFX1013" "⚠  Both fixes in a single kernel build (recommended)"
         print_item "13"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "13R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
+        print_item "14"  "Install DS5 Bridge PS Button Fix"  "⚠  Patched hid-playstation.ko — DS5 Bridge PS button for chord combos (Guide+A QAM)"
+        print_item "14R" "Revert DS5 Bridge PS Button Fix"   "Restore stock hid-playstation.ko"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -4569,6 +4676,8 @@ run_install_manual() {
             12) install_combined_fix;    press_enter ;;
             13) install_ac3_surround;      press_enter ;;
             13R) run_revert_ac3_surround;  press_enter ;;
+            14)  install_ds5_bridge_fix;     press_enter ;;
+            14R) run_revert_ds5_bridge_fix;  press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"

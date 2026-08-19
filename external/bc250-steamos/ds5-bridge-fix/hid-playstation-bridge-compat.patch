@@ -1,0 +1,34 @@
+--- a/drivers/hid/hid-playstation.c
++++ b/drivers/hid/hid-playstation.c
+@@ -1761,15 +1761,17 @@
+ 
+ 	ret = dualsense_get_mac_address(ds);
+ 	if (ret) {
+-		hid_err(hdev, "Failed to get MAC address from DualSense\n");
+-		return ERR_PTR(ret);
++		hid_warn(hdev, "Failed to get MAC address from DualSense: %d - continuing (DS5 Bridge compatibility)\n", ret);
++		memset(ds->base.mac_address, 0, sizeof(ds->base.mac_address));
+ 	}
+ 	snprintf(hdev->uniq, sizeof(hdev->uniq), "%pMR", ds->base.mac_address);
+ 
+ 	ret = dualsense_get_firmware_info(ds);
+ 	if (ret) {
+-		hid_err(hdev, "Failed to get firmware info from DualSense\n");
+-		return ERR_PTR(ret);
++		hid_warn(hdev, "Failed to get firmware info from DualSense: %d - continuing (DS5 Bridge compatibility)\n", ret);
++		ds->base.hw_version = 0;
++		ds->base.fw_version = 0;
++		ds->update_version = 0;
+ 	}
+ 
+ 	/* Original DualSense firmware simulated classic controller rumble through
+@@ -1793,8 +1795,7 @@
+ 
+ 	ret = dualsense_get_calibration_data(ds);
+ 	if (ret) {
+-		hid_err(hdev, "Failed to get calibration data from DualSense\n");
+-		goto err;
++		hid_warn(hdev, "Failed to get calibration data from DualSense: %d - continuing with defaults (DS5 Bridge compatibility)\n", ret);
+ 	}
+ 
+ 	ds->gamepad = ps_gamepad_create(hdev, dualsense_play_effect);
