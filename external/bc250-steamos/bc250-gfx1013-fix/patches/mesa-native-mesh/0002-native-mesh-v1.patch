@@ -140,25 +140,24 @@ diff --git a/src/amd/vulkan/radv_dgc.c b/src/amd/vulkan/radv_dgc.c
 index 8ab6cb9..4e6ab45 100644
 --- a/src/amd/vulkan/radv_dgc.c
 +++ b/src/amd/vulkan/radv_dgc.c
-@@ -3289,9 +3289,14 @@ radv_prepare_dgc(struct radv_cmd_buffer *cmd_buffer, const VkGeneratedCommandsIn
-    }
- 
-    if (radv_compute_queue_enabled(pdev)) {
--      assert((cmdbuf_layout.ace_main_offset + pGeneratedCommandsInfo->preprocessAddress) %
--                pdev->info.ip[AMD_IP_COMPUTE].ib_alignment ==
--             0);
-+      /* Mesh-only DGC doesn't generate an ACE command stream. Some devices,
-+       * including BC250, don't expose a usable compute queue or IB alignment.
-+       */
-+      if (cmdbuf_layout.ace_cmd_stride) {
-+         assert((cmdbuf_layout.ace_main_offset + pGeneratedCommandsInfo->preprocessAddress) %
-+                   pdev->info.ip[AMD_IP_COMPUTE].ib_alignment ==
-+                0);
-+      }
-    }
+@@ -3285,9 +3285,14 @@
+    assert((cmdbuf_layout.main_offset + pGeneratedCommandsInfo->preprocessAddress) %
+              pdev->info.ip[AMD_IP_GFX].ib_alignment ==
+           0);
+-   assert((cmdbuf_layout.ace_main_offset + pGeneratedCommandsInfo->preprocessAddress) %
+-             pdev->info.ip[AMD_IP_COMPUTE].ib_alignment ==
+-          0);
++   /* Mesh-only DGC doesn't generate an ACE command stream. Some devices,
++    * including BC250, don't expose a usable compute queue or IB alignment.
++    */
++   if (cmdbuf_layout.ace_cmd_stride) {
++      assert((cmdbuf_layout.ace_main_offset + pGeneratedCommandsInfo->preprocessAddress) %
++                pdev->info.ip[AMD_IP_COMPUTE].ib_alignment ==
++             0);
++   }
  
     struct radv_dgc_params params = {
-diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
+       .cmd_buf_preamble_offset = cmdbuf_layout.main_preamble_offset,diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
 index e23d375..9b14326 100644
 --- a/src/amd/vulkan/radv_physical_device.c
 +++ b/src/amd/vulkan/radv_physical_device.c
