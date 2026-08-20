@@ -358,6 +358,17 @@ if [ "$WITH_AUDIO" = 1 ]; then
     else
         die "tunable cache patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
+
+    step "apply VRR PCON FreeSync fallback patch (amdgpu_dm)"
+    VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
+        echo "VRR PCON FreeSync patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$VRR_PATCH"
+        echo "VRR PCON FreeSync patch applied"
+    else
+        die "VRR PCON FreeSync patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 else
     step "skipping audio fix patches (--gfx1013 used without --audio)"
 fi

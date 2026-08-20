@@ -25,3 +25,4 @@
 /external/bc250_memcfg/bc250memcfg
 /external/bc250-core-unlock/bc250-core-unlock-boot.sh
 /nohup.out
+/external/bc250-steamos/**/.patch-driver.lock
