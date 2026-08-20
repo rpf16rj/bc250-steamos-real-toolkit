@@ -3307,7 +3307,12 @@ vrr_edid_patch_installed() {
 vrr_edid_find_connector() {
     local conn
     for conn in /sys/class/drm/card*-*/edid; do
-        [[ -f "$conn" ]] && [[ -s "$conn" ]] || continue
+        [[ -f "$conn" ]] || continue
+        # sysfs files report size 0 in stat, so [[ -s ]] doesn't work.
+        # Use wc -c to check if there's actual EDID data.
+        local sz
+        sz=$(wc -c < "$conn" 2>/dev/null) || continue
+        [[ "$sz" -gt 0 ]] || continue
         echo "${conn%/edid}"
         return 0
     done
