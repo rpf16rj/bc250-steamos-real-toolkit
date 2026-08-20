@@ -11,8 +11,30 @@ MESA_TARBALL_SHA256=f733c005660d342a51c6727d1ad481f43d05b4c601ac72247fa641e1d73a
 BUILD_ROOT="${HERE}/build-mesa"
 MESA_PREFIX="/opt/bc250-gfx1013/${VERSION}"
 
+# Mesh shader mode: "mastag" (default, GFX10.3 spoof + mesh/task) or "native" (lonewolf, MESH only)
+MESH_MODE="mastag"
+
 die() { echo "FATAL: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --native-mesh)
+            MESH_MODE="native"
+            shift
+            ;;
+        --mastag-mesh)
+            MESH_MODE="mastag"
+            shift
+            ;;
+        *)
+            die "Unknown argument: $1\nUsage: $0 [--native-mesh|--mastag-mesh]"
+            ;;
+    esac
+done
+
+echo "Mesh shader mode: ${MESH_MODE}"
 
 # Check dependencies
 for cmd in meson ninja sha256sum wget cc; do
@@ -51,8 +73,13 @@ fi
 tar xf "mesa-${MESA_VERSION}.tar.xz"
 cd "mesa-${MESA_VERSION}"
 
-step "Apply Mesa patches from bc250-gfx1013-fix"
-SERIES_FILE="${HERE}/patches/mesa/series"
+step "Apply Mesa patches from bc250-gfx1013-fix (mode: ${MESH_MODE})"
+if [[ "$MESH_MODE" == "native" ]]; then
+    PATCH_DIR="${HERE}/patches/mesa-native-mesh"
+else
+    PATCH_DIR="${HERE}/patches/mesa"
+fi
+SERIES_FILE="${PATCH_DIR}/series"
 if [[ ! -f "$SERIES_FILE" ]]; then
     die "Mesa series file not found: $SERIES_FILE"
 fi
@@ -60,7 +87,7 @@ fi
 while IFS= read -r patch_file; do
     [[ "$patch_file" =~ ^# ]] && continue
     [[ -z "$patch_file" ]] && continue
-    patch_path="${HERE}/patches/mesa/${patch_file}"
+    patch_path="${PATCH_DIR}/${patch_file}"
     if [[ ! -f "$patch_path" ]]; then
         die "Patch file not found: $patch_path"
     fi
@@ -152,7 +179,16 @@ fi
 
 echo ""
 echo "==> Mesa build complete!"
+echo "   Mesh shader mode: ${MESH_MODE}"
 echo "   Installed to: ${MESA_PREFIX}"
 echo "   VK_DRIVER_FILES set to: ${VK_DRIVER_FILES_VALUE}"
+echo ""
+if [[ "$MESH_MODE" == "mastag" ]]; then
+    echo "   To enable mesh/task shaders per-game, set:"
+    echo "     RADV_GFX103=1"
+else
+    echo "   Native mesh shaders (MESH only, no TASK) are always available."
+    echo "   No RADV_GFX103 env var needed."
+fi
 echo ""
 echo "   Reboot required for VK_DRIVER_FILES to take effect."

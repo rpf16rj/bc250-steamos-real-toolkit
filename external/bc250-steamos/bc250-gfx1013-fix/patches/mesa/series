@@ -1,28 +1,24 @@
 # Mesa patch series for GFX1013 (BC-250), applied in order against
 # pristine mesa-26.2.0-rc3 with `git apply` / `patch -p1`.
 #
-# Comment out a line with '#' to skip that patch. 0001 is the compute
-# fix and is required; 0002 and 0003 are optional features. 0003
-# requires 0002.
+# Patches 0001-0004 updated from MastaG/linux-cachyos-bc250 (Aug 2026).
+# 0005 replaced with V3 deferred SDot hybrid from dmorazasanchez/bc250-fsr4.
 #
-# 0002/0003 enable mesh/task shading on GFX1013. The user-visible
-# feature path stays disabled unless 0004 sees RADV_GFX103=1 at
-# runtime. Mesh shaders work (FF7 Rebirth tested); task shaders are
-# still not working correctly — games that rely on task shaders may
-# render incorrectly, hang or crash. Do not export RADV_GFX103=1
-# globally; enable it only per-game.
+# 0001: Expose ACE compute queue + async compute threadgroup workaround.
+# 0002: Mesh/task shading on GFX1013 via GFX10.3 software path.
+# 0003: Mesh/task pipeline-statistics queries (requires 0002).
+# 0004: Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3.
+#       Safe by itself — only activates when user sets the env var.
+#       Do not export globally; enable per-game only.
+# 0005: FSR4 V3 deferred SDot hybrid — iadd(0,SDot) fusion, MAD24 chains,
+#       dense SDot pre-pass. Supersedes V2 selective sdot. Always active.
+#       (stripped: ac_gpu_info.c and radv_physical_device.c changes are
+#       already in 0001 and 0004 respectively)
 #
-# 0004 adds an opt-in RADV_GFX103=1 env var to promote GFX1013 to the
-# GFX10.3 software path. Safe by itself — only activates when the user
-# explicitly sets the env var. Requires 0002/0003 to be useful.
-#
-# 0005 selectively reassociates the NIR fallback for the signed 4x8
-# dot product (sdot_4x8_iadd). When the accumulator is a constant,
-# keeps the balanced tree (avoids register pressure); otherwise uses
-# the right-leaning chain for fewer instructions. Always active
-# regardless of environment variables (from dmorazasanchez/bc250-fsr4 v2).
+# Alternative: patches/mesa-native-mesh/series uses lonewolf0622's native
+# mesh approach (MESH only, no TASK, no GFX10.3 spoof needed).
 0001-gfx1013-compute-queue-fix.patch
 0002-gfx1013-mesh-task-shaders.patch
 0003-gfx1013-taskmesh-queries.patch
 0004-radv-gfx103.patch
-0005-bc250-fsr4-selective-sdot4x8.patch
+0005-bc250-fsr4-v3-deferred-sdot.patch
