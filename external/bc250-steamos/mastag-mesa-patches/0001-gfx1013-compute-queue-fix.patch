@@ -1,0 +1,50 @@
+From 4f9dac1fc39a5cdf22901b9de2e525821c416247 Mon Sep 17 00:00:00 2001
+From: DryhoppedIPA <DryhoppedIPA@users.noreply.github.com>
+Date: Sat, 8 Aug 2026 04:53:11 +0000
+Subject: [PATCH 1/4] radv,ac: GFX1013 compute queue fix (identity, exposure,
+ ACE dispatch WA)
+
+Expose the GFX1013 ACE compute queue when paired with the BC-250 kernel fixes and route GFX1013 through the async-compute threadgroup workaround. Keep the GFX10.1 IP correction where it is not already present upstream.
+---
+ src/amd/common/ac_gpu_info.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/src/amd/common/ac_gpu_info.c b/src/amd/common/ac_gpu_info.c
+index 6e4c0b0a..33a3ced5 100644
+--- a/src/amd/common/ac_gpu_info.c
++++ b/src/amd/common/ac_gpu_info.c
+@@ -483,11 +483,9 @@ ac_fill_hw_ip_info(struct radeon_info *info, const struct drm_amdgpu_info_device
+        */
+       info->ip[ip_type].num_queues = 1;
+    } else if (ip_info->available_rings) {
+-      /* GFX1013 is known to have broken compute queue */
+-      if (ip_type == AMD_IP_COMPUTE && device_info->family == FAMILY_NV &&
+-          ASICREV_IS(device_info->external_rev, GFX1013))
+-         return false;
+-
++      /* GFX1013: expose the dedicated compute queue. This requires the
++       * matching BC-250 kernel compute-queue lifecycle fixes.
++       */
+       info->ip[ip_type].num_queues = util_bitcount(ip_info->available_rings);
+    }
+ 
+@@ -504,7 +502,8 @@ ac_fill_hw_ip_info(struct radeon_info *info, const struct drm_amdgpu_info_device
+       if (device_info->family == FAMILY_NV &&
+             (ASICREV_IS(device_info->external_rev, NAVI10) ||
+             ASICREV_IS(device_info->external_rev, NAVI12) ||
+-            ASICREV_IS(device_info->external_rev, NAVI14)))
++            ASICREV_IS(device_info->external_rev, NAVI14) ||
++            ASICREV_IS(device_info->external_rev, GFX1013)))
+          info->ip[AMD_IP_GFX].ver_minor = info->ip[AMD_IP_COMPUTE].ver_minor = 1;
+       else if (device_info->family == FAMILY_NV ||
+                device_info->family == FAMILY_VGH ||
+@@ -1018,7 +1017,8 @@ void ac_fill_bug_info(struct radeon_info *info)
+     * dimension mode.
+     */
+    info->has_async_compute_threadgroup_bug = info->family == CHIP_ICELAND ||
+-                                             info->family == CHIP_TONGA;
++                                             info->family == CHIP_TONGA ||
++                                             info->family == CHIP_GFX1013;
+ 
+    /* GFX7 CP requires 32 bytes alignment for the indirect buffer arguments on
+     * the compute queue.

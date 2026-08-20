@@ -1,0 +1,18 @@
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+index 3eae6e6..39ac23d 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+@@ -1278,8 +1278,11 @@ static void amdgpu_ttm_tt_unpopulate(struct ttm_device *bdev,
+ 	if (ttm->page_flags & TTM_TT_FLAG_EXTERNAL)
+ 		return;
+ 
+-	for (i = 0; i < ttm->num_pages; ++i)
+-		ttm->pages[i]->mapping = NULL;
++	/* Partial TTM population can leave NULL entries in the page vector. */
++	for (i = 0; i < ttm->num_pages; ++i) {
++		if (ttm->pages[i])
++			ttm->pages[i]->mapping = NULL;
++	}
+ 
+ 	adev = amdgpu_ttm_adev(bdev);
+ 
