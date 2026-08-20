@@ -122,6 +122,7 @@ persist_detect_and_record_installed() {
     fi
     ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
     ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
+    ds5_chord_vdf_patched 2>/dev/null && persist_state_add "ds5_chord_vdf"
     if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
        && grep -q "VK_DRIVER_FILES=.*bc250-gfx1013" /etc/environment 2>/dev/null; then
         persist_state_add "gfx1013"
@@ -1877,6 +1878,35 @@ xbox_adapter_status_label() {
     fi
 }
 
+run_ds5_bridge_menu() {
+    while true; do
+        print_banner
+        print_section "DS5 Bridge PS Button Fix"
+        echo -e "  ${DIM}Patched hid-playstation.ko + Steam chord config for DualSense PS button${RESET}"
+        echo ""
+        print_item "1" "Install DS5 Bridge Fix"      "⚠  Patched hid-playstation.ko — exposes BTN_MODE for chord combos"
+        print_item "2" "Revert DS5 Bridge Fix"       "Restore stock hid-playstation.ko"
+        print_item "3" "Install DS5 Chord Config"    "Patch Steam VDF — PS+Cross=QAM, PS+Triangle=Steam overlay"
+        print_item "4" "Revert DS5 Chord Config"     "Restore original Steam PS5 chord config"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" ds5_choice
+
+        case "$ds5_choice" in
+            1) install_ds5_bridge_fix;      press_enter ;;
+            2) run_revert_ds5_bridge_fix;   press_enter ;;
+            3) run_install_ds5_chord_vdf;   press_enter ;;
+            4) run_revert_ds5_chord_vdf;    press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$ds5_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 run_xbox_adapter_menu() {
     while true; do
         print_banner
@@ -2331,6 +2361,126 @@ ds5_bridge_fix_installed() {
     [[ -f "$module" ]] && [[ -f "$marker" ]]
 }
 
+ds5_chord_vdf_path() {
+    local steam_cfg="$REAL_HOME/.local/share/Steam/steamapps/common/Steam Controller Configs"
+    local steam_id dir
+    for dir in "$steam_cfg"/*/config/443510/controller_ps5.vdf; do
+        [[ -f "$dir" ]] || continue
+        steam_id="$(basename "$(dirname "$(dirname "$(dirname "$dir")")")")"
+        echo "$steam_cfg/$steam_id/config/443510/controller_ps5.vdf"
+        return 0
+    done
+    return 1
+}
+
+ds5_chord_vdf_patched() {
+    local vdf
+    vdf="$(ds5_chord_vdf_path 2>/dev/null)" || return 1
+    [[ -f "$vdf" ]] && grep -q 'system_key_1' "$vdf" && grep -q 'button_a' "$vdf"
+}
+
+install_ds5_chord_vdf() {
+    local fix_dir="$1"
+    local template="$fix_dir/controller_ps5_chord.vdf"
+    local vdf steam_id steam_cfg
+
+    steam_cfg="$REAL_HOME/.local/share/Steam/steamapps/common/Steam Controller Configs"
+    vdf="$(ds5_chord_vdf_path 2>/dev/null)"
+
+    if [[ -z "$vdf" || ! -f "$vdf" ]]; then
+        print_info "Steam PS5 chord config not found yet — will be applied on next Steam restart."
+        # Install to a well-known location; Steam will pick it up when it creates the config
+        local steam_id
+        steam_id="$(ls "$steam_cfg" 2>/dev/null | head -1)"
+        if [[ -n "$steam_id" ]]; then
+            local dest_dir="$steam_cfg/$steam_id/config/443510"
+            mkdir -p "$dest_dir"
+            vdf="$dest_dir/controller_ps5.vdf"
+        else
+            print_info "Steam user config directory not found. Skipping VDF patch."
+            return 0
+        fi
+    fi
+
+    if [[ ! -f "$template" ]]; then
+        print_info "VDF template not found in toolkit. Skipping VDF patch."
+        return 0
+    fi
+
+    # Backup original if not already backed up
+    if [[ -f "$vdf" && ! -f "${vdf}.bc250-bak" ]]; then
+        cp "$vdf" "${vdf}.bc250-bak"
+        chown "$REAL_USER":"$REAL_USER" "${vdf}.bc250-bak"
+    fi
+
+    # Get the Steam ID from the path to fix the url field
+    local steam_id_from_path
+    steam_id_from_path="$(basename "$(dirname "$(dirname "$(dirname "$vdf")")")")"
+
+    # Copy template and fix the url path with the actual Steam ID
+    sed "s|autosave:///home/deck/.local/share/Steam/steamapps/common/Steam Controller Configs/[0-9]*/config/443510/controller_ps5.vdf|autosave:///home/deck/.local/share/Steam/steamapps/common/Steam Controller Configs/$steam_id_from_path/config/443510/controller_ps5.vdf|" "$template" > "$vdf"
+    chown "$REAL_USER":"$REAL_USER" "$vdf"
+
+    print_info "PS5 chord config patched: button_a -> system_key_1 (QAM)"
+    print_info "Restart Steam (or reboot) to apply the chord config."
+}
+
+revert_ds5_chord_vdf() {
+    local vdf backup
+    vdf="$(ds5_chord_vdf_path 2>/dev/null)" || return 0
+    backup="${vdf}.bc250-bak"
+
+    if [[ -f "$backup" ]]; then
+        cp "$backup" "$vdf"
+        chown "$REAL_USER":"$REAL_USER" "$vdf"
+        rm -f "$backup"
+        print_info "PS5 chord config restored to original."
+    fi
+}
+
+run_install_ds5_chord_vdf() {
+    print_step "DS5-CHORD-VDF" "Install DS5 Chord Config (Steam VDF patch)"
+
+    echo -e "  ${DIM}Patches the Steam PS5 chord config to map PS+Cross -> QAM (system_key_1).${RESET}"
+    echo -e "  ${DIM}Requires: DS5 Bridge PS Button fix already installed (for BTN_MODE events).${RESET}"
+    echo ""
+
+    fixes_repo_sync || return 1
+
+    local fix_dir="$FIXES_REPO_DIR/ds5-bridge-fix"
+    if [[ ! -f "$fix_dir/controller_ps5_chord.vdf" ]]; then
+        fail_with_log "VDF template not found: $fix_dir/controller_ps5_chord.vdf" "DS5 Chord VDF — missing template"
+        return 1
+    fi
+
+    if ds5_chord_vdf_patched 2>/dev/null; then
+        print_info "PS5 chord config is already patched."
+        return 0
+    fi
+
+    install_ds5_chord_vdf "$fix_dir"
+    persist_state_add "ds5_chord_vdf"
+    print_success "DS5 Chord Config installed! Restart Steam (or reboot) to apply."
+}
+
+run_revert_ds5_chord_vdf() {
+    print_step "R-DS5-CHORD-VDF" "Revert DS5 Chord Config (Steam VDF patch)"
+
+    if ! ds5_chord_vdf_patched 2>/dev/null; then
+        print_info "PS5 chord config is not patched."
+        return 0
+    fi
+
+    if ! confirm "Restore the original Steam PS5 chord config?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    revert_ds5_chord_vdf
+    persist_state_remove "ds5_chord_vdf"
+    print_success "DS5 Chord Config reverted. Restart Steam (or reboot) to apply."
+}
+
 install_ds5_bridge_fix() {
     print_step "DS5-BRIDGE" "Installing DS5 Bridge PS Button Fix (patched hid-playstation.ko)"
 
@@ -2365,6 +2515,7 @@ install_ds5_bridge_fix() {
 
     print_success "DS5 Bridge PS Button fix installed! Reboot required."
     persist_state_add "ds5_bridge"
+
     print_info "After reboot, connect the DS5 Bridge and verify:"
     print_info "  ${CYAN}lsmod | grep hid_playstation${RESET}    (should show 1 user)"
     print_info "  ${CYAN}evtest /dev/input/eventN${RESET}        (BTN_MODE should be in capabilities)"
@@ -3300,13 +3451,11 @@ run_fixes_menu() {
         print_item "3" "Install GFX1013 Compute Fix"       "⚠  Patched amdgpu.ko + Mesa/RADV — async compute + FSR4 opt + SCLK range"
         print_item "4" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build + FSR4 opt + SCLK range"
         print_item "5" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
-        print_item "6" "Install DS5 Bridge PS Button Fix"  "⚠  Patched hid-playstation.ko — PS button for chord combos (Guide+A QAM)"
         echo ""
-        print_item "7" "Revert ACPI Fix"                   ""
-        print_item "8" "Revert DP Audio/Video Fix"         ""
-        print_item "9" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
+        print_item "6" "Revert ACPI Fix"                   ""
+        print_item "7" "Revert DP Audio/Video Fix"         ""
+        print_item "8" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
         print_item "A" "Revert AIC8800 WiFi/BT Driver"     ""
-        print_item "B" "Revert DS5 Bridge PS Button Fix"   "Restore stock hid-playstation.ko"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -3318,12 +3467,10 @@ run_fixes_menu() {
             3) install_gfx1013_fix;     press_enter ;;
             4) install_combined_fix;    press_enter ;;
             5) install_aic8800_wifi;    press_enter ;;
-            6) install_ds5_bridge_fix;  press_enter ;;
-            7) run_revert_acpi_fix;     press_enter ;;
-            8) run_revert_audio_fix;    press_enter ;;
-            9) run_revert_gfx1013_fix;  press_enter ;;
+            6) run_revert_acpi_fix;     press_enter ;;
+            7) run_revert_audio_fix;    press_enter ;;
+            8) run_revert_gfx1013_fix;  press_enter ;;
             A) run_revert_aic8800_wifi; press_enter ;;
-            B) run_revert_ds5_bridge_fix; press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$fix_choice'"
@@ -4507,6 +4654,14 @@ run_status() {
     fi
     echo -e "  ${CYAN}DS5 Bridge Fix${RESET}     ${ds5_icon} ${ds5_color}${ds5_label}${RESET}"
 
+    local chord_icon chord_color chord_label
+    if ds5_chord_vdf_patched 2>/dev/null; then
+        chord_icon="$ICON_OK"; chord_color="$GREEN"; chord_label="patched (QAM enabled)"
+    else
+        chord_icon="$DIM"; chord_color="$DIM"; chord_label="not patched"
+    fi
+    echo -e "  ${CYAN}DS5 Chord Config${RESET}  ${chord_icon} ${chord_color}${chord_label}${RESET}"
+
     local cec_icon cec_color cec_label
     if cec_control_installed; then
         cec_icon="$ICON_OK"; cec_color="$GREEN"; cec_label="configured"
@@ -4605,6 +4760,8 @@ run_revert_all() {
     echo ""
     run_revert_ds5_bridge_fix
     echo ""
+    run_revert_ds5_chord_vdf
+    echo ""
     run_revert_core_unlock
     echo ""
     run_revert_ram_split
@@ -4644,8 +4801,6 @@ run_install_manual() {
         print_item "12"  "Install Combined Audio+GFX1013" "⚠  Both fixes in a single kernel build (recommended)"
         print_item "13"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "13R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
-        print_item "14"  "Install DS5 Bridge PS Button Fix"  "⚠  Patched hid-playstation.ko — DS5 Bridge PS button for chord combos (Guide+A QAM)"
-        print_item "14R" "Revert DS5 Bridge PS Button Fix"   "Restore stock hid-playstation.ko"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -4676,8 +4831,6 @@ run_install_manual() {
             12) install_combined_fix;    press_enter ;;
             13) install_ac3_surround;      press_enter ;;
             13R) run_revert_ac3_surround;  press_enter ;;
-            14)  install_ds5_bridge_fix;     press_enter ;;
-            14R) run_revert_ds5_bridge_fix;  press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
@@ -4781,6 +4934,7 @@ run_extras_menu() {
         print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
         print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
+        print_item "D" "DS5 Bridge PS Button Fix"    "Install/revert patched hid-playstation.ko — DualSense PS button chord combos"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "Z" "Toolkit SteamOS Control"      "Install Decky fan profiles and LED bar controls"
         print_item "0" "Back" ""
@@ -4794,6 +4948,7 @@ run_extras_menu() {
             H) run_cec_control;           press_enter ;;
             K) run_coolercontrol_menu ;;
             P) install_persistence;       press_enter ;;
+            D) run_ds5_bridge_menu ;;
             X) run_xbox_adapter_menu ;;
             Z) install_toolkit_steamos_control_plugin; press_enter ;;
             0) return 0 ;;
@@ -4830,6 +4985,8 @@ reapply_installed_components() {
             acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
             audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
             ac3)        install_ac3_surround || print_error "AC-3 surround reapply failed" ;;
+            ds5_bridge) install_ds5_bridge_fix || print_error "DS5 Bridge fix reapply failed" ;;
+            ds5_chord_vdf) run_install_ds5_chord_vdf || print_error "DS5 Chord VDF reapply failed" ;;
             cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;
             core_unlock) print_info "CPU Core Unlock boot service persists via the atomic-update keep list — skipped in unattended re-apply." ;;
             ram_split)  print_info "RAM/VRAM split persists on its own (CMOS is hardware state; GRUB config is in the atomic-update keep list) — skipped in unattended re-apply." ;;
