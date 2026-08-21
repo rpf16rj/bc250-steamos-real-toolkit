@@ -1,0 +1,66 @@
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-20 08:09:08.860264997 -0300
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-20 08:10:13.180968474 -0300
+@@ -13135,6 +13135,45 @@
+ 	return vsdb_info->freesync_supported;
+ }
+ 
++static bool parse_amd_vsdb_cea_direct(u8 *edid_ext, int len,
++		struct amdgpu_hdmi_vsdb_info *vsdb_info)
++{
++	int i = 4;
++	int dtd_start = edid_ext[2];
++
++	if (dtd_start == 0 || dtd_start >= len)
++		dtd_start = len;
++
++	while (i < dtd_start) {
++		u8 tag = (edid_ext[i] >> 5) & 0x07;
++		u8 db_len = edid_ext[i] & 0x1F;
++
++		if (db_len == 0 && tag == 0)
++			break;
++
++		if (tag == 3 && db_len >= 7) {
++			u8 *db = &edid_ext[i + 1];
++			unsigned int oui = (db[2] << 16) | (db[1] << 8) | db[0];
++
++			if (oui == HDMI_AMD_VENDOR_SPECIFIC_DATA_BLOCK_IEEE_REGISTRATION_ID) {
++				u8 version = db[3];
++
++				if (version == 1 && db_len >= 7) {
++					vsdb_info->freesync_supported = 1;
++					vsdb_info->amd_vsdb_version = 1;
++					vsdb_info->min_refresh_rate_hz = db[4] | (db[5] << 8);
++					vsdb_info->max_refresh_rate_hz = db[6] | (db[7] << 8);
++					return true;
++				}
++			}
++		}
++
++		i += 1 + db_len;
++	}
++
++	return false;
++}
++
+ static bool parse_edid_cea(struct amdgpu_dm_connector *aconnector,
+ 		u8 *edid_ext, int len,
+ 		struct amdgpu_hdmi_vsdb_info *vsdb_info)
+@@ -13145,9 +13184,16 @@
+ 	mutex_lock(&adev->dm.dc_lock);
+ 	if (adev->dm.dmub_srv)
+ 		ret = parse_edid_cea_dmub(&adev->dm, edid_ext, len, vsdb_info);
+-	else
++	else {
+ 		ret = parse_edid_cea_dmcu(&adev->dm, edid_ext, len, vsdb_info);
++		if (!ret)
++			ret = parse_amd_vsdb_cea_direct(edid_ext, len, vsdb_info);
++	}
+ 	mutex_unlock(&adev->dm.dc_lock);
++
++	if (!ret)
++		ret = parse_amd_vsdb_cea_direct(edid_ext, len, vsdb_info);
++
+ 	return ret;
+ }
+ 

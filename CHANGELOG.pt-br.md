@@ -7,6 +7,23 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.5.0 — 2026-08-21
+
+- **Novo:** Patches de Mesa/RADV atualizados com a versão mais recente
+  do MastaG (Ago 2026) — compute queue fix, mesh/task shaders,
+  taskmesh queries e promoção opt-in `RADV_GFX103=1` para GFX10.3
+  todos atualizados.
+- **Novo:** FSR4 V3 deferred SDot hybrid (de dmorazasanchez/bc250-fsr4)
+  substitui o V2 selective sdot — adiciona fusão `iadd(0,SDot)`, cadeias
+  MAD24 e pré-pass denso de SDot para melhor throughput INT8.
+- **Novo:** Opção de native mesh shaders (de lonewolf0622) — shaders
+  MESH-only no GFX10 sem spoofing de GFX10.3. Selecionável na instalação
+  junto com a abordagem mesh/task do MastaG.
+- **Novo:** Patch de EDID VRR para FreeSync via PCON DP→HDMI — zera o
+  VTEM HDMI para evitar flickering, adiciona AMD VSDB v1 para FreeSync.
+- **Corrigido:** Detecção de EDID no sysfs — `[[ -s ]]` reporta tamanho
+  0 em arquivos sysfs; trocado por `wc -c` para o patch VRR funcionar.
+
 ## v1.4.0 — 2026-08-19
 
 - **Novo:** Faixa SMU SCLK ampliada para 350–2230 MHz (patch do MastaG),

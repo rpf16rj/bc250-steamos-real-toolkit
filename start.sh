@@ -121,6 +121,9 @@ persist_detect_and_record_installed() {
         persist_state_add "audio"
     fi
     ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
+    vrr_edid_patch_installed 2>/dev/null && persist_state_add "vrr_edid"
+    ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
+    ds5_chord_vdf_patched 2>/dev/null && persist_state_add "ds5_chord_vdf"
     if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
        && grep -q "VK_DRIVER_FILES=.*bc250-gfx1013" /etc/environment 2>/dev/null; then
         persist_state_add "gfx1013"
@@ -1876,6 +1879,35 @@ xbox_adapter_status_label() {
     fi
 }
 
+run_ds5_bridge_menu() {
+    while true; do
+        print_banner
+        print_section "DS5 Bridge PS Button Fix"
+        echo -e "  ${DIM}Patched hid-playstation.ko + Steam chord config for DualSense PS button${RESET}"
+        echo ""
+        print_item "1" "Install DS5 Bridge Fix"      "⚠  Patched hid-playstation.ko — exposes BTN_MODE for chord combos"
+        print_item "2" "Revert DS5 Bridge Fix"       "Restore stock hid-playstation.ko"
+        print_item "3" "Install DS5 Chord Config"    "Patch Steam VDF — PS+Cross=QAM, PS+Triangle=Steam overlay"
+        print_item "4" "Revert DS5 Chord Config"     "Restore original Steam PS5 chord config"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" ds5_choice
+
+        case "$ds5_choice" in
+            1) install_ds5_bridge_fix;      press_enter ;;
+            2) run_revert_ds5_bridge_fix;   press_enter ;;
+            3) run_install_ds5_chord_vdf;   press_enter ;;
+            4) run_revert_ds5_chord_vdf;    press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$ds5_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 run_xbox_adapter_menu() {
     while true; do
         print_banner
@@ -2311,6 +2343,212 @@ run_revert_audio_fix() {
 
     print_success "DisplayPort audio/video fix reverted to stock amdgpu.ko. Reboot to apply."
     persist_state_remove "audio"
+}
+
+# --- DS5 Bridge PS Button Fix (patched hid-playstation.ko) --------------------
+# The DS5-Linux-Bridge (https://github.com/kungaa/DS5-Linux-Bridge/) presents
+# the DualSense via USB with VID 054c/PID 0ce6 but does not implement feature
+# report 0x09 (pairing info). The hid-playstation driver aborts probing on
+# this failure, falling back to generic usbhid — which doesn't declare BTN_MODE
+# in the evdev capabilities, preventing Steam/Gamescope chord combos like
+# Guide+A (Quick Access Menu) from working. This patches hid-playstation to
+# make the pairing info, firmware info, and calibration feature reports
+# non-fatal, allowing the driver to bind and expose BTN_MODE correctly.
+ds5_bridge_fix_installed() {
+    local rel marker module
+    rel=$(uname -r)
+    marker="/usr/lib/modules/$rel/updates/.bc250-ds5-bridge-fix"
+    module="/usr/lib/modules/$rel/updates/hid-playstation.ko.zst"
+    [[ -f "$module" ]] && [[ -f "$marker" ]]
+}
+
+ds5_chord_vdf_path() {
+    local steam_cfg="$REAL_HOME/.local/share/Steam/steamapps/common/Steam Controller Configs"
+    local steam_id dir
+    for dir in "$steam_cfg"/*/config/443510/controller_ps5.vdf; do
+        [[ -f "$dir" ]] || continue
+        steam_id="$(basename "$(dirname "$(dirname "$(dirname "$dir")")")")"
+        echo "$steam_cfg/$steam_id/config/443510/controller_ps5.vdf"
+        return 0
+    done
+    return 1
+}
+
+ds5_chord_vdf_patched() {
+    local vdf
+    vdf="$(ds5_chord_vdf_path 2>/dev/null)" || return 1
+    [[ -f "$vdf" ]] && grep -q 'system_key_1' "$vdf" && grep -q 'button_a' "$vdf"
+}
+
+install_ds5_chord_vdf() {
+    local fix_dir="$1"
+    local template="$fix_dir/controller_ps5_chord.vdf"
+    local vdf steam_id steam_cfg
+
+    steam_cfg="$REAL_HOME/.local/share/Steam/steamapps/common/Steam Controller Configs"
+    vdf="$(ds5_chord_vdf_path 2>/dev/null)"
+
+    if [[ -z "$vdf" || ! -f "$vdf" ]]; then
+        print_info "Steam PS5 chord config not found yet — will be applied on next Steam restart."
+        # Install to a well-known location; Steam will pick it up when it creates the config
+        local steam_id
+        steam_id="$(ls "$steam_cfg" 2>/dev/null | head -1)"
+        if [[ -n "$steam_id" ]]; then
+            local dest_dir="$steam_cfg/$steam_id/config/443510"
+            mkdir -p "$dest_dir"
+            vdf="$dest_dir/controller_ps5.vdf"
+        else
+            print_info "Steam user config directory not found. Skipping VDF patch."
+            return 0
+        fi
+    fi
+
+    if [[ ! -f "$template" ]]; then
+        print_info "VDF template not found in toolkit. Skipping VDF patch."
+        return 0
+    fi
+
+    # Backup original if not already backed up
+    if [[ -f "$vdf" && ! -f "${vdf}.bc250-bak" ]]; then
+        cp "$vdf" "${vdf}.bc250-bak"
+        chown "$REAL_USER":"$REAL_USER" "${vdf}.bc250-bak"
+    fi
+
+    # Get the Steam ID from the path to fix the url field
+    local steam_id_from_path
+    steam_id_from_path="$(basename "$(dirname "$(dirname "$(dirname "$vdf")")")")"
+
+    # Copy template and fix the url path with the actual Steam ID
+    sed "s|autosave:///home/deck/.local/share/Steam/steamapps/common/Steam Controller Configs/[0-9]*/config/443510/controller_ps5.vdf|autosave:///home/deck/.local/share/Steam/steamapps/common/Steam Controller Configs/$steam_id_from_path/config/443510/controller_ps5.vdf|" "$template" > "$vdf"
+    chown "$REAL_USER":"$REAL_USER" "$vdf"
+
+    print_info "PS5 chord config patched: button_a -> system_key_1 (QAM)"
+    print_info "Restart Steam (or reboot) to apply the chord config."
+}
+
+revert_ds5_chord_vdf() {
+    local vdf backup
+    vdf="$(ds5_chord_vdf_path 2>/dev/null)" || return 0
+    backup="${vdf}.bc250-bak"
+
+    if [[ -f "$backup" ]]; then
+        cp "$backup" "$vdf"
+        chown "$REAL_USER":"$REAL_USER" "$vdf"
+        rm -f "$backup"
+        print_info "PS5 chord config restored to original."
+    fi
+}
+
+run_install_ds5_chord_vdf() {
+    print_step "DS5-CHORD-VDF" "Install DS5 Chord Config (Steam VDF patch)"
+
+    echo -e "  ${DIM}Patches the Steam PS5 chord config to map PS+Cross -> QAM (system_key_1).${RESET}"
+    echo -e "  ${DIM}Requires: DS5 Bridge PS Button fix already installed (for BTN_MODE events).${RESET}"
+    echo ""
+
+    fixes_repo_sync || return 1
+
+    local fix_dir="$FIXES_REPO_DIR/ds5-bridge-fix"
+    if [[ ! -f "$fix_dir/controller_ps5_chord.vdf" ]]; then
+        fail_with_log "VDF template not found: $fix_dir/controller_ps5_chord.vdf" "DS5 Chord VDF — missing template"
+        return 1
+    fi
+
+    if ds5_chord_vdf_patched 2>/dev/null; then
+        print_info "PS5 chord config is already patched."
+        return 0
+    fi
+
+    install_ds5_chord_vdf "$fix_dir"
+    persist_state_add "ds5_chord_vdf"
+    print_success "DS5 Chord Config installed! Restart Steam (or reboot) to apply."
+}
+
+run_revert_ds5_chord_vdf() {
+    print_step "R-DS5-CHORD-VDF" "Revert DS5 Chord Config (Steam VDF patch)"
+
+    if ! ds5_chord_vdf_patched 2>/dev/null; then
+        print_info "PS5 chord config is not patched."
+        return 0
+    fi
+
+    if ! confirm "Restore the original Steam PS5 chord config?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    revert_ds5_chord_vdf
+    persist_state_remove "ds5_chord_vdf"
+    print_success "DS5 Chord Config reverted. Restart Steam (or reboot) to apply."
+}
+
+install_ds5_bridge_fix() {
+    print_step "DS5-BRIDGE" "Installing DS5 Bridge PS Button Fix (patched hid-playstation.ko)"
+
+    echo -e "  ${YELLOW}⚠  This builds and installs a patched hid-playstation.ko kernel module.${RESET}"
+    echo -e "  ${YELLOW}⚠  A bad build can prevent the DualSense driver from loading at boot.${RESET}"
+    echo -e "  ${DIM}Fixes: DS5-Linux-Bridge PS button not working for chord combos (Guide+A for QAM).${RESET}"
+    echo -e "  ${DIM}The hid-playstation driver currently fails to probe the bridge device because${RESET}"
+    echo -e "  ${DIM}it doesn't implement feature report 0x09 (pairing info). This patch makes${RESET}"
+    echo -e "  ${DIM}that and two other feature reports non-fatal, allowing the driver to bind${RESET}"
+    echo -e "  ${DIM}and expose BTN_MODE correctly for Steam/Gamescope chord combos.${RESET}"
+    echo ""
+    if ! confirm "Continue with the DS5 Bridge PS Button fix?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+
+    local fix_dir="$FIXES_REPO_DIR/ds5-bridge-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        fail_with_log "ds5-bridge-fix directory not found in the fixes repository." "DS5 Bridge Fix — missing directory"
+        return 1
+    fi
+
+    print_info "Running patch-driver.sh (fetch sources && build && install)..."
+    print_info "This reuses the audio fix's kernel source tree and can take several minutes."
+    chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ./patch-driver.sh"; then
+        fail_with_log "DS5 Bridge PS Button fix build/install failed." "DS5 Bridge Fix — patch-driver.sh"
+        return 1
+    fi
+
+    print_success "DS5 Bridge PS Button fix installed! Reboot required."
+    persist_state_add "ds5_bridge"
+
+    print_info "After reboot, connect the DS5 Bridge and verify:"
+    print_info "  ${CYAN}lsmod | grep hid_playstation${RESET}    (should show 1 user)"
+    print_info "  ${CYAN}evtest /dev/input/eventN${RESET}        (BTN_MODE should be in capabilities)"
+    print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
+}
+
+run_revert_ds5_bridge_fix() {
+    print_step "R-DS5-BRIDGE" "Revert DS5 Bridge PS Button Fix"
+
+    local fix_dir="$FIXES_REPO_DIR/ds5-bridge-fix"
+    if [[ ! -d "$fix_dir" ]]; then
+        print_info "Fixes repository not found locally — nothing to revert."
+        return 0
+    fi
+
+    if ! ds5_bridge_fix_installed; then
+        print_info "DS5 Bridge fix is not installed."
+        return 0
+    fi
+
+    if ! confirm "This will restore the stock hid-playstation.ko module. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    if ! (cd "$fix_dir" && ./patch-driver.sh uninstall); then
+        fail_with_log "Failed to roll back the DS5 Bridge PS Button fix." "DS5 Bridge Fix — uninstall"
+        return 1
+    fi
+
+    print_success "DS5 Bridge PS Button fix reverted to stock hid-playstation.ko. Reboot to apply."
+    persist_state_remove "ds5_bridge"
 }
 
 # --- HDMI AC-3 Surround Encoding (Dolby Digital via eARC) --------------------
@@ -2816,9 +3054,26 @@ install_gfx1013_fix() {
     echo -e "  ${DIM}Kernel: compute GFXOFF guard, PASID TLB fix, KFD runlist flush, TTM guard,${RESET}"
     echo -e "  ${DIM}  widened SMU SCLK range (350-2230 MHz) for userspace governors.${RESET}"
     echo -e "  ${DIM}Mesa: async compute fix, mesh/task shaders (opt-in via RADV_GFX103=1),${RESET}"
-    echo -e "  ${DIM}  FSR4 dp4a reassociation optimization (always active).${RESET}"
+    echo -e "  ${DIM}  FSR4 V3 deferred SDot hybrid (MAD24 chains, dense pre-pass, always active).${RESET}"
     echo -e "  ${DIM}Performance gains of +20-25% in async compute workloads (e.g., Cyberpunk 2077).${RESET}"
     echo ""
+
+    # Mesh shader mode selection
+    local mesh_flag=""
+    echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
+    echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
+    echo -e "  ${DIM}     Supports both MESH and TASK shaders. Opt-in per-game with RADV_GFX103=1.${RESET}"
+    echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
+    echo -e "  ${DIM}     MESH always available, no TASK shader support. No env var needed.${RESET}"
+    echo ""
+    local mesh_choice
+    read -rp "  Select mesh shader mode [1-MastaG/2-Native] (default 1): " mesh_choice
+    case "$mesh_choice" in
+        2|n|N|native) mesh_flag="--native-mesh"; print_info "Using native mesh shader mode." ;;
+        *) mesh_flag="--mastag-mesh"; print_info "Using MastaG mesh shader mode." ;;
+    esac
+    echo ""
+
     if ! confirm "Continue with the GFX1013 compute queue fix?"; then
         print_info "Cancelled."
         return 0
@@ -2878,8 +3133,8 @@ install_gfx1013_fix() {
         return 1
     fi
 
-    print_info "Step 7/7: Building Mesa/RADV (this may take 10-15 minutes)..."
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh"; then
+    print_info "Step 7/7: Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
         fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "GFX1013 Fix — build-mesa.sh"
         return 1
     fi
@@ -2940,9 +3195,27 @@ install_combined_fix() {
     echo -e "  ${DIM}  • GFX1013 compute queue fix for async compute support${RESET}"
     echo -e "  ${DIM}  • TTM NULL-page guard + opt-in KFD runlist flush (ROCm)${RESET}"
     echo -e "  ${DIM}  • Widened SMU SCLK range (350-2230 MHz) for userspace governors${RESET}"
-    echo -e "  ${DIM}  • Patched Mesa/RADV: async compute + FSR4 dp4a opt + mesh/task (opt-in)${RESET}"
+    echo -e "  ${DIM}  • Patched Mesa/RADV: async compute + FSR4 V3 + mesh/task (opt-in)${RESET}"
     echo -e "  ${DIM}  • Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3${RESET}"
+    echo -e "  ${DIM}  • FSR4 V3 deferred SDot hybrid (MAD24 chains, dense pre-pass)${RESET}"
     echo ""
+
+    # Mesh shader mode selection
+    local mesh_flag=""
+    echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
+    echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
+    echo -e "  ${DIM}     Supports both MESH and TASK shaders. Opt-in per-game with RADV_GFX103=1.${RESET}"
+    echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
+    echo -e "  ${DIM}     MESH always available, no TASK shader support. No env var needed.${RESET}"
+    echo ""
+    local mesh_choice
+    read -rp "  Select mesh shader mode [1-MastaG/2-Native] (default 1): " mesh_choice
+    case "$mesh_choice" in
+        2|n|N|native) mesh_flag="--native-mesh"; print_info "Using native mesh shader mode." ;;
+        *) mesh_flag="--mastag-mesh"; print_info "Using MastaG mesh shader mode." ;;
+    esac
+    echo ""
+
     if ! confirm "Continue with the combined DP Audio + GFX1013 fix?"; then
         print_info "Cancelled."
         return 0
@@ -2981,6 +3254,18 @@ install_combined_fix() {
         return 1
     fi
 
+    # VRR EDID patch prompt (kernel already includes the VRR fallback patch)
+    echo ""
+    echo -e "  ${CYAN}The VRR PCON FreeSync fallback patch is included in the kernel build.${RESET}"
+    echo -e "  ${DIM}If you use a DP→HDMI PCON adapter and want FreeSync VRR, you also need an EDID patch.${RESET}"
+    echo -e "  ${DIM}This dumps your display's EDID, zeros VTEM VRR (prevents flickering), and adds AMD VSDB v1.${RESET}"
+    echo ""
+    if confirm "Also install the VRR EDID patch for FreeSync over PCON?"; then
+        install_vrr_edid_patch || print_info "VRR EDID patch was skipped (kernel patch is still installed)."
+    else
+        print_info "VRR EDID patch skipped. You can install it later from the menu."
+    fi
+
     print_info "Kernel patches installed. Now building patched Mesa/RADV..."
     local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
     if [[ ! -d "$mesa_dir" ]]; then
@@ -2994,8 +3279,8 @@ install_combined_fix() {
         return 1
     fi
 
-    print_info "Building Mesa/RADV (this may take 10-15 minutes)..."
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh"; then
+    print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
         fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
         return 1
     fi
@@ -3006,6 +3291,154 @@ install_combined_fix() {
     print_info "After reboot: DP audio/video at normal speed + async compute queues enabled."
     print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
+}
+
+# --- VRR EDID patch for FreeSync over PCON (DP→HDMI) -------------------------
+VRR_EDID_DIR="$FIXES_REPO_DIR/display-edid-patch"
+VRR_EDID_FW_DIR="/lib/firmware/edid"
+VRR_EDID_FW_NAME="vrr-pcon-patched.bin"
+VRR_EDID_CONNECTOR="DP-1"
+
+vrr_edid_patch_installed() {
+    [[ -f "$VRR_EDID_FW_DIR/$VRR_EDID_FW_NAME" ]] \
+    && grep -q "drm.edid_firmware=$VRR_EDID_CONNECTOR:edid/$VRR_EDID_FW_NAME" "$GRUB_DEFAULT" 2>/dev/null
+}
+
+vrr_edid_find_connector() {
+    local conn
+    for conn in /sys/class/drm/card*-*/edid; do
+        [[ -f "$conn" ]] || continue
+        # sysfs files report size 0 in stat, so [[ -s ]] doesn't work.
+        # Use wc -c to check if there's actual EDID data.
+        local sz
+        sz=$(wc -c < "$conn" 2>/dev/null) || continue
+        [[ "$sz" -gt 0 ]] || continue
+        echo "${conn%/edid}"
+        return 0
+    done
+    return 1
+}
+
+install_vrr_edid_patch() {
+    print_step "VRR" "Installing VRR (FreeSync) EDID Patch for PCON"
+
+    echo -e "  ${DIM}Enables FreeSync VRR over a DP→HDMI PCON adapter by patching the display's EDID.${RESET}"
+    echo -e "  ${DIM}Zeros HDMI VRR (VTEM) in HF-VSDB to prevent flickering, adds AMD VSDB v1 for FreeSync SPD.${RESET}"
+    echo -e "  ${DIM}Requires the patched amdgpu.ko (VRR PCON FreeSync fallback patch).${RESET}"
+    echo -e "  ${DIM}Adds amdgpu.freesync_pcon_allow_all=1 and drm.edid_firmware to the kernel command line.${RESET}"
+    echo ""
+
+    if vrr_edid_patch_installed; then
+        print_info "VRR EDID patch is already installed."
+        if ! confirm "Reinstall/update the EDID patch?"; then
+            print_info "Cancelled."
+            return 0
+        fi
+    fi
+
+    if ! confirm "Continue with the VRR EDID patch?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+
+    if [[ ! -f "$VRR_EDID_DIR/patch_edid_vrr.py" ]]; then
+        fail_with_log "patch_edid_vrr.py not found at $VRR_EDID_DIR." "VRR EDID — missing script"
+        return 1
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        print_info "python3 is required for EDID patching — installing..."
+        steamos_writable 'pacman -Sy --noconfirm --needed python3' || {
+            fail_with_log "Failed to install python3." "VRR EDID — missing python3"
+            return 1
+        }
+    fi
+
+    local conn_path edid_raw edid_patched
+    conn_path=$(vrr_edid_find_connector) || {
+        fail_with_log "No connected display with an EDID found." "VRR EDID — no display"
+        return 1
+    }
+    VRR_EDID_CONNECTOR=$(basename "$conn_path")
+    edid_raw="/tmp/vrr-edid-raw.bin"
+    edid_patched="/tmp/vrr-edid-patched.bin"
+
+    print_info "Dumping EDID from $VRR_EDID_CONNECTOR..."
+    if ! sudo cat "$conn_path/edid" > "$edid_raw" 2>/dev/null || [[ ! -s "$edid_raw" ]]; then
+        fail_with_log "Could not read EDID from $conn_path/edid." "VRR EDID — read failed"
+        return 1
+    fi
+    print_info "Raw EDID: $(wc -c < "$edid_raw") bytes"
+
+    print_info "Patching EDID (zero VTEM VRR, add AMD VSDB v1 for FreeSync SPD)..."
+    if ! python3 "$VRR_EDID_DIR/patch_edid_vrr.py" "$edid_raw" "$edid_patched"; then
+        fail_with_log "EDID patching script failed." "VRR EDID — patch script"
+        return 1
+    fi
+
+    print_info "Installing patched EDID to $VRR_EDID_FW_DIR/$VRR_EDID_FW_NAME..."
+    steamos_writable "
+        sudo mkdir -p '$VRR_EDID_FW_DIR'
+        sudo cp '$edid_patched' '$VRR_EDID_FW_DIR/$VRR_EDID_FW_NAME'
+    " || {
+        fail_with_log "Failed to install patched EDID firmware." "VRR EDID — firmware install"
+        return 1
+    }
+
+    print_info "Configuring kernel command line..."
+    local grub_cmdline="amdgpu.freesync_pcon_allow_all=1 drm.edid_firmware=$VRR_EDID_CONNECTOR:edid/$VRR_EDID_FW_NAME"
+    steamos_writable "
+        cp '$GRUB_DEFAULT' '$GRUB_DEFAULT.vrr.bak'
+        if grep -q 'amdgpu.freesync_pcon_allow_all' '$GRUB_DEFAULT'; then
+            :
+        else
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 $grub_cmdline\"/' '$GRUB_DEFAULT'
+        fi
+        update-grub
+    " || {
+        fail_with_log "Failed to update GRUB configuration." "VRR EDID — grub config"
+        return 1
+    }
+
+    rm -f "$edid_raw" "$edid_patched"
+
+    print_success "VRR EDID patch installed! Reboot required."
+    persist_state_add "vrr_edid"
+    print_info "After reboot verify: sudo cat /sys/kernel/debug/dri/0/$VRR_EDID_CONNECTOR/vrr_range"
+    print_info "Expected: Min: 48, Max: 120 (or your display's FreeSync range)"
+}
+
+revert_vrr_edid_patch() {
+    print_step "R-VRR" "Revert VRR EDID Patch"
+
+    if ! vrr_edid_patch_installed; then
+        print_info "VRR EDID patch is not installed."
+        return 0
+    fi
+
+    if ! confirm "Remove the VRR EDID patch (firmware + kernel cmdline params)?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    steamos_writable "
+        sudo rm -f '$VRR_EDID_FW_DIR/$VRR_EDID_FW_NAME'
+        if [[ -f '$GRUB_DEFAULT.vrr.bak' ]]; then
+            cp '$GRUB_DEFAULT.vrr.bak' '$GRUB_DEFAULT'
+        else
+            sed -i 's/ amdgpu.freesync_pcon_allow_all=1//' '$GRUB_DEFAULT'
+            sed -i 's/ drm.edid_firmware=$VRR_EDID_CONNECTOR:edid\/$VRR_EDID_FW_NAME//' '$GRUB_DEFAULT'
+        fi
+        update-grub
+    " || {
+        fail_with_log "Failed to revert VRR EDID patch." "VRR EDID — revert"
+        return 1
+    }
+
+    print_success "VRR EDID patch reverted. Reboot to apply."
+    persist_state_remove "vrr_edid"
 }
 
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
@@ -3213,27 +3646,31 @@ run_fixes_menu() {
         print_item "2" "Install DP Audio/Video Fix"        "⚠  Patched amdgpu.ko — DP audio/video clock + GPU metrics + DP SS disable + tunable cache + TTM guard"
         print_item "3" "Install GFX1013 Compute Fix"       "⚠  Patched amdgpu.ko + Mesa/RADV — async compute + FSR4 opt + SCLK range"
         print_item "4" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build + FSR4 opt + SCLK range"
-        print_item "5" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "5" "Install VRR EDID Patch (PCON)"     "FreeSync VRR over DP→HDMI adapter — zeros VTEM, adds AMD VSDB v1"
+        print_item "6" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
         echo ""
-        print_item "6" "Revert ACPI Fix"                   ""
-        print_item "7" "Revert DP Audio/Video Fix"         ""
-        print_item "8" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
-        print_item "9" "Revert AIC8800 WiFi/BT Driver"     ""
+        print_item "7" "Revert ACPI Fix"                   ""
+        print_item "8" "Revert DP Audio/Video Fix"         ""
+        print_item "9" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
+        print_item "B" "Revert VRR EDID Patch"             "Removes patched EDID firmware + kernel cmdline params"
+        print_item "A" "Revert AIC8800 WiFi/BT Driver"     ""
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
         read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" fix_choice
 
-        case "$fix_choice" in
+        case "${fix_choice^^}" in
             1) install_acpi_fix;        press_enter ;;
             2) install_audio_fix;       press_enter ;;
             3) install_gfx1013_fix;     press_enter ;;
             4) install_combined_fix;    press_enter ;;
-            5) install_aic8800_wifi;    press_enter ;;
-            6) run_revert_acpi_fix;     press_enter ;;
-            7) run_revert_audio_fix;    press_enter ;;
-            8) run_revert_gfx1013_fix;  press_enter ;;
-            9) run_revert_aic8800_wifi; press_enter ;;
+            5) install_vrr_edid_patch;    press_enter ;;
+            6) install_aic8800_wifi;      press_enter ;;
+            7) run_revert_acpi_fix;       press_enter ;;
+            8) run_revert_audio_fix;      press_enter ;;
+            9) run_revert_gfx1013_fix;    press_enter ;;
+            B) revert_vrr_edid_patch;     press_enter ;;
+            A) run_revert_aic8800_wifi;   press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$fix_choice'"
@@ -4404,6 +4841,27 @@ run_status() {
     fi
     echo -e "  ${CYAN}AIC8800 WiFi Driver${RESET} ${wifi_icon} ${wifi_color}${wifi_label}${RESET}"
 
+    local ds5_icon ds5_color ds5_label resolved_hp
+    resolved_hp=$(modinfo -F filename hid_playstation 2>/dev/null || echo "")
+    if ds5_bridge_fix_installed; then
+        if [[ "$resolved_hp" == *"/updates/"* ]]; then
+            ds5_icon="$ICON_OK"; ds5_color="$GREEN"; ds5_label="patched module active"
+        else
+            ds5_icon="$ICON_WARN"; ds5_color="$YELLOW"; ds5_label="installed — reboot pending"
+        fi
+    else
+        ds5_icon="$DIM"; ds5_color="$DIM"; ds5_label="not installed"
+    fi
+    echo -e "  ${CYAN}DS5 Bridge Fix${RESET}     ${ds5_icon} ${ds5_color}${ds5_label}${RESET}"
+
+    local chord_icon chord_color chord_label
+    if ds5_chord_vdf_patched 2>/dev/null; then
+        chord_icon="$ICON_OK"; chord_color="$GREEN"; chord_label="patched (QAM enabled)"
+    else
+        chord_icon="$DIM"; chord_color="$DIM"; chord_label="not patched"
+    fi
+    echo -e "  ${CYAN}DS5 Chord Config${RESET}  ${chord_icon} ${chord_color}${chord_label}${RESET}"
+
     local cec_icon cec_color cec_label
     if cec_control_installed; then
         cec_icon="$ICON_OK"; cec_color="$GREEN"; cec_label="configured"
@@ -4499,6 +4957,10 @@ run_revert_all() {
     run_revert_audio_fix
     echo ""
     run_revert_ac3_surround
+    echo ""
+    run_revert_ds5_bridge_fix
+    echo ""
+    run_revert_ds5_chord_vdf
     echo ""
     run_revert_core_unlock
     echo ""
@@ -4672,6 +5134,7 @@ run_extras_menu() {
         print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
         print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
+        print_item "D" "DS5 Bridge PS Button Fix"    "Install/revert patched hid-playstation.ko — DualSense PS button chord combos"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "Z" "Toolkit SteamOS Control"      "Install Decky fan profiles and LED bar controls"
         print_item "0" "Back" ""
@@ -4685,6 +5148,7 @@ run_extras_menu() {
             H) run_cec_control;           press_enter ;;
             K) run_coolercontrol_menu ;;
             P) install_persistence;       press_enter ;;
+            D) run_ds5_bridge_menu ;;
             X) run_xbox_adapter_menu ;;
             Z) install_toolkit_steamos_control_plugin; press_enter ;;
             0) return 0 ;;
@@ -4721,6 +5185,8 @@ reapply_installed_components() {
             acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
             audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
             ac3)        install_ac3_surround || print_error "AC-3 surround reapply failed" ;;
+            ds5_bridge) install_ds5_bridge_fix || print_error "DS5 Bridge fix reapply failed" ;;
+            ds5_chord_vdf) run_install_ds5_chord_vdf || print_error "DS5 Chord VDF reapply failed" ;;
             cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;
             core_unlock) print_info "CPU Core Unlock boot service persists via the atomic-update keep list — skipped in unattended re-apply." ;;
             ram_split)  print_info "RAM/VRAM split persists on its own (CMOS is hardware state; GRUB config is in the atomic-update keep list) — skipped in unattended re-apply." ;;

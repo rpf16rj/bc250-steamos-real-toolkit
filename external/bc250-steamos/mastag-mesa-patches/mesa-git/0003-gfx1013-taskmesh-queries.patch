@@ -1,4 +1,4 @@
-From 9cd79f610e441e47394337e4c578e339ef40c229 Mon Sep 17 00:00:00 2001
+From 11a8d756ae11b687c9ca06f2364006ecf4c6082e Mon Sep 17 00:00:00 2001
 From: DryhoppedIPA <DryhoppedIPA@users.noreply.github.com>
 Date: Sat, 8 Aug 2026 04:53:11 +0000
 Subject: [PATCH 3/4] radv: mesh/task pipeline-statistics queries on GFX1013
@@ -11,10 +11,10 @@ Expose GFX1013 mesh-shader queries only through the opt-in GFX10.3 override. Onc
  3 files changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/src/amd/common/ac_gpu_info.c b/src/amd/common/ac_gpu_info.c
-index e4c21352..a633f200 100644
+index b8d10d7dd2d..3d237e615ed 100644
 --- a/src/amd/common/ac_gpu_info.c
 +++ b/src/amd/common/ac_gpu_info.c
-@@ -1037,6 +1037,7 @@ void ac_fill_bug_info(struct radeon_info *info)
+@@ -1041,6 +1041,7 @@ void ac_fill_bug_info(struct radeon_info *info)
     /* Hardware capabilities used by RADV's opt-in GFX1013 mesh/task path. */
     info->has_gfx1013_mesh_shading = info->family == CHIP_GFX1013;
     info->has_gfx1013_task_shading = info->has_gfx1013_mesh_shading;
@@ -23,10 +23,10 @@ index e4c21352..a633f200 100644
     info->has_export_conflict_bug = info->gfx_level == GFX11;
  
 diff --git a/src/amd/common/ac_gpu_info.h b/src/amd/common/ac_gpu_info.h
-index 02360101..227831eb 100644
+index f17679d232d..2f7c067d0e3 100644
 --- a/src/amd/common/ac_gpu_info.h
 +++ b/src/amd/common/ac_gpu_info.h
-@@ -292,6 +292,7 @@ struct radeon_info {
+@@ -314,6 +314,7 @@ struct radeon_info {
     bool has_taskmesh_indirect0_bug;
     bool has_gfx1013_mesh_shading;
     bool has_gfx1013_task_shading;
@@ -35,10 +35,10 @@ index 02360101..227831eb 100644
     bool sdma_supports_compression; /* Whether SDMA supports DCC and HTILE. */
     bool has_set_context_pairs;
 diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
-index 3a58122f..1475db33 100644
+index 7790c084a32..a4eb7b7424a 100644
 --- a/src/amd/vulkan/radv_physical_device.c
 +++ b/src/amd/vulkan/radv_physical_device.c
-@@ -1374,7 +1374,9 @@ radv_physical_device_get_features(const struct radv_physical_device *pdev, struc
+@@ -1361,7 +1361,9 @@ radv_physical_device_get_features(const struct radv_physical_device *pdev, struc
        .taskShader = task_en,
        .multiviewMeshShader = full_mesh_features,
        .primitiveFragmentShadingRateMeshShader = full_mesh_features,

@@ -7,6 +7,22 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.5.0 — 2026-08-21
+
+- **New:** Mesa/RADV patches updated from MastaG's latest (Aug 2026) —
+  compute queue fix, mesh/task shaders, taskmesh queries, and opt-in
+  `RADV_GFX103=1` GFX10.3 promotion all refreshed.
+- **New:** FSR4 V3 deferred SDot hybrid (from dmorazasanchez/bc250-fsr4)
+  replaces the old V2 selective sdot — adds `iadd(0,SDot)` fusion, MAD24
+  chains, and a dense SDot pre-pass for better INT8 throughput.
+- **New:** Native mesh shader option (from lonewolf0622) — MESH-only
+  shaders on GFX10 without GFX10.3 spoofing. Selectable at install time
+  alongside the existing MastaG mesh/task approach.
+- **New:** VRR EDID patch for FreeSync over DP→HDMI PCON — zeros HDMI
+  VTEM to prevent flickering, adds AMD VSDB v1 for FreeSync SPD.
+- **Fixed:** EDID detection on sysfs — `[[ -s ]]` reports size 0 for
+  sysfs files; switched to `wc -c` so the VRR EDID patch works.
+
 ## v1.4.0 — 2026-08-19
 
 - **New:** SMU SCLK range widened to 350–2230 MHz (from MastaG's kernel

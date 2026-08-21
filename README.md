@@ -26,7 +26,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 - Prebuilt Toolkit SteamOS Control Decky plugin with Pump Fan automatic/manual/managed controls, four-point profiles, and optional LED bar controls
 - HDMI-CEC / TV & receiver control
 - HDMI AC-3 Surround Encoding — Dolby Digital 5.1 over HDMI/DP via eARC, previously impossible on SteamOS with the BC-250; works with any active DP-to-HDMI adapter
-- Community-sourced fixes: ACPI power states, DisplayPort audio/video clock fix, AIC8800 WiFi/BT driver, GFX1013 compute queue fix (async compute, patched kernel + Mesa/RADV)
+- Community-sourced fixes: ACPI power states, DisplayPort audio/video clock fix, AIC8800 WiFi/BT driver, GFX1013 compute queue fix (async compute, patched kernel + Mesa/RADV with mesh shader and FSR4 V3 support)
 - One-click install, automatic desktop shortcut, and versioned releases with a changelog — everything is fully revertible
 
 ## Compatible System
@@ -54,6 +54,9 @@ This toolkit builds on top of great work from the BC-250 community. Huge thanks 
 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (ACPI fix, DisplayPort audio/video fix, AIC8800 WiFi/BT driver, HDMI-CEC control)
 - [DryhoppedIPA](https://github.com/DryhoppedIPA) — [bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix) (GFX1013 compute queue kernel + Mesa/RADV patches)
+- [MastaG](https://github.com/MastaG) — [linux-cachyos-bc250](https://github.com/MastaG/linux-cachyos-bc250) (updated Mesa/RADV patches: mesh/task shaders, compute queue, GFX10.3 promotion)
+- [lonewolf0622](https://github.com/lonewolf0622) — [BC250-Native-Mesh-Shaders-](https://github.com/lonewolf0622/BC250-Native-Mesh-Shaders-) (native MESH-only shader patch without GFX10.3 spoofing)
+- [dmorazasanchez](https://github.com/dmorazasanchez) — [bc250-fsr4](https://github.com/dmorazasanchez/bc250-fsr4) (FSR4 V3 deferred SDot hybrid optimization)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (PWM fan control driver)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (kernel patch for the 40 CU unlock)
 - [rw-r-r-0644](https://github.com/rw-r-r-0644) — [bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock) (CPU core unlock, 6c/12t → 8c/16t)
