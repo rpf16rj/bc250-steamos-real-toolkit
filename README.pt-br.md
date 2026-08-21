@@ -26,7 +26,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 - Plugin Decky Toolkit SteamOS Control pré-compilado, com controles automático/manual/gerenciado da Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
 - Controle de HDMI-CEC / TV e receiver
 - Codificação AC-3 Surround via HDMI — Dolby Digital 5.1 por HDMI/DP via eARC, antes impossível no SteamOS com o BC-250; funciona com qualquer adaptador DP-para-HDMI ativo
-- Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, correção da fila de compute GFX1013 (compute assíncrono, kernel + Mesa/RADV patchados)
+- Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, correção da fila de compute GFX1013 (compute assíncrono, kernel + Mesa/RADV patchados com suporte a mesh shaders e FSR4 V3)
 - Instalação em um clique, atalho de área de trabalho automático, e lançamentos versionados com changelog — tudo totalmente reversível
 
 ## Sistema Compatível
@@ -54,6 +54,9 @@ Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um 
 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (correção ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, controle HDMI-CEC)
 - [DryhoppedIPA](https://github.com/DryhoppedIPA) — [bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix) (patches de kernel + Mesa/RADV para a fila de compute GFX1013)
+- [MastaG](https://github.com/MastaG) — [linux-cachyos-bc250](https://github.com/MastaG/linux-cachyos-bc250) (patches atualizados de Mesa/RADV: mesh/task shaders, compute queue, promoção GFX10.3)
+- [lonewolf0622](https://github.com/lonewolf0622) — [BC250-Native-Mesh-Shaders-](https://github.com/lonewolf0622/BC250-Native-Mesh-Shaders-) (patch de mesh shaders nativo sem spoofing de GFX10.3)
+- [dmorazasanchez](https://github.com/dmorazasanchez) — [bc250-fsr4](https://github.com/dmorazasanchez/bc250-fsr4) (otimização FSR4 V3 deferred SDot hybrid)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (driver de controle PWM dos fans)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (patch de kernel para o desbloqueio de 40 CUs)
 - [rw-r-r-0644](https://github.com/rw-r-r-0644) — [bc250-core-unlock](https://github.com/rw-r-r-0644/bc250-core-unlock) (desbloqueio de núcleos de CPU, 6c/12t → 8c/16t)
