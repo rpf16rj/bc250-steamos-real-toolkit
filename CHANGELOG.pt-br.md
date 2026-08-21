@@ -9,6 +9,10 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## v1.5.0 — 2026-08-21
 
+- **Novo:** Fix do PS Button do DS5 Bridge — `hid-playstation.ko` patchado
+  para expor `BTN_MODE` no DS5-Linux-Bridge, habilitando chord combos do
+  Steam/Gamescope (PS+Cruz=QAM, PS+Triângulo=Steam overlay) com config
+  customizada de chord VDF no Steam.
 - **Novo:** Patches de Mesa/RADV atualizados com a versão mais recente
   do MastaG (Ago 2026) — compute queue fix, mesh/task shaders,
   taskmesh queries e promoção opt-in `RADV_GFX103=1` para GFX10.3

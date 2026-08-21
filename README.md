@@ -26,7 +26,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 - Prebuilt Toolkit SteamOS Control Decky plugin with Pump Fan automatic/manual/managed controls, four-point profiles, and optional LED bar controls
 - HDMI-CEC / TV & receiver control
 - HDMI AC-3 Surround Encoding — Dolby Digital 5.1 over HDMI/DP via eARC, previously impossible on SteamOS with the BC-250; works with any active DP-to-HDMI adapter
-- Community-sourced fixes: ACPI power states, DisplayPort audio/video clock fix, AIC8800 WiFi/BT driver, GFX1013 compute queue fix (async compute, patched kernel + Mesa/RADV with mesh shader and FSR4 V3 support)
+- Community-sourced fixes: ACPI power states, DisplayPort audio/video clock fix, AIC8800 WiFi/BT driver, GFX1013 compute queue fix (async compute, patched kernel + Mesa/RADV with mesh shader and FSR4 V3 support), DS5 Bridge PS Button fix (DualSense chord combos via patched hid-playstation.ko)
 - One-click install, automatic desktop shortcut, and versioned releases with a changelog — everything is fully revertible
 
 ## Compatible System
@@ -65,6 +65,7 @@ This toolkit builds on top of great work from the BC-250 community. Huge thanks 
 - [redbeard1083](https://github.com/redbeard1083) — [bc250-toolkit](https://github.com/redbeard1083/bc250-toolkit) (swap / ZRAM→ZSWAP setup)
 - [bc250-collective](https://github.com/bc250-collective) — [bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc) (CPU governor)
 - [filippor](https://github.com/filippor) — [cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor) (GPU governor)
+- [kungaa](https://github.com/kungaa) — [DS5-Linux-Bridge](https://github.com/kungaa/DS5-Linux-Bridge/) (DS5 Bridge PS Button fix inspiration)
 - The [CoolerControl](https://gitlab.com/coolercontrol/coolercontrol) project
 
 Without their work, none of this would be possible. 🙏
