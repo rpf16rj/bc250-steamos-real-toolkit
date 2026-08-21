@@ -26,7 +26,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 - Plugin Decky Toolkit SteamOS Control pré-compilado, com controles automático/manual/gerenciado da Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
 - Controle de HDMI-CEC / TV e receiver
 - Codificação AC-3 Surround via HDMI — Dolby Digital 5.1 por HDMI/DP via eARC, antes impossível no SteamOS com o BC-250; funciona com qualquer adaptador DP-para-HDMI ativo
-- Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, correção da fila de compute GFX1013 (compute assíncrono, kernel + Mesa/RADV patchados com suporte a mesh shaders e FSR4 V3)
+- Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, correção da fila de compute GFX1013 (compute assíncrono, kernel + Mesa/RADV patchados com suporte a mesh shaders e FSR4 V3), fix do PS Button do DS5 Bridge (chord combos do DualSense via hid-playstation.ko patchado)
 - Instalação em um clique, atalho de área de trabalho automático, e lançamentos versionados com changelog — tudo totalmente reversível
 
 ## Sistema Compatível
@@ -65,6 +65,7 @@ Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um 
 - [redbeard1083](https://github.com/redbeard1083) — [bc250-toolkit](https://github.com/redbeard1083/bc250-toolkit) (configuração de swap / ZRAM→ZSWAP)
 - [bc250-collective](https://github.com/bc250-collective) — [bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc) (governor de CPU)
 - [filippor](https://github.com/filippor) — [cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor) (governor de GPU)
+- [kungaa](https://github.com/kungaa) — [DS5-Linux-Bridge](https://github.com/kungaa/DS5-Linux-Bridge/) (inspiração para o fix do PS Button do DS5 Bridge)
 - O projeto [CoolerControl](https://gitlab.com/coolercontrol/coolercontrol)
 
 Sem o trabalho deles, nada disso seria possível. 🙏
