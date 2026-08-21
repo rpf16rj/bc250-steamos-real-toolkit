@@ -1,0 +1,16 @@
+diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+index c9c23c6..b3f16c7 100644
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+@@ -2079,6 +2079,11 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
+ 		init_data.flags.unify_link_enc_assignment = true;
+ 		init_data.flags.usb4_bw_alloc_support = true;
+ 	}
++
++	/* Disable DP spread spectrum for Cyan Skillfish. */
++	if (adev->apu_flags & AMD_APU_IS_CYAN_SKILLFISH2)
++		init_data.flags.ignore_dpref_ss = true;
++
+ 	retrieve_dmi_info(&adev->dm);
+ 	if (adev->dm.edp0_on_dp1_quirk)
+ 		init_data.flags.support_edp0_on_dp1 = true;

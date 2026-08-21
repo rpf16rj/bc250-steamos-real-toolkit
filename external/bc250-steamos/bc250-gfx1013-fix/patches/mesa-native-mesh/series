@@ -1,0 +1,11 @@
+# Native mesh shader patch set for BC-250 GFX1013
+# Uses lonewolf0622's native VK_EXT_mesh_shader approach (no GFX10.3 spoof)
+# Mutually exclusive with the MastaG mesh/task shader patches (0002/0003/0004)
+#
+# 0001: Expose ACE compute queue (compatible with native mesh)
+# 0002: Native mesh V1 — MESH only, no TASK, no GFX10.3 override needed
+# 0005: FSR4 V3 deferred SDot hybrid (compatible, different radv_shader.c hunks)
+
+0001-gfx1013-compute-queue-fix.patch
+0002-native-mesh-v1.patch
+0005-bc250-fsr4-v3-deferred-sdot.patch

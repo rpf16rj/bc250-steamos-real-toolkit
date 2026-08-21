@@ -3054,9 +3054,26 @@ install_gfx1013_fix() {
     echo -e "  ${DIM}Kernel: compute GFXOFF guard, PASID TLB fix, KFD runlist flush, TTM guard,${RESET}"
     echo -e "  ${DIM}  widened SMU SCLK range (350-2230 MHz) for userspace governors.${RESET}"
     echo -e "  ${DIM}Mesa: async compute fix, mesh/task shaders (opt-in via RADV_GFX103=1),${RESET}"
-    echo -e "  ${DIM}  FSR4 dp4a reassociation optimization (always active).${RESET}"
+    echo -e "  ${DIM}  FSR4 V3 deferred SDot hybrid (MAD24 chains, dense pre-pass, always active).${RESET}"
     echo -e "  ${DIM}Performance gains of +20-25% in async compute workloads (e.g., Cyberpunk 2077).${RESET}"
     echo ""
+
+    # Mesh shader mode selection
+    local mesh_flag=""
+    echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
+    echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
+    echo -e "  ${DIM}     Supports both MESH and TASK shaders. Opt-in per-game with RADV_GFX103=1.${RESET}"
+    echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
+    echo -e "  ${DIM}     MESH always available, no TASK shader support. No env var needed.${RESET}"
+    echo ""
+    local mesh_choice
+    read -rp "  Select mesh shader mode [1-MastaG/2-Native] (default 1): " mesh_choice
+    case "$mesh_choice" in
+        2|n|N|native) mesh_flag="--native-mesh"; print_info "Using native mesh shader mode." ;;
+        *) mesh_flag="--mastag-mesh"; print_info "Using MastaG mesh shader mode." ;;
+    esac
+    echo ""
+
     if ! confirm "Continue with the GFX1013 compute queue fix?"; then
         print_info "Cancelled."
         return 0
@@ -3116,8 +3133,8 @@ install_gfx1013_fix() {
         return 1
     fi
 
-    print_info "Step 7/7: Building Mesa/RADV (this may take 10-15 minutes)..."
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh"; then
+    print_info "Step 7/7: Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
         fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "GFX1013 Fix — build-mesa.sh"
         return 1
     fi
@@ -3178,9 +3195,27 @@ install_combined_fix() {
     echo -e "  ${DIM}  • GFX1013 compute queue fix for async compute support${RESET}"
     echo -e "  ${DIM}  • TTM NULL-page guard + opt-in KFD runlist flush (ROCm)${RESET}"
     echo -e "  ${DIM}  • Widened SMU SCLK range (350-2230 MHz) for userspace governors${RESET}"
-    echo -e "  ${DIM}  • Patched Mesa/RADV: async compute + FSR4 dp4a opt + mesh/task (opt-in)${RESET}"
+    echo -e "  ${DIM}  • Patched Mesa/RADV: async compute + FSR4 V3 + mesh/task (opt-in)${RESET}"
     echo -e "  ${DIM}  • Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3${RESET}"
+    echo -e "  ${DIM}  • FSR4 V3 deferred SDot hybrid (MAD24 chains, dense pre-pass)${RESET}"
     echo ""
+
+    # Mesh shader mode selection
+    local mesh_flag=""
+    echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
+    echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
+    echo -e "  ${DIM}     Supports both MESH and TASK shaders. Opt-in per-game with RADV_GFX103=1.${RESET}"
+    echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
+    echo -e "  ${DIM}     MESH always available, no TASK shader support. No env var needed.${RESET}"
+    echo ""
+    local mesh_choice
+    read -rp "  Select mesh shader mode [1-MastaG/2-Native] (default 1): " mesh_choice
+    case "$mesh_choice" in
+        2|n|N|native) mesh_flag="--native-mesh"; print_info "Using native mesh shader mode." ;;
+        *) mesh_flag="--mastag-mesh"; print_info "Using MastaG mesh shader mode." ;;
+    esac
+    echo ""
+
     if ! confirm "Continue with the combined DP Audio + GFX1013 fix?"; then
         print_info "Cancelled."
         return 0
@@ -3244,8 +3279,8 @@ install_combined_fix() {
         return 1
     fi
 
-    print_info "Building Mesa/RADV (this may take 10-15 minutes)..."
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh"; then
+    print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
         fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
         return 1
     fi
@@ -3272,7 +3307,12 @@ vrr_edid_patch_installed() {
 vrr_edid_find_connector() {
     local conn
     for conn in /sys/class/drm/card*-*/edid; do
-        [[ -f "$conn" ]] && [[ -s "$conn" ]] || continue
+        [[ -f "$conn" ]] || continue
+        # sysfs files report size 0 in stat, so [[ -s ]] doesn't work.
+        # Use wc -c to check if there's actual EDID data.
+        local sz
+        sz=$(wc -c < "$conn" 2>/dev/null) || continue
+        [[ "$sz" -gt 0 ]] || continue
         echo "${conn%/edid}"
         return 0
     done
