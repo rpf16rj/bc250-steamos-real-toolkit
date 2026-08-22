@@ -7,6 +7,24 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.7.0 — 2026-08-22
+
+- **Melhorado:** Telemetria de atividade da GPU agora usa
+  `amdgpu_fence_count_emitted` (32 amostras) em vez de polling de
+  `GRBM_STATUS` — GRBM_STATUS lê all-ones no Cyan Skillfish, então o
+  `gpu_busy_percent` era não confiável. Fence count é o mesmo sinal que
+  alimenta o `drm-engine-gfx` do fdinfo.
+- **Novo:** Parâmetro de kernel `cs_metrics_cache_ms` (25 ms padrão) para
+  cache de refresh bulk das métricas SMU, equivalente ao MastaG.
+- **Alterado:** Defaults de cache (`cs_gfxclk_cache_ms`,
+  `cs_activity_cache_ms`) reduzidos de 100 ms para 25 ms para telemetria
+  mais responsiva.
+- **Alterado:** Patches de telemetria e tunable-cache consolidados num
+  único arquivo (`bc250-cyan-skillfish-telemetry-cache.patch`) —
+  simplifica o build e garante ordem correta de aplicação.
+- **Interno:** Patch Mesa FSR4 V3 (0005) atualizado com commit header
+  upstream; sem mudanças de código, não precisa rebuild do Mesa.
+
 ## v1.6.0 — 2026-08-22
 
 - **Novo:** Instalador de firmware Intel BE200 Wi-Fi 7 adicionado ao

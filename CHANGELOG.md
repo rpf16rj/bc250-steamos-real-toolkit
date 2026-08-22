@@ -7,6 +7,22 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.7.0 — 2026-08-22
+
+- **Improved:** GPU activity telemetry now uses `amdgpu_fence_count_emitted`
+  (32 samples) instead of `GRBM_STATUS` polling — GRBM_STATUS reads all-ones
+  on Cyan Skillfish, so `gpu_busy_percent` was unreliable. Fence count is the
+  same signal that backs fdinfo `drm-engine-gfx` accounting.
+- **New:** `cs_metrics_cache_ms` module parameter (25 ms default) for bulk SMU
+  metrics refresh caching, matching MastaG's implementation.
+- **Changed:** Cache defaults (`cs_gfxclk_cache_ms`, `cs_activity_cache_ms`)
+  reduced from 100 ms to 25 ms for more responsive telemetry.
+- **Changed:** Telemetry and tunable-cache patches consolidated into a single
+  patch file (`bc250-cyan-skillfish-telemetry-cache.patch`) — simplifies the
+  build and ensures correct patch ordering.
+- **Internal:** Mesa FSR4 V3 patch (0005) updated with upstream commit header;
+  no code changes, no Mesa rebuild required.
+
 ## v1.6.0 — 2026-08-22
 
 - **New:** Intel BE200 Wi-Fi 7 firmware installer added to the Extras
