@@ -110,6 +110,7 @@ persist_detect_and_record_installed() {
     [[ -f /etc/default/grub.zram.bak ]] && persist_state_add "zswap"
     acpi_fix_installed 2>/dev/null && persist_state_add "acpi"
     aic8800_installed 2>/dev/null && persist_state_add "aic8800"
+    be200_firmware_installed 2>/dev/null && persist_state_add "be200_fw"
     lsmod 2>/dev/null | grep -qE 'nct6687|nct6686' && persist_state_add "sensors"
     coolercontrol_installed 2>/dev/null && persist_state_add "coolercontrol"
     xone_installed 2>/dev/null && persist_state_add "xbox"
@@ -3598,6 +3599,145 @@ run_revert_aic8800_wifi() {
     persist_state_remove "aic8800"
 }
 
+# --- Intel BE200 Wi-Fi 7 firmware -------------------------------------------
+# The BE200 (Gale Peak) PCIe card is supported by the in-tree iwlwifi driver
+# since kernel 6.5, and SteamOS 6.18 ships CONFIG_IWLMLD=m + iwlmld.ko.
+# However, some BE200 cards ship with firmware that requires ucode >= -100,
+# while SteamOS's linux-firmware only goes up to -96.  The driver prints:
+#   iwlwifi: no suitable firmware found!
+#   iwlwifi: minimum version required: iwlwifi-gl-c0-fm-c0-100
+#   iwlwifi: maximum version supported: iwlwifi-gl-c0-fm-c0-c101
+# This installs the missing -100/-101 ucode files from Debian's
+# firmware-iwlwifi package.  No kernel module build needed — just firmware.
+be200_firmware_installed() {
+    [[ -f /usr/lib/firmware/iwlwifi-gl-c0-fm-c0-100.ucode ]] \
+    || [[ -f /usr/lib/firmware/iwlwifi-gl-c0-fm-c0-100.ucode.zst ]]
+}
+
+install_be200_firmware() {
+    print_step "WIFI-BE200" "Installing Intel BE200 Wi-Fi 7 Firmware"
+    echo -e "  ${DIM}For Intel BE200/BE201 PCIe Wi-Fi 7 cards that fail with 'no suitable firmware found'${RESET}"
+    echo -e "  ${DIM}SteamOS ships ucode up to -96; some BE200 cards require -100 or -101.${RESET}"
+    echo ""
+
+    if be200_firmware_installed; then
+        print_info "BE200 firmware (-100) is already installed."
+        if ! confirm "Reinstall/update anyway?"; then
+            print_info "Cancelled."
+            return 0
+        fi
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        fail_with_log "curl is required to download the firmware package." "BE200 WiFi — missing curl"
+        return 1
+    fi
+
+    local workdir deb_url deb_file
+    workdir=$(mktemp -d /tmp/be200-fw-XXXXXX)
+    trap 'rm -rf "$workdir"' RETURN
+
+    print_info "Finding latest firmware-iwlwifi package from Debian..."
+    # Scrape the Debian pool directory for the newest package version.
+    # The URL is not hardcoded — we discover it dynamically.
+    deb_url=$(curl -fsSL "https://deb.debian.org/debian/pool/non-free-firmware/f/firmware-nonfree/" 2>/dev/null \
+        | grep -o 'firmware-iwlwifi_[^"]*_all\.deb' \
+        | sort -V | tail -1)
+
+    if [[ -z "$deb_url" ]]; then
+        fail_with_log "Could not find a firmware-iwlwifi package URL from Debian." "BE200 WiFi — package discovery"
+        return 1
+    fi
+
+    deb_url="https://deb.debian.org/debian/pool/non-free-firmware/f/firmware-nonfree/$deb_url"
+    deb_file=$(basename "$deb_url")
+    print_info "Downloading $deb_file ..."
+
+    if ! curl -fsSL -o "$workdir/$deb_file" "$deb_url"; then
+        fail_with_log "Failed to download $deb_url" "BE200 WiFi — download"
+        return 1
+    fi
+
+    print_info "Extracting firmware from package..."
+    (
+        cd "$workdir"
+        ar x "$deb_file" 2>/dev/null || { echo "ERROR: ar extraction failed" >&2; exit 1; }
+        local data_tar
+        data_tar=$(ls data.tar.* 2>/dev/null | head -1)
+        [[ -n "$data_tar" ]] || { echo "ERROR: no data.tar found" >&2; exit 1; }
+        tar -xf "$data_tar" 2>/dev/null || true
+    ) || {
+        fail_with_log "Failed to extract the Debian package." "BE200 WiFi — extraction"
+        return 1
+    }
+
+    # The package puts firmware in both ./usr/lib/firmware/ (top-level) and
+    # ./usr/lib/firmware/intel/iwlwifi/ (upstream layout).  The kernel loader
+    # checks /usr/lib/firmware/ directly, so either path works.
+    local fw_src="$workdir/usr/lib/firmware"
+    local found=0
+    local version
+    for version in 100 101; do
+        local src="$fw_src/iwlwifi-gl-c0-fm-c0-${version}.ucode"
+        if [[ -s "$src" ]]; then
+            found=$((found + 1))
+        fi
+    done
+
+    if [[ $found -eq 0 ]]; then
+        fail_with_log "No BE200 firmware files (-100/-101) found in the package." "BE200 WiFi — no firmware in package"
+        return 1
+    fi
+
+    print_info "Found $found firmware file(s). Installing to /usr/lib/firmware/..."
+
+    local install_cmd="cp -v"
+    for version in 100 101; do
+        local src="$fw_src/iwlwifi-gl-c0-fm-c0-${version}.ucode"
+        [[ -s "$src" ]] && install_cmd="$install_cmd \"$src\" /usr/lib/firmware/"
+    done
+
+    steamos_writable "$install_cmd" || {
+        fail_with_log "Failed to copy firmware files to /usr/lib/firmware/." "BE200 WiFi — install"
+        return 1
+    }
+
+    print_info "Reloading iwlwifi module..."
+    modprobe -r iwlwifi 2>/dev/null || true
+    modprobe iwlwifi 2>/dev/null || true
+
+    print_success "Intel BE200 firmware installed!"
+    persist_state_add "be200_fw"
+    print_info "Check with: ${CYAN}dmesg | grep iwlwifi${RESET} — should show 'loaded firmware version'"
+    print_info "If the card was not detected at boot, a reboot may be needed: ${CYAN}sudo reboot${RESET}"
+    print_info "${YELLOW}Note:${RESET} SteamOS updates may overwrite these files — re-run this option if WiFi stops working after an update."
+}
+
+run_revert_be200_firmware() {
+    print_step "R-WIFI-BE200" "Revert Intel BE200 Wi-Fi 7 Firmware"
+
+    if ! be200_firmware_installed; then
+        print_info "BE200 firmware does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "Remove BE200 firmware files (-100/-101) from /usr/lib/firmware/?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    steamos_writable 'rm -f /usr/lib/firmware/iwlwifi-gl-c0-fm-c0-100.ucode /usr/lib/firmware/iwlwifi-gl-c0-fm-c0-101.ucode /usr/lib/firmware/iwlwifi-gl-c0-fm-c0-100.ucode.zst /usr/lib/firmware/iwlwifi-gl-c0-fm-c0-101.ucode.zst' || {
+        fail_with_log "Failed to remove BE200 firmware files." "BE200 WiFi — revert"
+        return 1
+    }
+
+    modprobe -r iwlwifi 2>/dev/null || true
+    modprobe iwlwifi 2>/dev/null || true
+
+    print_success "BE200 firmware files removed."
+    persist_state_remove "be200_fw"
+}
+
 # --- HDMI-CEC / TV Control (bc250-cec.sh) -----------------------------------
 # Self-contained upstream TUI (same pattern as bc250-cu-live-manager.sh): TV
 # and AVR/receiver control via cecd + CEC-over-DP-AUX tunneling (wake/standby
@@ -5108,6 +5248,30 @@ run_aic8800_menu() {
     done
 }
 
+run_be200_menu() {
+    while true; do
+        print_banner
+        print_section "BE200 Wi-Fi 7 Firmware"
+        echo ""
+        print_item "I" "Install BE200 Firmware" "For Intel BE200/BE201 PCIe Wi-Fi 7 cards missing -100/-101 ucode"
+        print_item "R" "Revert BE200 Firmware"  "Remove BE200 firmware files"
+        print_item "0" "Back"                   ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" be200_choice
+
+        case "${be200_choice^^}" in
+            I) install_be200_firmware;    press_enter ;;
+            R) run_revert_be200_firmware; press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$be200_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 install_toolkit_steamos_control_plugin() {
     print_step "DSC" "Toolkit SteamOS Control Decky Plugin"
 
@@ -5130,6 +5294,7 @@ run_extras_menu() {
         print_section "Extras"
         echo ""
         print_item "A" "AIC8800 WiFi/BT Driver"      "Install/revert AIC8800D80 USB WiFi/BT dongles"
+        print_item "E" "BE200 Wi-Fi 7 Firmware"      "Install/revert Intel BE200 PCIe firmware (-100/-101 ucode)"
         print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
         print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
@@ -5144,6 +5309,7 @@ run_extras_menu() {
 
         case "${extras_choice^^}" in
             A) run_aic8800_menu ;;
+            E) run_be200_menu ;;
             F) run_sensors_menu ;;
             H) run_cec_control;           press_enter ;;
             K) run_coolercontrol_menu ;;
