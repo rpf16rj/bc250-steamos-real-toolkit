@@ -449,7 +449,15 @@ step "build amdgpu (runbook step 7)"
 # unconditional clean: syncconfig can regenerate auto.conf without touching
 # the include/config/ stamp files, so stale objects would NOT rebuild (README)
 make M=drivers/gpu/drm/amd/amdgpu clean
-make -j"$(nproc)" M=drivers/gpu/drm/amd/amdgpu modules
+JOBS=$(nproc)
+if ! make -j"$JOBS" M=drivers/gpu/drm/amd/amdgpu modules 2>&1; then
+    echo "==> build failed with -j$JOBS; retrying with -j1 (GCC 15.x ICE workaround)"
+    make M=drivers/gpu/drm/amd/amdgpu clean
+    if ! make -j1 M=drivers/gpu/drm/amd/amdgpu modules 2>&1; then
+        die "amdgpu module build failed even with -j1 — see GCC bug: pop_scope/pop_file_scope ICE"
+    fi
+    echo "==> build succeeded with -j1 after retry"
+fi
 KO=drivers/gpu/drm/amd/amdgpu/amdgpu.ko
 [ -f "$KO" ] || die "build produced no $KO"
 
