@@ -7,6 +7,21 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.6.0 — 2026-08-22
+
+- **Novo:** Instalador de firmware Intel BE200 Wi-Fi 7 adicionado ao
+  menu Extras — baixa e instala o firmware do BE200 para a placa ser
+  reconhecida sem precisar recompilar o kernel.
+- **Novo:** Patch ALLM-via-DP adicionado ao build do audio-fix — envia
+  AVI infoframe com `content_type=Game` via DP SDP para PCONs DP-to-HDMI
+  (ex. CH7218) em Source Control Mode, permitindo o PCON gerar
+  autonomamente o HDMI Forum VSIF com ALLM. Também habilita Source
+  Control Mode e HDMI Link via DPCD. Nota: a ativação do ALLM depende do
+  firmware do PCON; o CH7218 com firmware Dp6.0.30 aparentemente ainda
+  não gera HF-VSIF autonomamente.
+- **Fix:** build do amdgpu agora tenta novamente com `-j1` se o GCC 15.x
+  der erro interno (ICE) durante o build paralelo.
+
 ## v1.5.0 — 2026-08-21
 
 - **Novo:** Fix do PS Button do DS5 Bridge — `hid-playstation.ko` patchado
