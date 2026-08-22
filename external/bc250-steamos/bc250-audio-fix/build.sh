@@ -289,10 +289,18 @@ if [ "$WITH_GFX1013" = 1 ]; then
         drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
 fi
 
-# 0007 TTM NULL-page guard and 0008 SCLK range are always applied
+# 0007 TTM NULL-page guard, 0008 SCLK range, and ALLM-via-DP are always applied
 git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c \
-    drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
+    drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
+    drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu11_driver_if_cyan_skillfish.h \
+    drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c \
+    drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_helpers.c \
+    drivers/gpu/drm/amd/display/dc/core/dc_resource.c \
+    drivers/gpu/drm/amd/display/dc/dio/dcn10/dcn10_stream_encoder.c \
+    drivers/gpu/drm/amd/display/dc/dio/dcn20/dcn20_stream_encoder.h \
+    drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c \
+    drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
 
 if [ "$WITH_AUDIO" = 1 ]; then
     step "apply DP-audio patch (runbook step 7)"
@@ -315,26 +323,16 @@ if [ "$WITH_AUDIO" = 1 ]; then
         die "patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
-    step "apply Cyan Skillfish GPU telemetry patch"
-    METRICS_PATCH=$HERE/bc250-cyan-skillfish-gpu-telemetry.patch
+    step "apply Cyan Skillfish consolidated telemetry + cache patch"
+    METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache.patch
 
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
-        echo "GPU telemetry patch already applied"
+        echo "Cyan Skillfish telemetry+cache patch already applied"
     elif patch -p1 --dry-run --fuzz=3 -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
         patch -p1 --fuzz=3 -s < "$METRICS_PATCH"
-        echo "GPU telemetry patch applied"
+        echo "Cyan Skillfish telemetry+cache patch applied"
     else
-        die "GPU telemetry patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-    fi
-
-    GFXCLK_PATCH=$HERE/bc250-cyan-skillfish-gfxclk.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$GFXCLK_PATCH" >/dev/null 2>&1; then
-        echo "GPU clock query patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$GFXCLK_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$GFXCLK_PATCH"
-        echo "GPU clock query patch applied"
-    else
-        die "GPU clock query patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        die "Cyan Skillfish telemetry+cache patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
     step "apply DP spread spectrum disable patch (amdgpu_dm)"
@@ -348,16 +346,6 @@ if [ "$WITH_AUDIO" = 1 ]; then
         die "DM spread spectrum patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
-    step "apply tunable gfxclk/activity cache patch"
-    CACHE_PATCH=$HERE/bc250-tunable-gfxclk-activity-cache.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$CACHE_PATCH" >/dev/null 2>&1; then
-        echo "tunable cache patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$CACHE_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$CACHE_PATCH"
-        echo "tunable cache patch applied"
-    else
-        die "tunable cache patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-    fi
 
     step "apply VRR PCON FreeSync fallback patch (amdgpu_dm)"
     VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
@@ -401,6 +389,17 @@ else
             echo "$(basename "$p") REVERSED (leftover from a previous --gfx1013 build)"
         fi
     done
+fi
+
+step "apply ALLM-via-DP patch (HF-VSIF for DP-to-HDMI PCON)"
+ALLM_PATCH=$HERE/bc250-allm-via-dp.patch
+if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
+    echo "ALLM-via-DP patch already applied"
+elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
+    patch -p1 --fuzz=3 -s < "$ALLM_PATCH"
+    echo "ALLM-via-DP patch applied"
+else
+    die "ALLM-via-DP patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
 step "apply TTM NULL-page guard patch (defensive)"

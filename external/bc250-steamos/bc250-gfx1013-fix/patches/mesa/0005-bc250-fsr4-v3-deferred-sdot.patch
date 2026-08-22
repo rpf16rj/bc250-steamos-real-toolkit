@@ -1,3 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Moraza Sanchez <dmorazasanchezmendo@gmail.com>
+Date: Thu, 20 Aug 2026 00:00:00 +0000
+Subject: [PATCH 5/5] radv,aco,nir: BC-250 FSR4 deferred SDot lowering
+ (EXP-042B / V3)
+
+Supersedes the earlier unconditional/selective reassociation of
+sdot_4x8_a_b (EXP-028 / v2). V3 fuses FSR4's iadd(0, OpSDot) wrapper
+before the software fallback, defers remaining GFX1013 compute SDot
+operations through one NIR optimization round before restoring the
+real capability set and lowering to software, and adds ACO support
+for the signed i24 MAD form and GFX1013-only dense-reduction/two-chain
+lowering for pressure-sensitive shaders.
+
+A 64-shader FSR4 capture found register pressure and occupancy, not
+static instruction count, are what actually govern runtime: the
+previously pathological ED7 shader drops from 1314 VGPR spills / 4
+waves per SIMD to 0 spills / 6 waves per SIMD under V3, despite a
+higher naive inverse-cost estimate. Tested end to end with FSR 4.1.1
+in Cyberpunk 2077 at 63 FPS, up from 58 FPS pre-V3.
+
+This is EXP-042B from BC-250 FSR4 testing (David Moraza Sanchez,
+dmorazasanchez/bc250-fsr4, `v3` branch,
+https://github.com/dmorazasanchez/bc250-fsr4/tree/v3).
+
+The GFX1013 compute-queue/identity changes and the RADV_GFX103
+opt-in override that ship inside upstream's bc250-fsr4-v3.patch are
+intentionally omitted here: they duplicate 0001 and 0004 byte-for-byte
+and are already applied by those patches.
+---
+ src/amd/compiler/aco_ir.cpp                        |    1 
+ src/amd/compiler/aco_ir.h                          |    1 
+ src/amd/compiler/aco_spill.cpp                     |   11 ++
+ .../instruction_selection/aco_select_nir_alu.cpp   |   17 +++
+ src/amd/vulkan/radv_shader.c                       |  133 ++++++++++++++++++++
+ src/compiler/nir/nir_opt_algebraic.py              |   61 ++++++++-
+ 6 files changed, 218 insertions(+), 6 deletions(-)
+
 diff --git a/src/amd/compiler/aco_ir.cpp b/src/amd/compiler/aco_ir.cpp
 index 1955bf76aca..6697b93f742 100644
 --- a/src/amd/compiler/aco_ir.cpp
@@ -87,7 +125,7 @@ index d509130f4d8..4f5722b0404 100644
        if (dst.regClass() == s1) {
           Operand op1(get_alu_src(ctx, instr->src[0]));
 diff --git a/src/amd/vulkan/radv_shader.c b/src/amd/vulkan/radv_shader.c
-index 4867cb23f93..ee1f2d344f7 100644
+index c5f78f54d71..4f0d30ea28b 100644
 --- a/src/amd/vulkan/radv_shader.c
 +++ b/src/amd/vulkan/radv_shader.c
 @@ -169,6 +169,121 @@ radv_can_dump_shader_stats(const struct radv_compiler_info *compiler_info, nir_s
@@ -212,7 +250,7 @@ index 4867cb23f93..ee1f2d344f7 100644
  void
  radv_optimize_nir(struct nir_shader *shader, bool optimize_conservatively)
  {
-@@ -786,7 +901,23 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
+@@ -790,7 +905,23 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
        NIR_PASS(_, nir, nir_opt_find_array_copies);
        NIR_PASS(_, nir, nir_lower_vars_to_ssa);
  
