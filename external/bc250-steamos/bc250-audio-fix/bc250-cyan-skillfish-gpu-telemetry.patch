@@ -10,16 +10,7 @@ index a9db4c451bb5..8bd054d55179 100644
  
  #include "amdgpu.h"
  #include "amdgpu_smu.h"
-@@ -29,6 +30,8 @@
- #include "smu_v11_8_ppsmc.h"
- #include "smu_v11_8_pmfw.h"
- #include "smu_cmn.h"
-+#include "gc/gc_10_1_0_offset.h"
-+#include "gc/gc_10_1_0_sh_mask.h"
- #include "soc15_common.h"
- 
- /*
-@@ -44,6 +47,25 @@ static struct gfx_user_settings {
+@@ -44,6 +45,32 @@ static struct gfx_user_settings {
  
  static uint32_t cyan_skillfish_sclk_default;
  
@@ -29,23 +20,30 @@ index a9db4c451bb5..8bd054d55179 100644
 +	unsigned int busy = 0;
 +	int i;
 +
-+	/* The firmware table has no GFX activity field. Sample GUI_ACTIVE over
-+	 * a short window so gpu_metrics does not expose the 0xffff sentinel.
++	/*
++	 * Cyan Skillfish does not publish GFX activity in SmuMetrics_t, and
++	 * GRBM_STATUS reads back all-ones on this ASIC regardless of GPU
++	 * state (bus-fault sentinel, not a valid GUI_ACTIVE bit), which
++	 * previously pegged this at 100% even when the GPU was verifiably
++	 * idle. Approximate busy state from the GFX ring's emitted-fence
++	 * count instead: it is the same software-tracked activity signal
++	 * that already backs the reliable fdinfo drm-engine-gfx accounting,
++	 * and amdgpu_fence_count_emitted() is an existing core helper used
++	 * historically for exactly this kind of ring activity tracking.
 +	 */
-+	for (i = 0; i < 16; i++) {
-+		busy += !!(RREG32_SOC15(GC, 0, mmGRBM_STATUS) &
-+			  GRBM_STATUS__GUI_ACTIVE_MASK);
-+		if (i != 15)
++	for (i = 0; i < 32; i++) {
++		busy += !!amdgpu_fence_count_emitted(&adev->gfx.gfx_ring[0]);
++		if (i != 31)
 +			udelay(50);
 +	}
 +
-+	return DIV_ROUND_CLOSEST(busy * 10000, 16);
++	return DIV_ROUND_CLOSEST(busy * 10000, 32);
 +}
 +
  #define FEATURE_MASK(feature) (1ULL << feature)
  #define SMC_DPM_FEATURE ( \
  	FEATURE_MASK(FEATURE_FCLK_DPM_BIT)	|	\
-@@ -245,6 +267,11 @@ static int cyan_skillfish_read_sensor(struct smu_context *smu,
+@@ -245,6 +271,11 @@ static int cyan_skillfish_read_sensor(struct smu_context *smu,
  						   (uint32_t *)data);
  		*size = 4;
  		break;
@@ -57,7 +55,7 @@ index a9db4c451bb5..8bd054d55179 100644
  	default:
  		ret = -EOPNOTSUPP;
  		break;
-@@ -391,6 +418,7 @@ static ssize_t cyan_skillfish_get_gpu_metrics(struct smu_context *smu,
+@@ -391,6 +422,7 @@ static ssize_t cyan_skillfish_get_gpu_metrics(struct smu_context *smu,
  
  	smu_cmn_init_soft_gpu_metrics(gpu_metrics, 2, 2);
  
