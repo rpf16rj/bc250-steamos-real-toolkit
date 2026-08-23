@@ -190,6 +190,8 @@ exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
 TOOLKIT_VERSION="v$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.0.0")"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
+MIN_KERNEL_MAJOR=6
+MIN_KERNEL_MINOR=18
 CHANGELOG_URL="${REPO_URL}/blob/main/CHANGELOG.md"
 RELEASES_URL="${REPO_URL}/releases/latest"
 
@@ -221,6 +223,8 @@ print_banner() {
     echo -e "  ${BOLD}${YELLOW}⚠  SteamOS update notice:${RESET}"
     echo -e "  ${YELLOW}SteamOS updates may require reinstalling toolkit components. Check the toolkit status${RESET}"
     echo -e "  ${YELLOW}after every update, especially when using the Beta channel.${RESET}"
+    echo ""
+    echo -e "  ${DIM}Compatible with SteamOS kernel ${MIN_KERNEL_MAJOR}.${MIN_KERNEL_MINOR}+ (current: $(uname -r))${RESET}"
     echo ""
 }
 
@@ -329,6 +333,29 @@ is_steamos() {
         grep -Eqi '^(ID|NAME|PRETTY_NAME)=.*(steamos|steam os)' /etc/os-release && return 0
     fi
     command -v steamos-readonly >/dev/null 2>&1 && return 0
+    return 1
+}
+
+kernel_version_ok() {
+    local kver kmajor kminor
+    kver="$(uname -r)"
+    kmajor="${kver%%.*}"
+    local rest="${kver#*.}"
+    kminor="${rest%%.*}"
+    [[ "$kmajor" -gt "$MIN_KERNEL_MAJOR" ]] && return 0
+    [[ "$kmajor" -eq "$MIN_KERNEL_MAJOR" && "$kminor" -ge "$MIN_KERNEL_MINOR" ]] && return 0
+    return 1
+}
+
+require_kernel_version() {
+    if kernel_version_ok; then return 0; fi
+    echo -e "  ${BOLD}${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "  ${BOLD}${RED}Kernel incompatible — SteamOS $(uname -r) detected.${RESET}"
+    echo -e "  ${BOLD}${RED}This feature requires SteamOS kernel ${MIN_KERNEL_MAJOR}.${MIN_KERNEL_MINOR} or newer.${RESET}"
+    echo -e "  ${BOLD}${YELLOW}Update SteamOS to the Beta channel: Settings → System → System Update Channel → Beta.${RESET}"
+    echo -e "  ${BOLD}${YELLOW}Then run a system update and reboot before trying again.${RESET}"
+    echo -e "  ${BOLD}${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
     return 1
 }
 
@@ -1493,6 +1520,8 @@ install_sensors_readonly() {
 install_sensors_pwm() {
     print_step "PWM" "Installing NCT6687 Full PWM Fan Control Driver"
 
+    require_kernel_version || return 1
+
     local headers_pkg
     if ! headers_pkg="$(detect_kernel_headers_package)"; then
         fail_with_log "Could not determine the running kernel package for header lookup." "PWM Sensors Install — kernel detection"
@@ -1768,6 +1797,8 @@ xone_installed() {
 
 install_xbox_adapter() {
     print_step "XBOX" "Installing Xbox Wireless Adapter driver (xone)"
+
+    require_kernel_version || return 1
 
     if xone_installed; then
         if ! confirm "xone-dkms is already installed. Reinstall it?"; then
@@ -2268,6 +2299,8 @@ audio_fix_ensure_mkinitcpio_preset() {
 
 install_audio_fix() {
     print_step "AUDIO" "Installing DisplayPort Audio/Video Clock + GPU Metrics Fix"
+
+    require_kernel_version || return 1
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
@@ -3048,6 +3081,8 @@ gfx1013_ensure_mesa_build_deps() {
 install_gfx1013_fix() {
     print_step "GFX1013" "Installing GFX1013 Compute Queue Fix"
 
+    require_kernel_version || return 1
+
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
     echo -e "  ${DIM}Fixes GPU compute queue lifecycle on BC-250 for async compute support.${RESET}"
@@ -3188,6 +3223,8 @@ run_revert_gfx1013_fix() {
 
 install_combined_fix() {
     print_step "COMBO" "Installing DP Audio/Video + GFX1013 Compute Fix (combined build)"
+
+    require_kernel_version || return 1
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
@@ -3475,6 +3512,9 @@ aic8800_prefetch_headers() {
 
 install_aic8800_wifi() {
     print_step "WIFI" "Installing AIC8800D80 USB WiFi/BT Driver"
+
+    require_kernel_version || return 1
+
     echo -e "  ${DIM}Only needed for an AIC8800D80-based USB WiFi/BT dongle${RESET}"
     echo -e "  ${DIM}(enumerates as a fake 1111:1111 mass-storage device before setup).${RESET}"
     echo ""
