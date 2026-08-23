@@ -133,6 +133,11 @@ fi
 
 step "configure from the running kernel (runbook step 4)"
 cd "$TREE"
+# Clean stale kconfig artifacts — if the tree was previously built with a
+# different flex/bison, the generated .o files won't link (undefined refs to
+# zconf_fopen, yylineno, cur_filename, etc). Force regeneration.
+rm -f scripts/kconfig/*.o scripts/kconfig/conf \
+      scripts/kconfig/lexer.lex.c scripts/kconfig/parser.tab.[ch]
 zcat /proc/config.gz > .config.running
 cp .config.running .config
 make olddefconfig
