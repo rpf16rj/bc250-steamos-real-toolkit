@@ -2613,12 +2613,13 @@ ac3_pactl() {
 AC3_USER_SCRIPT="$SCRIPT_DIR/extras/hdmi-ac3-encoding/ac3-user-setup.sh"
 
 install_ac3_surround() {
+    local auto="${1:-}"
     print_step "AC3" "Installing HDMI AC-3 Surround Encoding (Dolby Digital)"
 
     echo -e "  ${DIM}Enables AC-3 (Dolby Digital) encoding over HDMI/DP for 5.1 surround${RESET}"
     echo -e "  ${DIM}via eARC. Bypasses TV LPCM downmix — receiver gets true 5.1 DD.${RESET}"
     echo -e "  ${DIM}Zero latency, minimal CPU overhead (native a52 encoding).${RESET}"
-    echo -e "  ${DIM}Requires: DP Audio/Video Fix (option 7), alsa-plugins (a52), ffmpeg (libavcodec).${RESET}"
+    echo -e "  ${DIM}Requires: Combined Audio+GFX1013 Fix (option 7), alsa-plugins (a52), ffmpeg (libavcodec).${RESET}"
     echo ""
 
     # Check that the DP Audio/Video Fix is installed (this feature depends on it)
@@ -2674,9 +2675,11 @@ install_ac3_surround() {
     fi
     print_info "Found audio card: $hdmi_card_name"
 
-    if ! confirm "Continue with AC-3 Surround Encoding installation?"; then
-        print_info "Cancelled."
-        return 0
+    if [[ "$auto" != "auto" ]]; then
+        if ! confirm "Continue with AC-3 Surround Encoding installation?"; then
+            print_info "Cancelled."
+            return 0
+        fi
     fi
 
     # 1. Install udev rule to set ACP_PROFILE_SET for the HDMI audio card
@@ -3823,15 +3826,12 @@ run_fixes_menu() {
         echo -e "  ${DIM}From keyboardspecialist/bc250-steamos — ACPI power states, DP audio/video, AIC8800 WiFi${RESET}"
         echo ""
         print_item "1" "Install ACPI Fix (C/P-states)"     "CPU idle states + cpufreq scaling (800-3200 MHz)"
-        print_item "2" "Install DP Audio/Video Fix"        "⚠  Patched amdgpu.ko — DP audio/video clock + GPU metrics + DP SS disable + tunable cache + TTM guard"
-        print_item "3" "Install GFX1013 Compute Fix"       "⚠  Patched amdgpu.ko + Mesa/RADV — async compute + FSR4 opt + SCLK range"
-        print_item "4" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build + FSR4 opt + SCLK range"
-        print_item "5" "Install VRR EDID Patch (PCON)"     "FreeSync VRR over DP→HDMI adapter — zeros VTEM, adds AMD VSDB v1"
-        print_item "6" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
+        print_item "2" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build + FSR4 opt + SCLK range + mesh/task"
+        print_item "3" "Install VRR EDID Patch (PCON)"     "FreeSync VRR over DP→HDMI adapter — zeros VTEM, adds AMD VSDB v1"
+        print_item "4" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
         echo ""
-        print_item "7" "Revert ACPI Fix"                   ""
-        print_item "8" "Revert DP Audio/Video Fix"         ""
-        print_item "9" "Revert GFX1013 Compute Fix"        "Restores stock amdgpu.ko + removes patched Mesa"
+        print_item "5" "Revert ACPI Fix"                   ""
+        print_item "6" "Revert Combined Fix"              "Restores stock amdgpu.ko + removes patched Mesa"
         print_item "B" "Revert VRR EDID Patch"             "Removes patched EDID firmware + kernel cmdline params"
         print_item "A" "Revert AIC8800 WiFi/BT Driver"     ""
         print_item "0" "Back" ""
@@ -3841,14 +3841,11 @@ run_fixes_menu() {
 
         case "${fix_choice^^}" in
             1) install_acpi_fix;        press_enter ;;
-            2) install_audio_fix;       press_enter ;;
-            3) install_gfx1013_fix;     press_enter ;;
-            4) install_combined_fix;    press_enter ;;
-            5) install_vrr_edid_patch;    press_enter ;;
-            6) install_aic8800_wifi;      press_enter ;;
-            7) run_revert_acpi_fix;       press_enter ;;
-            8) run_revert_audio_fix;      press_enter ;;
-            9) run_revert_gfx1013_fix;    press_enter ;;
+            2) install_combined_fix;    press_enter ;;
+            3) install_vrr_edid_patch;    press_enter ;;
+            4) install_aic8800_wifi;      press_enter ;;
+            5) run_revert_acpi_fix;       press_enter ;;
+            6) run_revert_gfx1013_fix;    press_enter ;;
             B) revert_vrr_edid_patch;     press_enter ;;
             A) run_revert_aic8800_wifi;   press_enter ;;
             0) return 0 ;;
@@ -5093,7 +5090,7 @@ run_install_all_step() {
 }
 
 run_install_all() {
-    print_step "00" "Install All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + CU Unlock + CPU Core Unlock + RAM/VRAM Split + GFX1013 Compute"
+    print_step "00" "Install All — CPU/GPU Governor + Mitigations + Swap/ZSWAP + ACPI + Combined Audio+GFX1013 + CU Unlock + Core Unlock + RAM/VRAM + AC-3 Surround"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -5115,13 +5112,14 @@ run_install_all() {
     run_install_all_step run_cu_live_manager || return 1
     run_install_all_step install_core_unlock auto || return 1
     run_install_all_step install_ram_split auto || return 1
+    run_install_all_step install_ac3_surround auto || return 1
 
     install_all_progress_clear
     print_success "Install All completed!"
 }
 
 run_revert_all() {
-    print_step "00-U" "Revert All — CPU Governor + GPU Governor + Mitigations + Swap/ZSWAP + Community Fixes + GFX1013 Compute"
+    print_step "00-U" "Revert All — CPU/GPU Governor + Mitigations + Swap/ZSWAP + ACPI + Combined Fix + AC-3 + Core Unlock + RAM/VRAM"
     run_revert_cpu_governor
     echo ""
     run_revert_gpu_governor
@@ -5133,8 +5131,6 @@ run_revert_all() {
     run_revert_zram_zswap auto
     echo ""
     run_revert_acpi_fix
-    echo ""
-    run_revert_audio_fix
     echo ""
     run_revert_ac3_surround
     echo ""
@@ -5169,17 +5165,15 @@ run_install_manual() {
         print_item "5R" "Revert ZRAM/ZSWAP to Default"   "Back to stock ZRAM — needs reboot"
         print_item "6"  "Install ACPI Fix"               "CPU C-/P-states"
         print_item "6R" "Revert ACPI Fix"                 "Remove ACPI fix"
-        print_item "7"  "Install DP Audio/Video Fix"     "⚠  Patched amdgpu.ko: clock fix + GPU metrics + DP SS disable + tunable cache + TTM guard"
-        print_item "7R" "Revert DP Audio/Video Fix"      "Restore stock amdgpu.ko"
+        print_item "7"  "Install Combined Audio+GFX1013" "⚠  Single kernel build (recommended): DP audio + async compute + Mesa/RADV + FSR4 + mesh/task"
+        print_item "7R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "8"  "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
         print_item "9"  "CPU Core Unlock"                "⚠  EXPERIMENTAL: 6c/12t -> 8c/16t, needs reboot"
         print_item "9R" "Revert CPU Core Unlock"          "Remove boot-time re-apply service"
         print_item "10"  "Install RAM/VRAM Split"        "UMA_SIZE=512 + ttm.pages_limit dynamic ceiling"
         print_item "10R" "Revert RAM/VRAM Split"         "Restore stock ${RAM_SPLIT_STOCK_UMA_MB}MB split"
-        print_item "11"  "Install Combined Audio+GFX1013" "⚠  Both fixes in a single kernel build (recommended): DP audio + async compute + Mesa/RADV"
-        print_item "11R" "Revert GFX1013 Compute Fix"    "Restore stock amdgpu.ko + Mesa"
-        print_item "12"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
-        print_item "12R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
+        print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
+        print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -5198,17 +5192,15 @@ run_install_manual() {
             5R) run_revert_zram_zswap;   press_enter ;;
             6)  install_acpi_fix;        press_enter ;;
             6R) run_revert_acpi_fix;     press_enter ;;
-            7)  install_audio_fix;       press_enter ;;
-            7R) run_revert_audio_fix;    press_enter ;;
+            7)  install_combined_fix;    press_enter ;;
+            7R) run_revert_gfx1013_fix; press_enter ;;
             8)  run_cu_live_manager;     press_enter ;;
             9)  install_core_unlock;     press_enter ;;
             9R) run_revert_core_unlock;  press_enter ;;
             10) install_ram_split;       press_enter ;;
             10R) run_revert_ram_split;   press_enter ;;
-            11) install_combined_fix;    press_enter ;;
-            11R) run_revert_gfx1013_fix; press_enter ;;
-            12) install_ac3_surround;      press_enter ;;
-            12R) run_revert_ac3_surround;  press_enter ;;
+            11) install_ac3_surround;      press_enter ;;
+            11R) run_revert_ac3_surround;  press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
