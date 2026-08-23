@@ -3819,44 +3819,6 @@ run_cec_control() {
         bash "$cec_script"
 }
 
-run_fixes_menu() {
-    while true; do
-        print_banner
-        print_section "Community Fixes"
-        echo -e "  ${DIM}From keyboardspecialist/bc250-steamos — ACPI power states, DP audio/video, AIC8800 WiFi${RESET}"
-        echo ""
-        print_item "1" "Install ACPI Fix (C/P-states)"     "CPU idle states + cpufreq scaling (800-3200 MHz)"
-        print_item "2" "Install Combined Audio+GFX1013"    "⚠  Both fixes in a single kernel build + FSR4 opt + SCLK range + mesh/task"
-        print_item "3" "Install VRR EDID Patch (PCON)"     "FreeSync VRR over DP→HDMI adapter — zeros VTEM, adds AMD VSDB v1"
-        print_item "4" "Install AIC8800 WiFi/BT Driver"    "For AIC8800D80 USB WiFi/BT dongles"
-        echo ""
-        print_item "5" "Revert ACPI Fix"                   ""
-        print_item "6" "Revert Combined Fix"              "Restores stock amdgpu.ko + removes patched Mesa"
-        print_item "B" "Revert VRR EDID Patch"             "Removes patched EDID firmware + kernel cmdline params"
-        print_item "A" "Revert AIC8800 WiFi/BT Driver"     ""
-        print_item "0" "Back" ""
-        echo ""
-        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
-        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" fix_choice
-
-        case "${fix_choice^^}" in
-            1) install_acpi_fix;        press_enter ;;
-            2) install_combined_fix;    press_enter ;;
-            3) install_vrr_edid_patch;    press_enter ;;
-            4) install_aic8800_wifi;      press_enter ;;
-            5) run_revert_acpi_fix;       press_enter ;;
-            6) run_revert_gfx1013_fix;    press_enter ;;
-            B) revert_vrr_edid_patch;     press_enter ;;
-            A) run_revert_aic8800_wifi;   press_enter ;;
-            0) return 0 ;;
-            *)
-                print_error "Invalid selection: '$fix_choice'"
-                sleep 1
-                ;;
-        esac
-    done
-}
-
 # ==============================================================================
 # OVERCLOCK / PERFORMANCE PROFILES
 # ==============================================================================
