@@ -178,7 +178,14 @@ build_mesa() {
     [[ -f ${series} ]] || die "patch series is missing: ${series}"
 
     printf '== mesa: fetching source\n'
-    fetch "${mesa_tarball_url}" "${tarball}"
+    if [[ -f "${tarball}" ]]; then
+        printf '   tarball already present\n'
+    elif [[ -f "${release_root}/vendor/mesa-${mesa_version}.tar.xz" ]]; then
+        printf '   using vendored tarball\n'
+        cp "${release_root}/vendor/mesa-${mesa_version}.tar.xz" "${tarball}"
+    else
+        fetch "${mesa_tarball_url}" "${tarball}"
+    fi
     printf '%s  %s\n' "${mesa_tarball_sha256}" "${tarball}" | sha256sum --quiet -c ||
         die 'mesa tarball failed checksum verification'
     rm -rf "${source_root}"

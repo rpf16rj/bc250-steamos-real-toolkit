@@ -54,9 +54,12 @@ mkdir -p "$BUILD_ROOT"
 cd "$BUILD_ROOT"
 if [[ -f "mesa-${MESA_VERSION}.tar.xz" ]]; then
     echo "Tarball already downloaded"
+elif [[ -f "${HERE}/vendor/mesa-${MESA_VERSION}.tar.xz" ]]; then
+    echo "Using vendored tarball"
+    cp "${HERE}/vendor/mesa-${MESA_VERSION}.tar.xz" .
 else
     if ! wget -O "mesa-${MESA_VERSION}.tar.xz" "$MESA_TARBALL_URL"; then
-        die "Failed to download Mesa tarball"
+        die "Failed to download Mesa tarball from ${MESA_TARBALL_URL}. The server may be offline. A vendored copy can be placed at ${HERE}/vendor/mesa-${MESA_VERSION}.tar.xz"
     fi
 fi
 
