@@ -2619,7 +2619,7 @@ install_ac3_surround() {
     echo -e "  ${DIM}Enables AC-3 (Dolby Digital) encoding over HDMI/DP for 5.1 surround${RESET}"
     echo -e "  ${DIM}via eARC. Bypasses TV LPCM downmix — receiver gets true 5.1 DD.${RESET}"
     echo -e "  ${DIM}Zero latency, minimal CPU overhead (native a52 encoding).${RESET}"
-    echo -e "  ${DIM}Requires: Combined Audio+GFX1013 Fix (option 7), alsa-plugins (a52), ffmpeg (libavcodec).${RESET}"
+    echo -e "  ${DIM}Requires: Combined Audio+GFX1013 Fix (option 10), alsa-plugins (a52), ffmpeg (libavcodec).${RESET}"
     echo ""
 
     # Check that the DP Audio/Video Fix is installed (this feature depends on it)
@@ -2627,10 +2627,10 @@ install_ac3_surround() {
     local resolved_amdgpu
     resolved_amdgpu=$(modinfo -F filename amdgpu 2>/dev/null || echo "")
     if [[ "$resolved_amdgpu" != *"/updates/"* ]]; then
-        print_error "The DisplayPort Audio/Video Fix (option 7) is required for AC-3 Surround."
+        print_error "The Combined Audio+GFX1013 Fix (option 10) is required for AC-3 Surround."
         print_info "The BC-250 has no native HDMI output — audio goes through DisplayPort,"
-        print_info "and the DP Audio Fix patches the amdgpu driver to fix audio clock issues."
-        print_info "Please install option 7 (DP Audio/Video Fix) first, reboot, then try again."
+        print_info "and the Combined Fix patches the amdgpu driver to fix audio clock issues."
+        print_info "Please install option 10 (Combined Audio+GFX1013) first, reboot, then try again."
         fail_with_log "DP Audio/Video Fix not installed — AC-3 Surround requires it" "AC-3 install — missing DP audio patch"
         return 1
     fi
@@ -5070,10 +5070,10 @@ run_install_all() {
     run_install_all_step run_configure_swap auto || return 1
     run_install_all_step run_zram_zswap_toggle auto || return 1
     run_install_all_step install_acpi_fix || return 1
-    run_install_all_step install_combined_fix || return 1
     run_install_all_step run_cu_live_manager || return 1
     run_install_all_step install_core_unlock auto || return 1
     run_install_all_step install_ram_split auto || return 1
+    run_install_all_step install_combined_fix || return 1
     run_install_all_step install_ac3_surround auto || return 1
 
     install_all_progress_clear
@@ -5127,13 +5127,13 @@ run_install_manual() {
         print_item "5R" "Revert ZRAM/ZSWAP to Default"   "Back to stock ZRAM — needs reboot"
         print_item "6"  "Install ACPI Fix"               "CPU C-/P-states"
         print_item "6R" "Revert ACPI Fix"                 "Remove ACPI fix"
-        print_item "7"  "Install Combined Audio+GFX1013" "⚠  Single kernel build (recommended): DP audio + async compute + Mesa/RADV + FSR4 + mesh/task"
-        print_item "7R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
-        print_item "8"  "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
-        print_item "9"  "CPU Core Unlock"                "⚠  EXPERIMENTAL: 6c/12t -> 8c/16t, needs reboot"
-        print_item "9R" "Revert CPU Core Unlock"          "Remove boot-time re-apply service"
-        print_item "10"  "Install RAM/VRAM Split"        "UMA_SIZE=512 + ttm.pages_limit dynamic ceiling"
-        print_item "10R" "Revert RAM/VRAM Split"         "Restore stock ${RAM_SPLIT_STOCK_UMA_MB}MB split"
+        print_item "7"  "CU Unlock Live"                 "Open bc250-cu-live-manager.sh (WGP/CU live manager)"
+        print_item "8"  "CPU Core Unlock"                "⚠  EXPERIMENTAL: 6c/12t -> 8c/16t, needs reboot"
+        print_item "8R" "Revert CPU Core Unlock"          "Remove boot-time re-apply service"
+        print_item "9"  "Install RAM/VRAM Split"        "UMA_SIZE=512 + ttm.pages_limit dynamic ceiling"
+        print_item "9R" "Revert RAM/VRAM Split"         "Restore stock ${RAM_SPLIT_STOCK_UMA_MB}MB split"
+        print_item "10"  "Install Combined Audio+GFX1013" "⚠  Single kernel build (recommended): DP audio + async compute + Mesa/RADV + FSR4 + mesh/task"
+        print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
         print_item "0"  "Back" ""
@@ -5154,13 +5154,13 @@ run_install_manual() {
             5R) run_revert_zram_zswap;   press_enter ;;
             6)  install_acpi_fix;        press_enter ;;
             6R) run_revert_acpi_fix;     press_enter ;;
-            7)  install_combined_fix;    press_enter ;;
-            7R) run_revert_gfx1013_fix; press_enter ;;
-            8)  run_cu_live_manager;     press_enter ;;
-            9)  install_core_unlock;     press_enter ;;
-            9R) run_revert_core_unlock;  press_enter ;;
-            10) install_ram_split;       press_enter ;;
-            10R) run_revert_ram_split;   press_enter ;;
+            7)  run_cu_live_manager;     press_enter ;;
+            8)  install_core_unlock;     press_enter ;;
+            8R) run_revert_core_unlock;  press_enter ;;
+            9)  install_ram_split;       press_enter ;;
+            9R) run_revert_ram_split;   press_enter ;;
+            10) install_combined_fix;    press_enter ;;
+            10R) run_revert_gfx1013_fix; press_enter ;;
             11) install_ac3_surround;      press_enter ;;
             11R) run_revert_ac3_surround;  press_enter ;;
             0)  return 0 ;;
