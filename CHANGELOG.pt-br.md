@@ -7,6 +7,15 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.7.1 — 2026-08-23
+
+- **Corrigido:** Tarball do Mesa 26.2.0-rc3 agora é vendored no repo — o
+  build não falha mais quando `archive.mesa3d.org` está indisponível.
+- **Alterado:** Menu reorganizado — removidas as opções independentes de
+  DP Audio (antiga 7) e GFX1013 (antiga 11), já inclusas no install
+  Combined Audio+GFX1013. Install All agora inclui AC-3 Surround como
+  último passo.
+
 ## v1.7.0 — 2026-08-22
 
 - **Melhorado:** Telemetria de atividade da GPU agora usa

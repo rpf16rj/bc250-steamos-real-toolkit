@@ -7,6 +7,15 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.7.1 — 2026-08-23
+
+- **Fixed:** Mesa 26.2.0-rc3 tarball is now vendored in the repo — the
+  build no longer fails when `archive.mesa3d.org` is unreachable.
+- **Changed:** Menu reorganized — removed standalone DP Audio (old 7) and
+  GFX1013 (old 11) options since both are already included in the Combined
+  Audio+GFX1013 install. Install All now includes AC-3 Surround as the
+  final step.
+
 ## v1.7.0 — 2026-08-22
 
 - **Improved:** GPU activity telemetry now uses `amdgpu_fence_count_emitted`
