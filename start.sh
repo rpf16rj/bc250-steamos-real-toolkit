@@ -5176,11 +5176,10 @@ run_install_manual() {
         print_item "9R" "Revert CPU Core Unlock"          "Remove boot-time re-apply service"
         print_item "10"  "Install RAM/VRAM Split"        "UMA_SIZE=512 + ttm.pages_limit dynamic ceiling"
         print_item "10R" "Revert RAM/VRAM Split"         "Restore stock ${RAM_SPLIT_STOCK_UMA_MB}MB split"
-        print_item "11"  "Install GFX1013 Compute Fix"   "⚠  Kernel + Mesa/RADV: async compute + RADV_GFX103 opt-in (+20-25% perf)"
+        print_item "11"  "Install Combined Audio+GFX1013" "⚠  Both fixes in a single kernel build (recommended): DP audio + async compute + Mesa/RADV"
         print_item "11R" "Revert GFX1013 Compute Fix"    "Restore stock amdgpu.ko + Mesa"
-        print_item "12"  "Install Combined Audio+GFX1013" "⚠  Both fixes in a single kernel build (recommended)"
-        print_item "13"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
-        print_item "13R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
+        print_item "12"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
+        print_item "12R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -5206,11 +5205,10 @@ run_install_manual() {
             9R) run_revert_core_unlock;  press_enter ;;
             10) install_ram_split;       press_enter ;;
             10R) run_revert_ram_split;   press_enter ;;
-            11) install_gfx1013_fix;     press_enter ;;
+            11) install_combined_fix;    press_enter ;;
             11R) run_revert_gfx1013_fix; press_enter ;;
-            12) install_combined_fix;    press_enter ;;
-            13) install_ac3_surround;      press_enter ;;
-            13R) run_revert_ac3_surround;  press_enter ;;
+            12) install_ac3_surround;      press_enter ;;
+            12R) run_revert_ac3_surround;  press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
