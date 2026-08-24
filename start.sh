@@ -482,7 +482,7 @@ run_with_retry() {
             return 0
         fi
         # First try the known pacman keyring error path once.
-        if echo "$output" | grep -qiE "keyring|chaveiro|invalid or corrupted package|assinatura|signature"; then
+        if echo "$output" | grep -qiE "keyring|chaveiro|invalid or corrupted package|assinatura|signature|в'язку ключів|в'язка ключів|ключ.*недоступн|ключ.*не знайдено|ключ.*не містить|chave.*não encontrada|chave.*indispon"; then
             repair_pacman_keyring
             print_info "Retrying the failed command after keyring repair..."
             continue
@@ -1000,7 +1000,7 @@ ram_split_build_tool() {
 ram_split_current_uma() {
     [[ -x "$RAM_SPLIT_BIN" ]] || return 1
     local val
-    val=$("$RAM_SPLIT_BIN" 2>/dev/null | awk -F= '$1 == "UMA_SIZE" {print $2}' | tr -d ' \r')
+    val=$(timeout 5 "$RAM_SPLIT_BIN" 2>/dev/null | awk -F= '$1 == "UMA_SIZE" {print $2}' | tr -d ' \r')
     [[ -n "$val" ]] || return 1
     echo "$((10#$val))"
 }
