@@ -7,6 +7,14 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.7.2 — 2026-08-24
+
+- **Fixed:** Pacman keyring errors in non-English locales (Ukrainian/Russian)
+  are now detected and auto-repaired — Install All no longer fails when the
+  system locale produces error messages like `в'язка ключів недоступна`.
+- **Fixed:** Verify My Setup no longer hangs after the CPU Core Unlock line —
+  the `bc250memcfg` binary call now has a 5-second timeout.
+
 ## v1.7.1 — 2026-08-23
 
 - **Fixed:** Mesa 26.2.0-rc3 tarball is now vendored in the repo — the

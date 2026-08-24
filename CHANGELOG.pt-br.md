@@ -7,6 +7,15 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.7.2 — 2026-08-24
+
+- **Corrigido:** Erros de keyring do pacman em locales não-inglês
+  (ucraniano/russo) agora são detectados e auto-reparados — Install All não
+  falha mais quando o locale do sistema produz mensagens como
+  `в'язка ключів недоступна`.
+- **Corrigido:** Verify My Setup não trava mais após a linha CPU Core Unlock —
+  a chamada do binário `bc250memcfg` agora tem timeout de 5 segundos.
+
 ## v1.7.1 — 2026-08-23
 
 - **Corrigido:** Tarball do Mesa 26.2.0-rc3 agora é vendored no repo — o
