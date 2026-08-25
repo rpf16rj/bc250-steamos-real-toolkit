@@ -443,13 +443,13 @@ trap 'toolkit_unhandled_error "$BASH_COMMAND" "$?"' ERR
 repair_pacman_keyring() {
     print_info "Detected a pacman keyring problem — attempting automatic repair..."
     rm -rf /etc/pacman.d/gnupg
-    pacman-key --init
-    pacman-key --populate archlinux holo 2>/dev/null || pacman-key --populate
+    LC_ALL=C pacman-key --init
+    LC_ALL=C pacman-key --populate archlinux holo 2>/dev/null || LC_ALL=C pacman-key --populate
 }
 
 is_network_error() {
     local output="$1"
-    grep -qiE "operation too slow|timeout|timed out|connection refused|connection reset|could not resolve|network is unreachable|temporary failure in name resolution|failed to download|failed to retrieve|erro.*baixar|erro.*obter|download.*failed|http.*error|curl.*error|git.*unable to access|git.*failed to connect|socket timed out|transfer closed|validity check|verificação.*validade|não passou|did not pass" <<< "$output"
+    grep -qiE "operation too slow|timeout|timed out|connection refused|connection reset|could not resolve|network is unreachable|temporary failure in name resolution|failed to download|failed to retrieve|download.*failed|http.*error|curl.*error|git.*unable to access|git.*failed to connect|socket timed out|transfer closed|validity check|did not pass" <<< "$output"
 }
 
 prompt_retry_or_abort() {
@@ -472,6 +472,11 @@ prompt_retry_or_abort() {
 run_with_retry() {
     local cmd="$1" context="${2:-command}"
     local output rc
+    # Force English output for pacman and AUR helper commands so error
+    # detection works regardless of the user's system locale (es, pt, uk, etc.)
+    if [[ "$cmd" == *pacman* || "$cmd" == *paru* || "$cmd" == *yay* || "$cmd" == *shelly* ]]; then
+        cmd="LC_ALL=C $cmd"
+    fi
     print_info "[${context}] starting..."
     while true; do
         output="$(eval "$cmd" 2>&1)"
@@ -482,7 +487,9 @@ run_with_retry() {
             return 0
         fi
         # First try the known pacman keyring error path once.
-        if echo "$output" | grep -qiE "keyring|chaveiro|invalid or corrupted package|assinatura|signature|в'язку ключів|в'язка ключів|ключ.*недоступн|ключ.*не знайдено|ключ.*не містить|chave.*não encontrada|chave.*indispon"; then
+        # run_with_retry prepends LC_ALL=C to pacman commands so output is
+        # always in English — no need for localized string matching.
+        if echo "$output" | grep -qiE "keyring|invalid or corrupted|signature"; then
             repair_pacman_keyring
             print_info "Retrying the failed command after keyring repair..."
             continue
@@ -490,7 +497,7 @@ run_with_retry() {
         # If it looks like a transient network/download error, ask the user.
         if is_network_error "$output"; then
             # Clean AUR cache on validity-check failures to avoid stale downloads
-            if echo "$output" | grep -qiE "validity check|verificação.*validade|não passou|did not pass"; then
+            if echo "$output" | grep -qiE "validity check|did not pass"; then
                 local pkg
                 pkg=$(echo "$output" | grep -oiE "cyan-skillfish-governor[a-z-]*" | head -1)
                 [[ -n "$pkg" ]] && aur_clean_cache "$pkg"
@@ -555,9 +562,9 @@ aur_install() {
     fi
     print_info "Installing $package via $helper..."
     case "$helper" in
-        shelly) sudo -u "$REAL_USER" shelly aur install "$package" ;;
-        paru)   sudo -u "$REAL_USER" paru -S --noconfirm "$package" ;;
-        yay)    sudo -u "$REAL_USER" yay -S --noconfirm "$package" ;;
+        shelly) sudo -u "$REAL_USER" env LC_ALL=C shelly aur install "$package" ;;
+        paru)   sudo -u "$REAL_USER" env LC_ALL=C paru -S --noconfirm "$package" ;;
+        yay)    sudo -u "$REAL_USER" env LC_ALL=C yay -S --noconfirm "$package" ;;
     esac
 }
 
@@ -583,9 +590,9 @@ aur_remove() {
     fi
     print_info "Removing $package via $helper..."
     case "$helper" in
-        shelly) shelly remove "$package" ;;
-        paru)   paru -Rns --noconfirm "$package" 2>/dev/null || true ;;
-        yay)    yay -Rns --noconfirm "$package" 2>/dev/null || true ;;
+        shelly) LC_ALL=C shelly remove "$package" ;;
+        paru)   LC_ALL=C paru -Rns --noconfirm "$package" 2>/dev/null || true ;;
+        yay)    LC_ALL=C yay -Rns --noconfirm "$package" 2>/dev/null || true ;;
     esac
 }
 
@@ -2648,7 +2655,7 @@ install_ac3_surround() {
             was_steamos_deps=1
             steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }
         fi
-        if ! pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+        if ! LC_ALL=C pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
             print_error "Failed to install dependencies: ${missing[*]}"
             (( was_steamos_deps )) && steamos-readonly enable || true
             return 1
@@ -3060,7 +3067,7 @@ gfx1013_ensure_mesa_build_deps() {
     # Drop --needed so pacman reinstalls even when the DB thinks the package
     # is already present (the local DB lists the package as fully installed
     # but the actual .pc files and headers were removed from the image).
-    sudo pacman -S --noconfirm --overwrite '*' "${pkgs[@]}" || rc=1
+    LC_ALL=C sudo pacman -S --noconfirm --overwrite '*' "${pkgs[@]}" || rc=1
     if (( was_steamos )); then
         steamos-readonly enable || true
     fi

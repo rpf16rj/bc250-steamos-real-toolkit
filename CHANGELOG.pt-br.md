@@ -7,6 +7,15 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.7.3 — 2026-08-24
+
+- **Corrigido:** Auto-reparo do keyring do pacman agora funciona em **qualquer
+  idioma** (espanhol, português, ucraniano, etc.) — todos os comandos
+  pacman/AUR são forçados para `LC_ALL=C`, então a detecção de erros faz
+  match com strings em inglês independente do idioma do sistema. Antes,
+  mensagens localizadas (ex: `depósito de claves` em espanhol) nunca eram
+  detectadas, fazendo o Install All falhar sem tentar o reparo automático.
+
 ## v1.7.2 — 2026-08-24
 
 - **Corrigido:** Erros de keyring do pacman em locales não-inglês
