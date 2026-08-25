@@ -294,7 +294,7 @@ if [ "$WITH_GFX1013" = 1 ]; then
         drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
 fi
 
-# 0007 TTM NULL-page guard, 0008 SCLK range, and ALLM-via-DP are always applied
+# 0007 TTM NULL-page guard, 0008 SCLK range are always applied
 git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c \
     drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
@@ -352,16 +352,6 @@ if [ "$WITH_AUDIO" = 1 ]; then
     fi
 
 
-    step "apply VRR PCON FreeSync fallback patch (amdgpu_dm)"
-    VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
-        echo "VRR PCON FreeSync patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$VRR_PATCH"
-        echo "VRR PCON FreeSync patch applied"
-    else
-        die "VRR PCON FreeSync patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-    fi
 else
     step "skipping audio fix patches (--gfx1013 used without --audio)"
 fi
@@ -394,17 +384,6 @@ else
             echo "$(basename "$p") REVERSED (leftover from a previous --gfx1013 build)"
         fi
     done
-fi
-
-step "apply ALLM-via-DP patch (HF-VSIF for DP-to-HDMI PCON)"
-ALLM_PATCH=$HERE/bc250-allm-via-dp.patch
-if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
-    echo "ALLM-via-DP patch already applied"
-elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
-    patch -p1 --fuzz=3 -s < "$ALLM_PATCH"
-    echo "ALLM-via-DP patch applied"
-else
-    die "ALLM-via-DP patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
 step "apply TTM NULL-page guard patch (defensive)"
