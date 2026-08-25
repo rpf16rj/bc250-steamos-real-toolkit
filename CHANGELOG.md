@@ -7,6 +7,15 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.7.3 — 2026-08-24
+
+- **Fixed:** Pacman keyring auto-repair now works in **all locales** (Spanish,
+  Portuguese, Ukrainian, etc.) — all pacman/AUR commands are forced to
+  `LC_ALL=C` so error detection matches English strings regardless of the
+  user's system language. Previously, localized error messages (e.g.
+  `depósito de claves` in Spanish) were never matched, causing Install All
+  to fail without attempting the automatic keyring repair.
+
 ## v1.7.2 — 2026-08-24
 
 - **Fixed:** Pacman keyring errors in non-English locales (Ukrainian/Russian)
