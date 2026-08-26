@@ -2303,6 +2303,50 @@ audio_fix_ensure_mkinitcpio_preset() {
     fi
 }
 
+audio_fix_pcon_grub_installed() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.freesync_pcon_allow_all=1' "$GRUB_DEFAULT" >/dev/null 2>&1
+}
+
+audio_fix_ensure_pcon_grub_param() {
+    if audio_fix_pcon_grub_installed; then
+        return 0
+    fi
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        print_info "Could not add amdgpu.freesync_pcon_allow_all=1 to GRUB (missing $GRUB_DEFAULT or update-grub)."
+        print_info "Add it manually for VRR over PCON: edit $GRUB_DEFAULT and run sudo update-grub."
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.freesync_pcon_allow_all=1'; then
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.freesync_pcon_allow_all=1\"/' \"$GRUB_DEFAULT\"
+        fi
+        update-grub
+    " || {
+        print_info "Failed to add amdgpu.freesync_pcon_allow_all=1 to GRUB. Add it manually for VRR over PCON."
+        return 0
+    }
+    print_info "Added amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON."
+}
+
+audio_fix_remove_pcon_grub_param() {
+    if ! audio_fix_pcon_grub_installed; then
+        return 0
+    fi
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ amdgpu\\.freesync_pcon_allow_all=1//g; s/amdgpu\\.freesync_pcon_allow_all=1 //g; s/amdgpu\\.freesync_pcon_allow_all=1//g' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        print_info "Failed to remove amdgpu.freesync_pcon_allow_all=1 from GRUB."
+        return 0
+    }
+    print_info "Removed amdgpu.freesync_pcon_allow_all=1 from GRUB."
+}
+
 install_audio_fix() {
     print_step "AUDIO" "Installing DisplayPort Audio/Video Clock + GPU Metrics Fix"
 
@@ -2358,6 +2402,20 @@ install_audio_fix() {
     persist_state_add "audio"
     print_info "After reboot, verify DisplayPort video/audio play back at normal speed."
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
+
+    echo ""
+    echo -e "  ${CYAN}The patched amdgpu.ko also includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
+    echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
+    echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
+    echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
+    echo ""
+    if audio_fix_pcon_grub_installed; then
+        print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
+    elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
+        audio_fix_ensure_pcon_grub_param
+    else
+        print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
+    fi
 }
 
 run_revert_audio_fix() {
@@ -2383,6 +2441,15 @@ run_revert_audio_fix() {
 
     print_success "DisplayPort audio/video fix reverted to stock amdgpu.ko. Reboot to apply."
     persist_state_remove "audio"
+
+    if audio_fix_pcon_grub_installed; then
+        echo ""
+        if confirm "Also remove amdgpu.freesync_pcon_allow_all=1 from GRUB (was added for VRR over PCON)?"; then
+            audio_fix_remove_pcon_grub_param
+        else
+            print_info "GRUB param kept. Remove manually if no longer needed."
+        fi
+    fi
 }
 
 # --- DS5 Bridge PS Button Fix (patched hid-playstation.ko) --------------------
@@ -3326,6 +3393,20 @@ install_combined_fix() {
     print_info "After reboot: DP audio/video at normal speed + async compute queues enabled."
     print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
+
+    echo ""
+    echo -e "  ${CYAN}The patched amdgpu.ko also includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
+    echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
+    echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
+    echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
+    echo ""
+    if audio_fix_pcon_grub_installed; then
+        print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
+    elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
+        audio_fix_ensure_pcon_grub_param
+    else
+        print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
+    fi
 }
 
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
