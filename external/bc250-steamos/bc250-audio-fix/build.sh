@@ -351,7 +351,16 @@ if [ "$WITH_AUDIO" = 1 ]; then
         die "DM spread spectrum patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
-
+    step "apply VRR PCON FreeSync fallback + range extending patch (amdgpu_dm)"
+    VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
+        echo "VRR PCON FreeSync patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$VRR_PATCH"
+        echo "VRR PCON FreeSync patch applied"
+    else
+        die "VRR PCON FreeSync patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 else
     step "skipping audio fix patches (--gfx1013 used without --audio)"
 fi
@@ -384,6 +393,17 @@ else
             echo "$(basename "$p") REVERSED (leftover from a previous --gfx1013 build)"
         fi
     done
+fi
+
+step "apply ALLM-via-DP patch (HF-VSIF for DP-to-HDMI PCON)"
+ALLM_PATCH=$HERE/bc250-allm-via-dp.patch
+if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
+    echo "ALLM-via-DP patch already applied"
+elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
+    patch -p1 --fuzz=3 -s < "$ALLM_PATCH"
+    echo "ALLM-via-DP patch applied"
+else
+    die "ALLM-via-DP patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
 step "apply TTM NULL-page guard patch (defensive)"
