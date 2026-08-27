@@ -2383,18 +2383,26 @@ audio_fix_cleanup_legacy_edid() {
         changed=1
     fi
 
-    # Remove edid_firmware hook from mkinitcpio config and delete hook files
+    # Remove edid_firmware hook from mkinitcpio config and drop-in configs
     local mkinitcpio_conf="/etc/mkinitcpio.conf"
-    if [[ -f "$mkinitcpio_conf" ]] && grep -q 'edid_firmware' "$mkinitcpio_conf" 2>/dev/null; then
-        print_info "Removing edid_firmware hook from mkinitcpio.conf."
-        steamos_writable "
-            cp \"$mkinitcpio_conf\" \"$mkinitcpio_conf.bak\"
-            sed -i 's/ edid_firmware//g; s/edid_firmware //g; s/edid_firmware//g' \"$mkinitcpio_conf\"
-        " || {
-            print_info "Failed to remove edid_firmware hook from mkinitcpio.conf. Remove it manually."
-        }
-        changed=1
-    fi
+    local mkinitcpio_conf_dir="/etc/mkinitcpio.conf.d"
+    local mkinitcpio_files=("$mkinitcpio_conf")
+    [[ -d "$mkinitcpio_conf_dir" ]] && while IFS= read -r f; do
+        mkinitcpio_files+=("$f")
+    done < <(find "$mkinitcpio_conf_dir" -name '*.conf' -type f 2>/dev/null)
+
+    for mc in "${mkinitcpio_files[@]}"; do
+        if [[ -f "$mc" ]] && grep -q 'edid_firmware' "$mc" 2>/dev/null; then
+            print_info "Removing edid_firmware hook from $mc."
+            steamos_writable "
+                cp \"$mc\" \"$mc.bak\"
+                sed -i 's/ edid_firmware//g; s/edid_firmware //g; s/edid_firmware//g' \"$mc\"
+            " || {
+                print_info "Failed to remove edid_firmware hook from $mc. Remove it manually."
+            }
+            changed=1
+        fi
+    done
 
     # Remove edid_firmware hook install script and hook itself
     local hook_files=(/etc/initcpio/install/edid_firmware /etc/initcpio/hooks/edid_firmware)
