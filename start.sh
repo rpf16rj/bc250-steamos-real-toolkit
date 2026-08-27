@@ -2427,6 +2427,8 @@ install_audio_fix() {
     echo -e "  ${DIM}(needed for correct GPU clock/load readings once CPU Core Unlock is active).${RESET}"
     echo -e "  ${DIM}Disables DP spread spectrum at the display manager layer for cleaner audio output.${RESET}"
     echo -e "  ${DIM}Adds tunable gfxclk/activity cache (cs_gfxclk_cache_ms, cs_activity_cache_ms module params).${RESET}"
+    echo -e "  ${DIM}VRR over HDMI via PCON: FreeSync fallback + LFC-aware range extending${RESET}"
+    echo -e "  ${DIM}ALLM (Auto Low Latency Mode) via DP for PCON HDMI Game Mode${RESET}"
     echo ""
     if ! confirm "Continue with the DisplayPort audio/video fix?"; then
         print_info "Cancelled."
@@ -3379,6 +3381,8 @@ install_combined_fix() {
     echo -e "  ${DIM}  • GFX1013 compute queue fix for async compute support${RESET}"
     echo -e "  ${DIM}  • TTM NULL-page guard + opt-in KFD runlist flush (ROCm)${RESET}"
     echo -e "  ${DIM}  • Widened SMU SCLK range (350-2230 MHz) for userspace governors${RESET}"
+    echo -e "  ${DIM}  • VRR over HDMI via PCON: FreeSync fallback + LFC-aware range extending${RESET}"
+    echo -e "  ${DIM}  • ALLM (Auto Low Latency Mode) via DP for PCON HDMI Game Mode${RESET}"
     echo -e "  ${DIM}  • Patched Mesa/RADV: async compute + FSR4 V3 + mesh/task (opt-in)${RESET}"
     echo -e "  ${DIM}  • Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3${RESET}"
     echo -e "  ${DIM}  • FSR4 V3 deferred SDot hybrid (MAD24 chains, dense pre-pass)${RESET}"
