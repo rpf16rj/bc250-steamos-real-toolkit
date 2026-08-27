@@ -2383,6 +2383,31 @@ audio_fix_cleanup_legacy_edid() {
         changed=1
     fi
 
+    # Remove edid_firmware hook from mkinitcpio config and delete hook files
+    local mkinitcpio_conf="/etc/mkinitcpio.conf"
+    if [[ -f "$mkinitcpio_conf" ]] && grep -q 'edid_firmware' "$mkinitcpio_conf" 2>/dev/null; then
+        print_info "Removing edid_firmware hook from mkinitcpio.conf."
+        steamos_writable "
+            cp \"$mkinitcpio_conf\" \"$mkinitcpio_conf.bak\"
+            sed -i 's/ edid_firmware//g; s/edid_firmware //g; s/edid_firmware//g' \"$mkinitcpio_conf\"
+        " || {
+            print_info "Failed to remove edid_firmware hook from mkinitcpio.conf. Remove it manually."
+        }
+        changed=1
+    fi
+
+    # Remove edid_firmware hook install script and hook itself
+    local hook_files=(/etc/initcpio/install/edid_firmware /etc/initcpio/hooks/edid_firmware)
+    local existing_hooks=()
+    for hf in "${hook_files[@]}"; do
+        [[ -f "$hf" ]] && existing_hooks+=("$hf")
+    done
+    if (( ${#existing_hooks[@]} > 0 )); then
+        print_info "Removing edid_firmware mkinitcpio hook files: ${existing_hooks[*]}"
+        steamos_writable "rm -f ${existing_hooks[*]}" || true
+        changed=1
+    fi
+
     if (( changed )); then
         print_info "Legacy EDID cleanup complete. Native display EDID will be used after reboot."
     fi
