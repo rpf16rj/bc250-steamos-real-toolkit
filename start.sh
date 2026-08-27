@@ -2350,19 +2350,27 @@ audio_fix_remove_pcon_grub_param() {
 audio_fix_cleanup_legacy_edid() {
     local changed=0
 
-    # Remove legacy EDID firmware binaries
+    # Remove all legacy EDID firmware binaries (any .bin in /lib/firmware/edid)
     local edid_dir="/lib/firmware/edid"
-    local legacy_bins=()
-    [[ -f "$edid_dir/q80a-patched.bin" ]] && legacy_bins+=("$edid_dir/q80a-patched.bin")
-    [[ -f "$edid_dir/vrr-pcon-patched.bin" ]] && legacy_bins+=("$edid_dir/vrr-pcon-patched.bin")
+    if [[ -d "$edid_dir" ]]; then
+        local legacy_bins=()
+        while IFS= read -r f; do
+            legacy_bins+=("$f")
+        done < <(find "$edid_dir" -maxdepth 1 -name '*.bin' -type f 2>/dev/null)
 
-    if (( ${#legacy_bins[@]} > 0 )); then
-        print_info "Removing legacy EDID firmware: ${legacy_bins[*]}"
-        steamos_writable "rm -f ${legacy_bins[*]}" || true
-        changed=1
+        if (( ${#legacy_bins[@]} > 0 )); then
+            print_info "Removing legacy EDID firmware: ${legacy_bins[*]}"
+            steamos_writable "rm -f ${legacy_bins[*]}" || true
+            changed=1
+        fi
+
+        # Remove empty edid dir if nothing left
+        if [[ -z "$(ls -A "$edid_dir" 2>/dev/null)" ]]; then
+            steamos_writable "rmdir '$edid_dir' 2>/dev/null" || true
+        fi
     fi
 
-    # Remove drm.edid_firmware from GRUB cmdline
+    # Remove any drm.edid_firmware=... from GRUB cmdline (any connector, any path)
     if [[ -f "$GRUB_DEFAULT" ]] && grep -q 'drm\.edid_firmware' "$GRUB_DEFAULT" 2>/dev/null; then
         print_info "Removing drm.edid_firmware from GRUB cmdline (using native EDID now)."
         steamos_writable "
@@ -2375,13 +2383,8 @@ audio_fix_cleanup_legacy_edid() {
         changed=1
     fi
 
-    # Remove empty edid dir if nothing left
-    if [[ -d "$edid_dir" ]] && [[ -z "$(ls -A "$edid_dir" 2>/dev/null)" ]]; then
-        steamos_writable "rmdir '$edid_dir' 2>/dev/null" || true
-    fi
-
     if (( changed )); then
-        print_info "Legacy EDID cleanup complete. Native TV EDID will be used after reboot."
+        print_info "Legacy EDID cleanup complete. Native display EDID will be used after reboot."
     fi
 }
 
