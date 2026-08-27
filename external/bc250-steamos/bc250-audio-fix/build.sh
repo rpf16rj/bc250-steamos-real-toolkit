@@ -294,7 +294,7 @@ if [ "$WITH_GFX1013" = 1 ]; then
         drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
 fi
 
-# 0007 TTM NULL-page guard, 0008 SCLK range, and ALLM-via-DP are always applied
+# 0007 TTM NULL-page guard, 0008 SCLK range are always applied
 git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c \
     drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
@@ -351,8 +351,7 @@ if [ "$WITH_AUDIO" = 1 ]; then
         die "DM spread spectrum patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
-
-    step "apply VRR PCON FreeSync fallback patch (amdgpu_dm)"
+    step "apply VRR PCON FreeSync fallback + range extending patch (amdgpu_dm)"
     VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
         echo "VRR PCON FreeSync patch already applied"

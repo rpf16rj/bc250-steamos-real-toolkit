@@ -122,7 +122,6 @@ persist_detect_and_record_installed() {
         persist_state_add "audio"
     fi
     ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
-    vrr_edid_patch_installed 2>/dev/null && persist_state_add "vrr_edid"
     ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
     ds5_chord_vdf_patched 2>/dev/null && persist_state_add "ds5_chord_vdf"
     if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
@@ -2304,10 +2303,97 @@ audio_fix_ensure_mkinitcpio_preset() {
     fi
 }
 
+audio_fix_pcon_grub_installed() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.freesync_pcon_allow_all=1' "$GRUB_DEFAULT" >/dev/null 2>&1
+}
+
+audio_fix_ensure_pcon_grub_param() {
+    if audio_fix_pcon_grub_installed; then
+        return 0
+    fi
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        print_info "Could not add amdgpu.freesync_pcon_allow_all=1 to GRUB (missing $GRUB_DEFAULT or update-grub)."
+        print_info "Add it manually for VRR over PCON: edit $GRUB_DEFAULT and run sudo update-grub."
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.freesync_pcon_allow_all=1'; then
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.freesync_pcon_allow_all=1\"/' \"$GRUB_DEFAULT\"
+        fi
+        update-grub
+    " || {
+        print_info "Failed to add amdgpu.freesync_pcon_allow_all=1 to GRUB. Add it manually for VRR over PCON."
+        return 0
+    }
+    print_info "Added amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON."
+}
+
+audio_fix_remove_pcon_grub_param() {
+    if ! audio_fix_pcon_grub_installed; then
+        return 0
+    fi
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ amdgpu\\.freesync_pcon_allow_all=1//g; s/amdgpu\\.freesync_pcon_allow_all=1 //g; s/amdgpu\\.freesync_pcon_allow_all=1//g' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        print_info "Failed to remove amdgpu.freesync_pcon_allow_all=1 from GRUB."
+        return 0
+    }
+    print_info "Removed amdgpu.freesync_pcon_allow_all=1 from GRUB."
+}
+
+audio_fix_cleanup_legacy_edid() {
+    local changed=0
+
+    # Remove all legacy EDID firmware binaries (any .bin in /lib/firmware/edid)
+    local edid_dir="/lib/firmware/edid"
+    if [[ -d "$edid_dir" ]]; then
+        local legacy_bins=()
+        while IFS= read -r f; do
+            legacy_bins+=("$f")
+        done < <(find "$edid_dir" -maxdepth 1 -name '*.bin' -type f 2>/dev/null)
+
+        if (( ${#legacy_bins[@]} > 0 )); then
+            print_info "Removing legacy EDID firmware: ${legacy_bins[*]}"
+            steamos_writable "rm -f ${legacy_bins[*]}" || true
+            changed=1
+        fi
+
+        # Remove empty edid dir if nothing left
+        if [[ -z "$(ls -A "$edid_dir" 2>/dev/null)" ]]; then
+            steamos_writable "rmdir '$edid_dir' 2>/dev/null" || true
+        fi
+    fi
+
+    # Remove any drm.edid_firmware=... from GRUB cmdline (any connector, any path)
+    if [[ -f "$GRUB_DEFAULT" ]] && grep -q 'drm\.edid_firmware' "$GRUB_DEFAULT" 2>/dev/null; then
+        print_info "Removing drm.edid_firmware from GRUB cmdline (using native EDID now)."
+        steamos_writable "
+            cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+            sed -i 's/ drm\\.edid_firmware=[^ \"\\t]*//g; s/drm\\.edid_firmware=[^ \"\\t]* //g; s/drm\\.edid_firmware=[^ \"\\t]*//g' \"$GRUB_DEFAULT\"
+            update-grub
+        " || {
+            print_info "Failed to remove drm.edid_firmware from GRUB. Remove it manually."
+        }
+        changed=1
+    fi
+
+    if (( changed )); then
+        print_info "Legacy EDID cleanup complete. Native display EDID will be used after reboot."
+    fi
+}
+
 install_audio_fix() {
     print_step "AUDIO" "Installing DisplayPort Audio/Video Clock + GPU Metrics Fix"
 
     require_kernel_version || return 1
+
+    audio_fix_cleanup_legacy_edid
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
@@ -2359,6 +2445,20 @@ install_audio_fix() {
     persist_state_add "audio"
     print_info "After reboot, verify DisplayPort video/audio play back at normal speed."
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
+
+    echo ""
+    echo -e "  ${CYAN}The patched amdgpu.ko also includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
+    echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
+    echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
+    echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
+    echo ""
+    if audio_fix_pcon_grub_installed; then
+        print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
+    elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
+        audio_fix_ensure_pcon_grub_param
+    else
+        print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
+    fi
 }
 
 run_revert_audio_fix() {
@@ -2384,6 +2484,15 @@ run_revert_audio_fix() {
 
     print_success "DisplayPort audio/video fix reverted to stock amdgpu.ko. Reboot to apply."
     persist_state_remove "audio"
+
+    if audio_fix_pcon_grub_installed; then
+        echo ""
+        if confirm "Also remove amdgpu.freesync_pcon_allow_all=1 from GRUB (was added for VRR over PCON)?"; then
+            audio_fix_remove_pcon_grub_param
+        else
+            print_info "GRUB param kept. Remove manually if no longer needed."
+        fi
+    fi
 }
 
 # --- DS5 Bridge PS Button Fix (patched hid-playstation.ko) --------------------
@@ -3236,6 +3345,8 @@ install_combined_fix() {
 
     require_kernel_version || return 1
 
+    audio_fix_cleanup_legacy_edid
+
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
     echo -e "  ${DIM}Combines both fix sets in a single kernel build:${RESET}"
@@ -3302,18 +3413,6 @@ install_combined_fix() {
         return 1
     fi
 
-    # VRR EDID patch prompt (kernel already includes the VRR fallback patch)
-    echo ""
-    echo -e "  ${CYAN}The VRR PCON FreeSync fallback patch is included in the kernel build.${RESET}"
-    echo -e "  ${DIM}If you use a DP→HDMI PCON adapter and want FreeSync VRR, you also need an EDID patch.${RESET}"
-    echo -e "  ${DIM}This dumps your display's EDID, zeros VTEM VRR (prevents flickering), and adds AMD VSDB v1.${RESET}"
-    echo ""
-    if confirm "Also install the VRR EDID patch for FreeSync over PCON?"; then
-        install_vrr_edid_patch || print_info "VRR EDID patch was skipped (kernel patch is still installed)."
-    else
-        print_info "VRR EDID patch skipped. You can install it later from the menu."
-    fi
-
     print_info "Kernel patches installed. Now building patched Mesa/RADV..."
     local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
     if [[ ! -d "$mesa_dir" ]]; then
@@ -3339,154 +3438,20 @@ install_combined_fix() {
     print_info "After reboot: DP audio/video at normal speed + async compute queues enabled."
     print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
-}
 
-# --- VRR EDID patch for FreeSync over PCON (DP→HDMI) -------------------------
-VRR_EDID_DIR="$FIXES_REPO_DIR/display-edid-patch"
-VRR_EDID_FW_DIR="/lib/firmware/edid"
-VRR_EDID_FW_NAME="vrr-pcon-patched.bin"
-VRR_EDID_CONNECTOR="DP-1"
-
-vrr_edid_patch_installed() {
-    [[ -f "$VRR_EDID_FW_DIR/$VRR_EDID_FW_NAME" ]] \
-    && grep -q "drm.edid_firmware=$VRR_EDID_CONNECTOR:edid/$VRR_EDID_FW_NAME" "$GRUB_DEFAULT" 2>/dev/null
-}
-
-vrr_edid_find_connector() {
-    local conn
-    for conn in /sys/class/drm/card*-*/edid; do
-        [[ -f "$conn" ]] || continue
-        # sysfs files report size 0 in stat, so [[ -s ]] doesn't work.
-        # Use wc -c to check if there's actual EDID data.
-        local sz
-        sz=$(wc -c < "$conn" 2>/dev/null) || continue
-        [[ "$sz" -gt 0 ]] || continue
-        echo "${conn%/edid}"
-        return 0
-    done
-    return 1
-}
-
-install_vrr_edid_patch() {
-    print_step "VRR" "Installing VRR (FreeSync) EDID Patch for PCON"
-
-    echo -e "  ${DIM}Enables FreeSync VRR over a DP→HDMI PCON adapter by patching the display's EDID.${RESET}"
-    echo -e "  ${DIM}Zeros HDMI VRR (VTEM) in HF-VSDB to prevent flickering, adds AMD VSDB v1 for FreeSync SPD.${RESET}"
-    echo -e "  ${DIM}Requires the patched amdgpu.ko (VRR PCON FreeSync fallback patch).${RESET}"
-    echo -e "  ${DIM}Adds amdgpu.freesync_pcon_allow_all=1 and drm.edid_firmware to the kernel command line.${RESET}"
     echo ""
-
-    if vrr_edid_patch_installed; then
-        print_info "VRR EDID patch is already installed."
-        if ! confirm "Reinstall/update the EDID patch?"; then
-            print_info "Cancelled."
-            return 0
-        fi
+    echo -e "  ${CYAN}The patched amdgpu.ko also includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
+    echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
+    echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
+    echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
+    echo ""
+    if audio_fix_pcon_grub_installed; then
+        print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
+    elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
+        audio_fix_ensure_pcon_grub_param
+    else
+        print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
     fi
-
-    if ! confirm "Continue with the VRR EDID patch?"; then
-        print_info "Cancelled."
-        return 0
-    fi
-
-    fixes_repo_sync || return 1
-
-    if [[ ! -f "$VRR_EDID_DIR/patch_edid_vrr.py" ]]; then
-        fail_with_log "patch_edid_vrr.py not found at $VRR_EDID_DIR." "VRR EDID — missing script"
-        return 1
-    fi
-
-    if ! command -v python3 >/dev/null 2>&1; then
-        print_info "python3 is required for EDID patching — installing..."
-        steamos_writable 'pacman -Sy --noconfirm --needed python3' || {
-            fail_with_log "Failed to install python3." "VRR EDID — missing python3"
-            return 1
-        }
-    fi
-
-    local conn_path edid_raw edid_patched
-    conn_path=$(vrr_edid_find_connector) || {
-        fail_with_log "No connected display with an EDID found." "VRR EDID — no display"
-        return 1
-    }
-    VRR_EDID_CONNECTOR=$(basename "$conn_path")
-    edid_raw="/tmp/vrr-edid-raw.bin"
-    edid_patched="/tmp/vrr-edid-patched.bin"
-
-    print_info "Dumping EDID from $VRR_EDID_CONNECTOR..."
-    if ! sudo cat "$conn_path/edid" > "$edid_raw" 2>/dev/null || [[ ! -s "$edid_raw" ]]; then
-        fail_with_log "Could not read EDID from $conn_path/edid." "VRR EDID — read failed"
-        return 1
-    fi
-    print_info "Raw EDID: $(wc -c < "$edid_raw") bytes"
-
-    print_info "Patching EDID (zero VTEM VRR, add AMD VSDB v1 for FreeSync SPD)..."
-    if ! python3 "$VRR_EDID_DIR/patch_edid_vrr.py" "$edid_raw" "$edid_patched"; then
-        fail_with_log "EDID patching script failed." "VRR EDID — patch script"
-        return 1
-    fi
-
-    print_info "Installing patched EDID to $VRR_EDID_FW_DIR/$VRR_EDID_FW_NAME..."
-    steamos_writable "
-        sudo mkdir -p '$VRR_EDID_FW_DIR'
-        sudo cp '$edid_patched' '$VRR_EDID_FW_DIR/$VRR_EDID_FW_NAME'
-    " || {
-        fail_with_log "Failed to install patched EDID firmware." "VRR EDID — firmware install"
-        return 1
-    }
-
-    print_info "Configuring kernel command line..."
-    local grub_cmdline="amdgpu.freesync_pcon_allow_all=1 drm.edid_firmware=$VRR_EDID_CONNECTOR:edid/$VRR_EDID_FW_NAME"
-    steamos_writable "
-        cp '$GRUB_DEFAULT' '$GRUB_DEFAULT.vrr.bak'
-        if grep -q 'amdgpu.freesync_pcon_allow_all' '$GRUB_DEFAULT'; then
-            :
-        else
-            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 $grub_cmdline\"/' '$GRUB_DEFAULT'
-        fi
-        update-grub
-    " || {
-        fail_with_log "Failed to update GRUB configuration." "VRR EDID — grub config"
-        return 1
-    }
-
-    rm -f "$edid_raw" "$edid_patched"
-
-    print_success "VRR EDID patch installed! Reboot required."
-    persist_state_add "vrr_edid"
-    print_info "After reboot verify: sudo cat /sys/kernel/debug/dri/0/$VRR_EDID_CONNECTOR/vrr_range"
-    print_info "Expected: Min: 48, Max: 120 (or your display's FreeSync range)"
-}
-
-revert_vrr_edid_patch() {
-    print_step "R-VRR" "Revert VRR EDID Patch"
-
-    if ! vrr_edid_patch_installed; then
-        print_info "VRR EDID patch is not installed."
-        return 0
-    fi
-
-    if ! confirm "Remove the VRR EDID patch (firmware + kernel cmdline params)?"; then
-        print_info "Cancelled."
-        return 0
-    fi
-
-    steamos_writable "
-        sudo rm -f '$VRR_EDID_FW_DIR/$VRR_EDID_FW_NAME'
-        if [[ -f '$GRUB_DEFAULT.vrr.bak' ]]; then
-            cp '$GRUB_DEFAULT.vrr.bak' '$GRUB_DEFAULT'
-        else
-            sed -i 's/ amdgpu.freesync_pcon_allow_all=1//' '$GRUB_DEFAULT'
-            sed -i 's/ drm.edid_firmware=$VRR_EDID_CONNECTOR:edid\/$VRR_EDID_FW_NAME//' '$GRUB_DEFAULT'
-        fi
-        update-grub
-    " || {
-        fail_with_log "Failed to revert VRR EDID patch." "VRR EDID — revert"
-        return 1
-    }
-
-    print_success "VRR EDID patch reverted. Reboot to apply."
-    persist_state_remove "vrr_edid"
 }
 
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
