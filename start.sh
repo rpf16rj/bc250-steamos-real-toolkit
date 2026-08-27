@@ -2347,10 +2347,50 @@ audio_fix_remove_pcon_grub_param() {
     print_info "Removed amdgpu.freesync_pcon_allow_all=1 from GRUB."
 }
 
+audio_fix_cleanup_legacy_edid() {
+    local changed=0
+
+    # Remove legacy EDID firmware binaries
+    local edid_dir="/lib/firmware/edid"
+    local legacy_bins=()
+    [[ -f "$edid_dir/q80a-patched.bin" ]] && legacy_bins+=("$edid_dir/q80a-patched.bin")
+    [[ -f "$edid_dir/vrr-pcon-patched.bin" ]] && legacy_bins+=("$edid_dir/vrr-pcon-patched.bin")
+
+    if (( ${#legacy_bins[@]} > 0 )); then
+        print_info "Removing legacy EDID firmware: ${legacy_bins[*]}"
+        steamos_writable "rm -f ${legacy_bins[*]}" || true
+        changed=1
+    fi
+
+    # Remove drm.edid_firmware from GRUB cmdline
+    if [[ -f "$GRUB_DEFAULT" ]] && grep -q 'drm\.edid_firmware' "$GRUB_DEFAULT" 2>/dev/null; then
+        print_info "Removing drm.edid_firmware from GRUB cmdline (using native EDID now)."
+        steamos_writable "
+            cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+            sed -i 's/ drm\\.edid_firmware=[^ \"\\t]*//g; s/drm\\.edid_firmware=[^ \"\\t]* //g; s/drm\\.edid_firmware=[^ \"\\t]*//g' \"$GRUB_DEFAULT\"
+            update-grub
+        " || {
+            print_info "Failed to remove drm.edid_firmware from GRUB. Remove it manually."
+        }
+        changed=1
+    fi
+
+    # Remove empty edid dir if nothing left
+    if [[ -d "$edid_dir" ]] && [[ -z "$(ls -A "$edid_dir" 2>/dev/null)" ]]; then
+        steamos_writable "rmdir '$edid_dir' 2>/dev/null" || true
+    fi
+
+    if (( changed )); then
+        print_info "Legacy EDID cleanup complete. Native TV EDID will be used after reboot."
+    fi
+}
+
 install_audio_fix() {
     print_step "AUDIO" "Installing DisplayPort Audio/Video Clock + GPU Metrics Fix"
 
     require_kernel_version || return 1
+
+    audio_fix_cleanup_legacy_edid
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
@@ -3301,6 +3341,8 @@ install_combined_fix() {
     print_step "COMBO" "Installing DP Audio/Video + GFX1013 Compute Fix (combined build)"
 
     require_kernel_version || return 1
+
+    audio_fix_cleanup_legacy_edid
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
