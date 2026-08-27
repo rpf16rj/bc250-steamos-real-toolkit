@@ -7,6 +7,45 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.7.4 — 2026-08-27
+
+- **Adicionado:** Suporte a VRR (Variable Refresh Rate) e ALLM (Auto Low
+  Latency Mode) para adaptadores DP-to-HDMI PCON — habilita **4K120 VRR
+  via HDMI** em TVs como Samsung QN80A e LG C3 OLED ao usar um cabo
+  DP-to-HDMI com chip PCON (ex: CH7218). O `amdgpu.ko` patcheado agora
+  inclui:
+  - **Fallback de parsing AMD VSDB por software**
+    (`parse_amd_vsdb_cea_direct`): lê o AMD Vendor Specific Data Block
+    diretamente do bloco de extensão CEA sem depender do firmware DMUB,
+    detectando capacidades FreeSync mesmo quando o parser do DMUB falha
+    (comum em conexões HDMI via PCON).
+  - **Extensão de range VRR com consciência de LFC**
+    (`extend_range_from_vsdb`): substitui a lógica antiga de
+    `compare_ranges`. Sempre estende o limite superior de refresh rate,
+    mas só estende o limite inferior quando o mínimo atual desabilita
+    LFC (Low Framerate Compensation), evitando blanking em displays onde
+    o fabricante ajustou o VRR min após lançamento.
+  - **ALLM via DP** (`bc250-allm-via-dp.patch`): força
+    `content_type=GAME` no stream de vídeo quando o sink reporta suporte
+    a ALLM no EDID, permitindo que o PCON gere o HF-VSIF
+    autonomamente para ativar o Game Mode da TV.
+- **Adicionado:** O toolkit agora pergunta se quer adicionar
+  `amdgpu.freesync_pcon_allow_all=1` à linha de comando do GRUB após
+  instalar o audio fix (ou combined fix), e oferece remover no revert.
+  Esse parâmetro de kernel é necessário para o VRR funcionar via PCON.
+- **Removido:** Sistema legado de patcheamento de EDID
+  (`patch_edid_vrr.py`) e toda injeção manual de firmware EDID. O
+  toolkit agora limpa qualquer binário de firmware EDID existente
+  (`/lib/firmware/edid/*.bin`) e entradas `drm.edid_firmware=` no GRUB
+  no início da instalação do audio fix, garantindo que o **EDID nativo**
+  do display seja usado. Funciona para qualquer marca de TV (Samsung,
+  LG, Sony, etc.).
+- **Nota:** Usuários que tinham problemas de VRR com cabos DP-to-HDMI
+  PCON (ver [bazzite#4532](https://github.com/ublue-os/bazzite/issues/4532))
+  devem atualizar o firmware do adaptador PCON e reinstalar o audio fix.
+  O range VRR agora é lido corretamente do EDID nativo (ex: VRRmin 40 Hz
+  – VRRmax 120 Hz na LG C3).
+
 ## v1.7.3 — 2026-08-24
 
 - **Corrigido:** Auto-reparo do keyring do pacman agora funciona em **qualquer
