@@ -1,5 +1,5 @@
---- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-20 08:09:08.860264997 -0300
-+++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-20 08:10:13.180968474 -0300
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-26 01:04:26.977608670 -0300
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-26 01:04:48.305126562 -0300
 @@ -13135,6 +13135,45 @@
  	return vsdb_info->freesync_supported;
  }
@@ -64,3 +64,44 @@
  	return ret;
  }
  
+@@ -13338,6 +13384,29 @@
+ 	       (range->max_vfreq - range->min_vfreq);
+ }
+ 
++static void extend_range_from_vsdb(struct drm_display_info *display,
++				   const struct amdgpu_hdmi_vsdb_info *vsdb)
++{
++	u16 vrr_min = display->monitor_range.min_vfreq;
++	u16 vrr_max = display->monitor_range.max_vfreq;
++
++	/* Always extend upper limit */
++	if (vsdb->max_refresh_rate_hz > vrr_max)
++		vrr_max = vsdb->max_refresh_rate_hz;
++
++	/*
++	 * Only extend lower limit if current one disables LFC.
++	 * Some manufacturers adjusted VRR min up in Monitor Ranges due to
++	 * issues found before release but didn't update AMD vsdb. Using the
++	 * lower vsdb value on such monitors causes blanking.
++	 */
++	if (vsdb->min_refresh_rate_hz < vrr_min && (vrr_min * 2 >= vrr_max))
++		vrr_min = vsdb->min_refresh_rate_hz;
++
++	display->monitor_range.min_vfreq = vrr_min;
++	display->monitor_range.max_vfreq = vrr_max;
++}
++
+ /**
+  * amdgpu_dm_update_freesync_caps - Update Freesync capabilities
+  *
+@@ -13419,8 +13488,8 @@
+ 			monitor_range_from_vsdb(&connector->display_info, &vsdb_info);
+ 
+ 		/* Use bigger range if found in AMD vsdb */
+-		if (compare_ranges(connector, &vsdb_info))
+-			monitor_range_from_vsdb(&connector->display_info, &vsdb_info);
++		if (vsdb_info.freesync_supported)
++			extend_range_from_vsdb(&connector->display_info, &vsdb_info);
+ 
+ 		if (dpcd_caps.allow_invalid_MSA_timing_param)
+ 			freesync_capable = copy_range_to_amdgpu_connector(connector);
