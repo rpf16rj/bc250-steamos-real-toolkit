@@ -2307,6 +2307,10 @@ audio_fix_pcon_grub_installed() {
     [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.freesync_pcon_allow_all=1' "$GRUB_DEFAULT" >/dev/null 2>&1
 }
 
+audio_fix_hpd_debounce_grub_installed() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.hdmi_hpd_debounce_delay_ms=1500' "$GRUB_DEFAULT" >/dev/null 2>&1
+}
+
 audio_fix_ensure_pcon_grub_param() {
     if audio_fix_pcon_grub_installed; then
         return 0
@@ -2329,6 +2333,27 @@ audio_fix_ensure_pcon_grub_param() {
     print_info "Added amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON."
 }
 
+audio_fix_ensure_hpd_debounce_grub_param() {
+    if audio_fix_hpd_debounce_grub_installed; then
+        return 0
+    fi
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        print_info "Could not add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB (missing $GRUB_DEFAULT or update-grub)."
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.hdmi_hpd_debounce_delay_ms=1500'; then
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.hdmi_hpd_debounce_delay_ms=1500\"/' \"$GRUB_DEFAULT\"
+        fi
+        update-grub
+    " || {
+        print_info "Failed to add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB."
+        return 0
+    }
+    print_info "Added amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB for HDMI HPD debounce."
+}
+
 audio_fix_remove_pcon_grub_param() {
     if ! audio_fix_pcon_grub_installed; then
         return 0
@@ -2337,8 +2362,8 @@ audio_fix_remove_pcon_grub_param() {
         return 0
     fi
     steamos_writable "
-        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
-        sed -i 's/ amdgpu\\.freesync_pcon_allow_all=1//g; s/amdgpu\\.freesync_pcon_allow_all=1 //g; s/amdgpu\\.freesync_pcon_allow_all=1//g' \"$GRUB_DEFAULT\"
+        cp "$GRUB_DEFAULT" "$GRUB_DEFAULT.bak"
+        sed -i 's/ amdgpu\\.freesync_pcon_allow_all=1//g; s/amdgpu\\.freesync_pcon_allow_all=1 //g; s/amdgpu\\.freesync_pcon_allow_all=1//g' "$GRUB_DEFAULT"
         update-grub
     " || {
         print_info "Failed to remove amdgpu.freesync_pcon_allow_all=1 from GRUB."
@@ -2494,6 +2519,15 @@ install_audio_fix() {
     else
         print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
     fi
+
+    echo ""
+    if audio_fix_hpd_debounce_grub_installed; then
+        print_info "amdgpu.hdmi_hpd_debounce_delay_ms=1500 is already in GRUB — HPD debounce active."
+    elif confirm "Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB for HDMI HPD debounce (prevents spurious HPD on TV power cycling)?"; then
+        audio_fix_ensure_hpd_debounce_grub_param
+    else
+        print_info "Skipped HPD debounce param. Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 manually if needed."
+    fi
 }
 
 run_revert_audio_fix() {
@@ -2526,6 +2560,14 @@ run_revert_audio_fix() {
             audio_fix_remove_pcon_grub_param
         else
             print_info "GRUB param kept. Remove manually if no longer needed."
+        fi
+    fi
+
+    if audio_fix_hpd_debounce_grub_installed; then
+        if confirm "Also remove amdgpu.hdmi_hpd_debounce_delay_ms=1500 from GRUB?"; then
+            audio_fix_remove_hpd_debounce_grub_param
+        else
+            print_info "HPD debounce param kept. Remove manually if no longer needed."
         fi
     fi
 }
@@ -3488,6 +3530,15 @@ install_combined_fix() {
         audio_fix_ensure_pcon_grub_param
     else
         print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
+    fi
+
+    echo ""
+    if audio_fix_hpd_debounce_grub_installed; then
+        print_info "amdgpu.hdmi_hpd_debounce_delay_ms=1500 is already in GRUB — HPD debounce active."
+    elif confirm "Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB for HDMI HPD debounce (prevents spurious HPD on TV power cycling)?"; then
+        audio_fix_ensure_hpd_debounce_grub_param
+    else
+        print_info "Skipped HPD debounce param. Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 manually if needed."
     fi
 }
 
