@@ -305,7 +305,8 @@ git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/display/dc/dio/dcn10/dcn10_stream_encoder.c \
     drivers/gpu/drm/amd/display/dc/dio/dcn20/dcn20_stream_encoder.h \
     drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c \
-    drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
+    drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c \
+    drivers/gpu/drm/amd/display/dc/link/link_detection.c
 
 if [ "$WITH_AUDIO" = 1 ]; then
     step "apply DP-audio patch (runbook step 7)"
@@ -404,6 +405,17 @@ elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
     echo "ALLM-via-DP patch applied"
 else
     die "ALLM-via-DP patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+fi
+
+step "apply PCON FRL hotplug preserve patch (link_detection)"
+FRL_HP_PATCH=$HERE/bc250-pcon-frl-hotplug-preserve.patch
+if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
+    echo "PCON FRL hotplug preserve patch already applied"
+elif patch -p1 --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
+    patch -p1 --fuzz=3 -s < "$FRL_HP_PATCH"
+    echo "PCON FRL hotplug preserve patch applied"
+else
+    die "PCON FRL hotplug preserve patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
 step "apply TTM NULL-page guard patch (defensive)"

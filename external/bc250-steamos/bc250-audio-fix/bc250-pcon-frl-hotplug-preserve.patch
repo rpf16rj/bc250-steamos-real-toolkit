@@ -1,0 +1,25 @@
+--- a/drivers/gpu/drm/amd/display/dc/link/link_detection.c	2026-08-25 01:45:35.709696199 -0300
++++ b/drivers/gpu/drm/amd/display/dc/link/link_detection.c	2026-08-28 01:27:09.998641604 -0300
+@@ -1137,6 +1137,22 @@ static bool detect_link_and_local_sink(s
+ 				link_disconnect_remap(prev_sink, link);
+ 				sink = prev_sink;
+ 				prev_sink = NULL;
++
++				/*
++				 * On hotplug with the same display, the PCON may not have
++				 * completed FRL link training yet, so the re-read
++				 * dp_hdmi_frl_max_link_bw_in_kbps can be zero even though
++				 * the PCON supports FRL. Restore the previous valid value
++				 * to prevent fallback to TMDS.
++				 */
++				if (link->dpcd_caps.dongle_caps.dp_hdmi_frl_max_link_bw_in_kbps == 0 &&
++				    prev_dpcd_caps.dongle_caps.dp_hdmi_frl_max_link_bw_in_kbps > 0) {
++					link->dpcd_caps.dongle_caps.dp_hdmi_frl_max_link_bw_in_kbps =
++						prev_dpcd_caps.dongle_caps.dp_hdmi_frl_max_link_bw_in_kbps;
++					DC_LOG_DC("link=%d: restored PCON FRL cap = %u kbps from previous detection\n",
++						link->link_index,
++						link->dpcd_caps.dongle_caps.dp_hdmi_frl_max_link_bw_in_kbps);
++				}
+ 			}
+ 			query_hdcp_capability(sink->sink_signal, link);
+ 		}
