@@ -1684,38 +1684,32 @@ run_revert_sensors() {
 
 # Check if NCT6686/87 SuperIO hardware is present
 nct6686_hardware_present() {
-    # Check for NCT6686/87 SuperIO via common I/O ports and ACPI
-    # The NCT6686/87 is commonly found at I/O port 0x2E/0x2F or 0x4E/0x4F
-    # We'll check if we can access the SuperIO registers
+    # If a sensor driver is already loaded, hardware is present
+    if sensors_driver_loaded; then
+        return 0
+    fi
 
-    # Try to detect NCT6686/87 by attempting to enter configuration mode
-    local ioport
-    for ioport in 0x2e 0x4e; do
-        # Attempt to enter SuperIO configuration mode
-        outb 0x87 $ioport >/dev/null 2>&1
-        outb 0x87 $ioport >/dev/null 2>&1
-        # Read chip ID (should be 0xC6 for NCT6686D or 0xC7 for NCT6687D)
-        outb 0x20 $ioport >/dev/null 2>&1
-        local chip_id=$(inb $((ioport + 1)) 2>/dev/null)
-        # Exit configuration mode
-        outb 0xAA $ioport >/dev/null 2>&1
-
-        # Check if we got a valid chip ID
-        if [[ "$chip_id" == "0xc6" || "$chip_id" == "0xc7" ]]; then
-            return 0  # Hardware found
-        fi
-    done
-
-    # Alternative: check via sysfs or ACPI
+    # Check via sysfs or ACPI
     if [[ -d /sys/devices/platform/nct6686.isa || -d /sys/devices/platform/nct6687.isa ]]; then
-        return 0  # Hardware found via sysfs
+        return 0
     fi
 
     # Check ACPI for Nuvoton NCT6686/87
     if [[ -f /sys/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:00/PNP0C09:00/VPC2000:00/hwmon/hwmon*/name ]]; then
         if grep -q "nct6686\|nct6687" /sys/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:00/PNP0C09:00/VPC2000:00/hwmon/hwmon*/name 2>/dev/null; then
-            return 0  # Hardware found via ACPI
+            return 0
         fi
+    fi
+
+    # Try probing the in-tree nct6683 module — if it loads, the hardware is there
+    if modprobe nct6683 force=true 2>/dev/null; then
+        modprobe -r nct6683 2>/dev/null || true
+        return 0
+    fi
+
+    # Check dmesg for Nuvoton SuperIO detection
+    if dmesg 2>/dev/null | grep -qi "nct668[67]"; then
+        return 0
     fi
 
     return 1  # Hardware not found
