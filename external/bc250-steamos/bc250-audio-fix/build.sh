@@ -321,6 +321,7 @@ if [ "$WITH_AUDIO" = 1 ]; then
     case "$BASE" in
         6.16.*) PATCH=$HERE/bc250-dp-audio-clock-6.16.patch ;;
         6.18.*) PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
+        7.2.*)  PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;  # same hunk applies to 7.2
         *)      die "no DP-audio patch variant for kernel $BASE — check which hunks are already upstream, then add a case above" ;;
     esac
     echo "kernel $BASE -> $(basename "$PATCH")"
@@ -334,7 +335,10 @@ if [ "$WITH_AUDIO" = 1 ]; then
     fi
 
     step "apply Cyan Skillfish consolidated telemetry + cache patch"
-    METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache.patch
+    case "$BASE" in
+        7.2.*)  METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache-7.2.patch ;;
+        *)      METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache.patch ;;
+    esac
 
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
         echo "Cyan Skillfish telemetry+cache patch already applied"
