@@ -5744,10 +5744,10 @@ validate_combined_fix_prerequisites() {
         return 1
     fi
 
-    # Check build tools (meson/ninja only needed for Mesa build)
+    # Check build tools (meson/ninja are auto-installed later by gfx1013_ensure_mesa_build_deps)
     local build_tools=("git" "make" "gcc" "patch")
-    [[ "$check_mesa" == "1" ]] && build_tools+=("meson" "ninja")
     local missing_tools=()
+    local missing_mesa_tools=()
 
     for tool in "${build_tools[@]}"; do
         if ! command -v "$tool" >/dev/null 2>&1; then
@@ -5759,6 +5759,15 @@ validate_combined_fix_prerequisites() {
         print_error "Missing build tools: ${missing_tools[*]}"
         print_info "Please install the missing tools and try again"
         return 1
+    fi
+
+    if [[ "$check_mesa" == "1" ]]; then
+        for tool in meson ninja; do
+            command -v "$tool" >/dev/null 2>&1 || missing_mesa_tools+=("$tool")
+        done
+        if [[ ${#missing_mesa_tools[@]} -gt 0 ]]; then
+            print_info "Note: meson/ninja not found — will be auto-installed during Mesa build."
+        fi
     fi
 
     # Check basic connectivity (try to reach a known host)
