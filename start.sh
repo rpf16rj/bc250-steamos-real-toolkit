@@ -3652,6 +3652,40 @@ install_combined_fix() {
             print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
         fi
     fi
+
+    # Kernel 7.x telemetry: 8-core without patched SMU BIOS needs cs_legacy_8core_metrics=1
+    if [[ "$do_audio" -eq 1 && "$kver_major" -ge 7 ]]; then
+        local core_count
+        core_count=$(nproc 2>/dev/null || echo 0)
+        if (( core_count >= 16 )); then
+            # 8 cores / 16 threads — check if SMU-patched BIOS is in use
+            if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.cs_legacy_8core_metrics=1' "$GRUB_DEFAULT" >/dev/null 2>&1; then
+                : # already set
+            else
+                echo ""
+                echo -e "  ${YELLOW}8-core detected with kernel 7.x telemetry patch.${RESET}"
+                echo -e "  ${DIM}The new telemetry patch defaults to the SMU-patched 8-core layout (136-byte tables).${RESET}"
+                echo -e "  ${DIM}If your BIOS does NOT have the SMU telemetry patch (stock BIOS P3.00),${RESET}"
+                echo -e "  ${DIM}GPU temperature and some metrics will read as 0 until you add:${RESET}"
+                echo -e "  ${CYAN}amdgpu.cs_legacy_8core_metrics=1${RESET} ${DIM}to the kernel command line.${RESET}"
+                echo ""
+                if confirm "Are you running a stock BIOS (no SMU patch)? Add cs_legacy_8core_metrics=1 to GRUB?"; then
+                    steamos_writable "
+                        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+                        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.cs_legacy_8core_metrics=1'; then
+                            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.cs_legacy_8core_metrics=1\"/' \"$GRUB_DEFAULT\"
+                        fi
+                        update-grub
+                    " || {
+                        print_info "Failed to add amdgpu.cs_legacy_8core_metrics=1 to GRUB. Add it manually."
+                    }
+                    print_info "Added amdgpu.cs_legacy_8core_metrics=1 to GRUB. Reboot to activate correct telemetry."
+                else
+                    print_info "Skipped. If GPU temperature reads 0, add amdgpu.cs_legacy_8core_metrics=1 to GRUB manually."
+                fi
+            fi
+        fi
+    fi
 }
 
 # --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
