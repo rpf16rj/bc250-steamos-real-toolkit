@@ -601,7 +601,7 @@ aur_remove() {
 
 cpu_governor_installed() {
     systemctl is-enabled bc250-smu-oc.service &>/dev/null || \
-        pipx list 2>/dev/null | grep -q 'bc250-smu-oc'
+        pipx list 2>&1 | grep -q 'bc250-smu-oc'
 }
 
 cpu_governor_venv_healthy() {
@@ -611,19 +611,21 @@ cpu_governor_venv_healthy() {
 
 cpu_governor_repair_venv() {
     print_info "bc250-detect venv is broken (likely after SteamOS update). Reinstalling..."
-    pipx uninstall bc250-smu-oc 2>/dev/null || true
-    local cpu_gov_dir="$EXTERNAL_DIR/bc250_smu_oc"
-    if [[ ! -d "$cpu_gov_dir" ]]; then
-        fail_with_log "Vendored bc250_smu_oc not found at $cpu_gov_dir." "CPU Governor — missing vendored repo for venv repair"
-        return 1
-    fi
-    pushd "$cpu_gov_dir" >/dev/null || return 1
-    run_with_retry "pipx install ." "pipx install bc250_smu_oc" || {
-        fail_with_log "Failed to reinstall bc250_smu_oc via pipx." "CPU Governor — pipx reinstall"
+    pipx reinstall bc250-smu-oc 2>/dev/null || {
+        pipx uninstall bc250-smu-oc 2>/dev/null || true
+        local cpu_gov_dir="$EXTERNAL_DIR/bc250_smu_oc"
+        if [[ ! -d "$cpu_gov_dir" ]]; then
+            fail_with_log "Vendored bc250_smu_oc not found at $cpu_gov_dir." "CPU Governor — missing vendored repo for venv repair"
+            return 1
+        fi
+        pushd "$cpu_gov_dir" >/dev/null || return 1
+        run_with_retry "pipx install ." "pipx install bc250_smu_oc" || {
+            fail_with_log "Failed to reinstall bc250_smu_oc via pipx." "CPU Governor — pipx reinstall"
+            popd >/dev/null || true
+            return 1
+        }
         popd >/dev/null || true
-        return 1
     }
-    popd >/dev/null || true
     pipx ensurepath || true
     export PATH="$PATH:/root/.local/bin"
     print_success "bc250-detect venv repaired."
@@ -717,10 +719,16 @@ run_cpu_governor() {
     print_info "Using vendored bc250_smu_oc repository..."
     pushd "$CPU_GOVERNOR_DIR" >/dev/null || return 1
     print_info "Installing via pipx..."
+    pipx uninstall bc250-smu-oc 2>/dev/null || true
     run_with_retry "pipx install ." "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
     popd >/dev/null || true
     pipx ensurepath || true
     export PATH="$PATH:/root/.local/bin"
+
+    if ! cpu_governor_venv_healthy; then
+        print_info "pipx install completed but bc250-detect is still not working. Attempting reinstall..."
+        cpu_governor_repair_venv || return 1
+    fi
 
     cpu_governor_setup || return 1
     print_success "CPU Governor installed successfully!"
