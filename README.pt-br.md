@@ -31,9 +31,11 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 ## Sistema Compatível
 
-- SteamOS real (testado na versão 3.8.21 beta)
+- SteamOS real (testado na versão 3.8.21 beta e 3.10 com kernel 7.2)
 - Placa AMD BC-250
 - Acesso root e conexão com a internet
+
+> **Atualizando para SteamOS 3.10 / kernel 7.2:** ative o Modo Desenvolvedor (Configurações → Sistema → Modo Desenvolvedor), depois ative Canais de Atualização Avançados e troque o canal para **Main**. Após a atualização, rode Install All de novo para reaplicar os patches do toolkit no novo kernel.
 
 ## Instalação Rápida
 

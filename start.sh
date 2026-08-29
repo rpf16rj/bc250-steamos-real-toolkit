@@ -3512,7 +3512,7 @@ install_combined_fix() {
     echo -e "  ${DIM}Select which components to include in this build:${RESET}"
     echo ""
 
-    local do_audio=0 do_gfx=0 do_vrr=0 do_allm=0 do_edid=0
+    local do_audio=0 do_gfx=0 do_vrr=0 do_allm=0
     local patch_flags=()
 
     # Detect kernel major version for version-specific skip logic
@@ -3539,10 +3539,6 @@ install_combined_fix() {
         if confirm "  Install ALLM via DP patch?"; then do_allm=1; patch_flags+=(--allm); fi
         echo ""
     fi
-
-    echo -e "  ${CYAN}5) Legacy EDID Cleanup${RESET} — remove old EDID firmware + GRUB params + mkinitcpio hooks"
-    if confirm "  Clean up legacy EDID firmware?"; then do_edid=1; fi
-    echo ""
 
     if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 ]]; then
         print_info "No patches selected. Nothing to do."
@@ -3574,8 +3570,6 @@ install_combined_fix() {
         print_info "Cancelled."
         return 0
     fi
-
-    [[ $do_edid -eq 1 ]] && audio_fix_cleanup_legacy_edid
 
     fixes_repo_sync || return 1
 
