@@ -604,6 +604,31 @@ cpu_governor_installed() {
         pipx list 2>/dev/null | grep -q 'bc250-smu-oc'
 }
 
+cpu_governor_venv_healthy() {
+    export PATH="$PATH:/root/.local/bin:/home/deck/.local/bin"
+    command -v bc250-detect &>/dev/null && bc250-detect --help &>/dev/null
+}
+
+cpu_governor_repair_venv() {
+    print_info "bc250-detect venv is broken (likely after SteamOS update). Reinstalling..."
+    pipx uninstall bc250-smu-oc 2>/dev/null || true
+    local cpu_gov_dir="$EXTERNAL_DIR/bc250_smu_oc"
+    if [[ ! -d "$cpu_gov_dir" ]]; then
+        fail_with_log "Vendored bc250_smu_oc not found at $cpu_gov_dir." "CPU Governor — missing vendored repo for venv repair"
+        return 1
+    fi
+    pushd "$cpu_gov_dir" >/dev/null || return 1
+    run_with_retry "pipx install ." "pipx install bc250_smu_oc" || {
+        fail_with_log "Failed to reinstall bc250_smu_oc via pipx." "CPU Governor — pipx reinstall"
+        popd >/dev/null || true
+        return 1
+    }
+    popd >/dev/null || true
+    pipx ensurepath || true
+    export PATH="$PATH:/root/.local/bin"
+    print_success "bc250-detect venv repaired."
+}
+
 cpu_governor_setup() {
     print_step "01-S" "CPU Governor — Configuration Setup"
 
@@ -657,6 +682,13 @@ run_cpu_governor() {
     print_step "01" "Installing CPU Governor"
 
     if cpu_governor_installed; then
+        if ! cpu_governor_venv_healthy; then
+            print_info "CPU governor is installed but the pipx venv is broken (common after SteamOS updates)."
+            cpu_governor_repair_venv || return 1
+            cpu_governor_setup || return 1
+            print_success "CPU Governor repaired and configured successfully!"
+            return 0
+        fi
         if confirm "CPU governor is already installed. Reinstall it?"; then
             print_info "Removing existing installation..."
             systemctl stop bc250-smu-oc.service 2>/dev/null || true
