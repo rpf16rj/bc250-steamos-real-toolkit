@@ -1642,6 +1642,99 @@ run_revert_sensors() {
     persist_state_remove "sensors"
 }
 
+# Check if NCT6686/87 SuperIO hardware is present
+nct6686_hardware_present() {
+    # Check for NCT6686/87 SuperIO via common I/O ports and ACPI
+    # The NCT6686/87 is commonly found at I/O port 0x2E/0x2F or 0x4E/0x4F
+    # We'll check if we can access the SuperIO registers
+
+    # Try to detect NCT6686/87 by attempting to enter configuration mode
+    local ioport
+    for ioport in 0x2e 0x4e; do
+        # Attempt to enter SuperIO configuration mode
+        outb 0x87 $ioport >/dev/null 2>&1
+        outb 0x87 $ioport >/dev/null 2>&1
+        # Read chip ID (should be 0xC6 for NCT6686D or 0xC7 for NCT6687D)
+        outb 0x20 $ioport >/dev/null 2>&1
+        local chip_id=$(inb $((ioport + 1)) 2>/dev/null)
+        # Exit configuration mode
+        outb 0xAA $ioport >/dev/null 2>&1
+
+        # Check if we got a valid chip ID
+        if [[ "$chip_id" == "0xc6" || "$chip_id" == "0xc7" ]]; then
+            return 0  # Hardware found
+        fi
+    done
+
+    # Alternative: check via sysfs or ACPI
+    if [[ -d /sys/devices/platform/nct6686.isa || -d /sys/devices/platform/nct6687.isa ]]; then
+        return 0  # Hardware found via sysfs
+    fi
+
+    # Check ACPI for Nuvoton NCT6686/87
+    if [[ -f /sys/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:00/PNP0C09:00/VPC2000:00/hwmon/hwmon*/name ]]; then
+        if grep -q "nct6686\|nct6687" /sys/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:00/PNP0C09:00/VPC2000:00/hwmon/hwmon*/name 2>/dev/null; then
+            return 0  # Hardware found via ACPI
+        fi
+    fi
+
+    return 1  # Hardware not found
+}
+
+# Ensure NCT6687 PWM sensor driver is installed if hardware is present
+ensure_sensors_pwm_installed() {
+    if ! nct6686_hardware_present; then
+        print_info "NCT6686/87 SuperIO hardware not detected - skipping PWM sensor driver installation"
+        return 0  # Hardware not present, nothing to do
+    fi
+
+    if sensors_driver_loaded && [[ "$(sensors_active_driver)" == "nct6687" ]]; then
+        print_info "NCT6687 PWM sensor driver already loaded - skipping installation"
+        return 0  # Already installed and active
+    fi
+
+    print_info "NCT6686/87 SuperIO hardware detected - ensuring PWM sensor driver is installed..."
+    install_sensors_pwm
+    return $?
+}
+
+# Ensure CoolerControl is installed if sensor readings are available
+ensure_coolercontrol_installed() {
+    # Check if we can read sensors (basic functionality)
+    if ! sensors_driver_loaded; then
+        print_info "No sensor driver loaded - skipping CoolerControl installation"
+        return 0  # No sensor driver loaded, nothing to do
+    fi
+
+    # Check if CoolerControl is already installed
+    if coolercontrol_installed; then
+        print_info "CoolerControl already installed - skipping installation"
+        return 0  # Already installed
+    fi
+
+    print_info "Sensor readings available - ensuring CoolerControl is installed for fan curve control..."
+    install_coolercontrol
+    return $?
+}
+
+# Validate that CPU core unlock was successful (checks for 8c/16t)
+validate_core_unlock() {
+    local core_count thread_count
+    core_count=$(nproc 2>/dev/null || echo "0")
+    thread_count=$(nproc --all 2>/dev/null || echo "0")
+
+    # If we have more than 12 threads, assume core unlock worked (6c/12t stock -> 8c/16t unlocked)
+    # This is a heuristic - actual threshold may vary but 12 is a safe minimum for unlocked state
+    if (( thread_count > 12 )); then
+        print_info "CPU core unlock validated: ${thread_count} threads detected (expected >12 for 8c/16t)"
+        return 0
+    else
+        print_warning "CPU core unlock validation: only ${thread_count} threads detected (expected >12 for 8c/16t)"
+        print_warning "This may indicate the core unlock did not take effect or requires a cold reboot"
+        return 1  # Warning only, don't fail the entire process
+    fi
+}
+
 run_sensors_menu() {
     while true; do
         print_banner
@@ -3378,6 +3471,7 @@ run_revert_gfx1013_fix() {
 install_combined_fix() {
     print_step "COMBO" "Installing DP Audio/Video + GFX1013 Compute Fix (combined build)"
 
+    validate_combined_fix_prerequisites || return 1
     require_kernel_version || return 1
 
     audio_fix_cleanup_legacy_edid
@@ -5050,18 +5144,24 @@ install_all_progress_is_done() { [[ -f "$INSTALL_ALL_PROGRESS" ]] && grep -Fxq "
 install_all_progress_clear() { rm -f "$INSTALL_ALL_PROGRESS"; }
 
 run_install_all_step() {
-    local step="$1"; shift
-    if install_all_progress_is_done "$step"; then
-        print_info "Skipping already completed step: $step"
+    local step_num="$1"; shift
+    local total_steps="$1"; shift
+    local description="$1"; shift
+    local step_function="$1"; shift
+
+    if install_all_progress_is_done "$step_function"; then
+        print_info "Skipping already completed step: $step_function"
         return 0
     fi
-    "$step" "$@" || { print_error "Step $step failed — saved progress so you can resume later."; return 1; }
-    install_all_progress_done "$step"
+
+    print_step "$(printf "%02d" $step_num)" "[$step_num/$total_steps] $description"
+    "$step_function" "$@" || { print_error "Step $step_function failed — saved progress so you can resume later."; return 1; }
+    install_all_progress_done "$step_function"
     echo ""
 }
 
 run_install_all() {
-    print_step "00" "Install All — CPU/GPU Governor + Mitigations + Swap/ZSWAP + ACPI + Combined Audio+GFX1013 + CU Unlock + Core Unlock + RAM/VRAM + AC-3 Surround"
+    print_step "00" "Install All — Swap/ZSWAP + Mitigations + ACPI + RAM/VRAM + Sensor PWM + CoolerControl + Core Unlock + Validation + CPU/GPU Governor + CU Live Manager + Combined Fix + AC-3 Surround"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -5073,17 +5173,20 @@ run_install_all() {
         install_all_progress_init
     fi
 
-    run_install_all_step run_cpu_governor || return 1
-    run_install_all_step run_gpu_governor || return 1
-    run_install_all_step run_disable_mitigations auto || return 1
-    run_install_all_step run_configure_swap auto || return 1
-    run_install_all_step run_zram_zswap_toggle auto || return 1
-    run_install_all_step install_acpi_fix || return 1
-    run_install_all_step run_cu_live_manager || return 1
-    run_install_all_step install_core_unlock auto || return 1
-    run_install_all_step install_ram_split auto || return 1
-    run_install_all_step install_combined_fix || return 1
-    run_install_all_step install_ac3_surround auto || return 1
+    run_install_all_step 1 14 "Configuring Swap" run_configure_swap auto || return 1
+    run_install_all_step 2 14 "Enabling ZSWAP/Disabling ZRAM" run_zram_zswap_toggle auto || return 1
+    run_install_all_step 3 14 "Disabling CPU Mitigations" run_disable_mitigations auto || return 1
+    run_install_all_step 4 14 "Installing ACPI Fix" install_acpi_fix || return 1
+    run_install_all_step 5 14 "Installing RAM/VRAM Split" install_ram_split auto || return 1
+    run_install_all_step 6 14 "Ensuring Sensor PWM Driver" ensure_sensors_pwm_installed || return 1
+    run_install_all_step 7 14 "Ensuring CoolerControl Installation" ensure_coolercontrol_installed || return 1
+    run_install_all_step 8 14 "Installing Core Unlock" install_core_unlock auto || return 1
+    run_install_all_step 9 14 "Validating Core Unlock" validate_core_unlock || return 1
+    run_install_all_step 10 14 "Installing CPU Governor" run_cpu_governor || return 1
+    run_install_all_step 11 14 "Installing GPU Governor" run_gpu_governor || return 1
+    run_install_all_step 12 14 "Installing CU Live Manager" run_cu_live_manager || return 1
+    run_install_all_step 13 14 "Installing Combined Fix" install_combined_fix || return 1
+    run_install_all_step 14 14 "Installing AC-3 Surround" install_ac3_surround auto || return 1
 
     install_all_progress_clear
     print_success "Install All completed!"
@@ -5562,6 +5665,49 @@ if [[ "${1:-}" == "--reapply-all" ]]; then
     reapply_installed_components
     exit 0
 fi
+
+# Validate prerequisites for Combined Fix installation
+validate_combined_fix_prerequisites() {
+    print_step "VALIDATE" "Validating Combined Fix prerequisites"
+
+    # Check disk space (>5GB free)
+    local required_space_gb=5
+    local free_space_gb
+    free_space_gb=$(df --output=avail -BG /home | tail -1 | tr -dc '0-9')
+
+    if [[ -z "$free_space_gb" ]] || (( free_space_gb < required_space_gb )); then
+        print_error "Insufficient disk space: ${free_space_gb:-0}GB free, ${required_space_gb}GB required"
+        print_info "Please free up at least ${required_space_gb}GB of space on /home"
+        return 1
+    fi
+
+    # Check build tools
+    local build_tools=("git" "make" "gcc" "meson" "ninja" "patch")
+    local missing_tools=()
+
+    for tool in "${build_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools+=("$tool")
+        fi
+    done
+
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        print_error "Missing build tools: ${missing_tools[*]}"
+        print_info "Please install the missing tools and try again"
+        return 1
+    fi
+
+    # Check basic connectivity (try to reach a known host)
+    if ! ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
+        print_warning "Unable to reach external network (8.8.8.8)"
+        print_warning "The Combined Fix requires internet access to download source code"
+        print_warning "Continuing anyway, but installation may fail if network is unavailable"
+        # Don't return 1 here - just warn, as the user might be in a restricted environment
+    fi
+
+    print_success "All Combined Fix prerequisites met"
+    return 0
+}
 
 while true; do
     show_menu
