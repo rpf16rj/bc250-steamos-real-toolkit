@@ -3511,7 +3511,6 @@ run_revert_gfx1013_fix() {
 install_combined_fix() {
     print_step "COMBO" "Installing Combined Fix (selectable components)"
 
-    validate_combined_fix_prerequisites || return 1
     require_kernel_version || return 1
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
@@ -3542,6 +3541,8 @@ install_combined_fix() {
         print_info "No patches selected. Nothing to do."
         return 0
     fi
+
+    validate_combined_fix_prerequisites "$do_gfx" || return 1
 
     echo -e "  ${DIM}Always included: TTM NULL-page guard + SCLK range widening (350-2230 MHz)${RESET}"
     echo ""
@@ -5729,6 +5730,7 @@ fi
 
 # Validate prerequisites for Combined Fix installation
 validate_combined_fix_prerequisites() {
+    local check_mesa="${1:-1}"
     print_step "VALIDATE" "Validating Combined Fix prerequisites"
 
     # Check disk space (>5GB free)
@@ -5742,8 +5744,9 @@ validate_combined_fix_prerequisites() {
         return 1
     fi
 
-    # Check build tools
-    local build_tools=("git" "make" "gcc" "meson" "ninja" "patch")
+    # Check build tools (meson/ninja only needed for Mesa build)
+    local build_tools=("git" "make" "gcc" "patch")
+    [[ "$check_mesa" == "1" ]] && build_tools+=("meson" "ninja")
     local missing_tools=()
 
     for tool in "${build_tools[@]}"; do
