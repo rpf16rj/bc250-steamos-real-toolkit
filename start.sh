@@ -601,7 +601,34 @@ aur_remove() {
 
 cpu_governor_installed() {
     systemctl is-enabled bc250-smu-oc.service &>/dev/null || \
-        pipx list 2>/dev/null | grep -q 'bc250-smu-oc'
+        pipx list 2>&1 | grep -q 'bc250-smu-oc'
+}
+
+cpu_governor_venv_healthy() {
+    export PATH="$PATH:/root/.local/bin:/home/deck/.local/bin"
+    command -v bc250-detect &>/dev/null && bc250-detect --help &>/dev/null
+}
+
+cpu_governor_repair_venv() {
+    print_info "bc250-detect venv is broken (likely after SteamOS update). Reinstalling..."
+    pipx reinstall bc250-smu-oc 2>/dev/null || {
+        pipx uninstall bc250-smu-oc 2>/dev/null || true
+        local cpu_gov_dir="$EXTERNAL_DIR/bc250_smu_oc"
+        if [[ ! -d "$cpu_gov_dir" ]]; then
+            fail_with_log "Vendored bc250_smu_oc not found at $cpu_gov_dir." "CPU Governor — missing vendored repo for venv repair"
+            return 1
+        fi
+        pushd "$cpu_gov_dir" >/dev/null || return 1
+        run_with_retry "pipx install ." "pipx install bc250_smu_oc" || {
+            fail_with_log "Failed to reinstall bc250_smu_oc via pipx." "CPU Governor — pipx reinstall"
+            popd >/dev/null || true
+            return 1
+        }
+        popd >/dev/null || true
+    }
+    pipx ensurepath || true
+    export PATH="$PATH:/root/.local/bin"
+    print_success "bc250-detect venv repaired."
 }
 
 cpu_governor_setup() {
@@ -657,6 +684,13 @@ run_cpu_governor() {
     print_step "01" "Installing CPU Governor"
 
     if cpu_governor_installed; then
+        if ! cpu_governor_venv_healthy; then
+            print_info "CPU governor is installed but the pipx venv is broken (common after SteamOS updates)."
+            cpu_governor_repair_venv || return 1
+            cpu_governor_setup || return 1
+            print_success "CPU Governor repaired and configured successfully!"
+            return 0
+        fi
         if confirm "CPU governor is already installed. Reinstall it?"; then
             print_info "Removing existing installation..."
             systemctl stop bc250-smu-oc.service 2>/dev/null || true
@@ -685,10 +719,16 @@ run_cpu_governor() {
     print_info "Using vendored bc250_smu_oc repository..."
     pushd "$CPU_GOVERNOR_DIR" >/dev/null || return 1
     print_info "Installing via pipx..."
+    pipx uninstall bc250-smu-oc 2>/dev/null || true
     run_with_retry "pipx install ." "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
     popd >/dev/null || true
     pipx ensurepath || true
     export PATH="$PATH:/root/.local/bin"
+
+    if ! cpu_governor_venv_healthy; then
+        print_info "pipx install completed but bc250-detect is still not working. Attempting reinstall..."
+        cpu_governor_repair_venv || return 1
+    fi
 
     cpu_governor_setup || return 1
     print_success "CPU Governor installed successfully!"
@@ -1640,6 +1680,93 @@ run_revert_sensors() {
 
     print_success "Sensor driver configuration removed."
     persist_state_remove "sensors"
+}
+
+# Check if NCT6686/87 SuperIO hardware is present
+nct6686_hardware_present() {
+    # If a sensor driver is already loaded, hardware is present
+    if sensors_driver_loaded; then
+        return 0
+    fi
+
+    # Check via sysfs or ACPI
+    if [[ -d /sys/devices/platform/nct6686.isa || -d /sys/devices/platform/nct6687.isa ]]; then
+        return 0
+    fi
+
+    # Check ACPI for Nuvoton NCT6686/87
+    if [[ -f /sys/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:00/PNP0C09:00/VPC2000:00/hwmon/hwmon*/name ]]; then
+        if grep -q "nct6686\|nct6687" /sys/devices/LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:00/PNP0C09:00/VPC2000:00/hwmon/hwmon*/name 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # Try probing the in-tree nct6683 module — if it loads, the hardware is there
+    if modprobe nct6683 force=true 2>/dev/null; then
+        modprobe -r nct6683 2>/dev/null || true
+        return 0
+    fi
+
+    # Check dmesg for Nuvoton SuperIO detection
+    if dmesg 2>/dev/null | grep -qi "nct668[67]"; then
+        return 0
+    fi
+
+    return 1  # Hardware not found
+}
+
+# Ensure NCT6687 PWM sensor driver is installed if hardware is present
+ensure_sensors_pwm_installed() {
+    if ! nct6686_hardware_present; then
+        print_info "NCT6686/87 SuperIO hardware not detected - skipping PWM sensor driver installation"
+        return 0  # Hardware not present, nothing to do
+    fi
+
+    if sensors_driver_loaded && [[ "$(sensors_active_driver)" == "nct6687" ]]; then
+        print_info "NCT6687 PWM sensor driver already loaded - skipping installation"
+        return 0  # Already installed and active
+    fi
+
+    print_info "NCT6686/87 SuperIO hardware detected - ensuring PWM sensor driver is installed..."
+    install_sensors_pwm
+    return $?
+}
+
+# Ensure CoolerControl is installed if sensor readings are available
+ensure_coolercontrol_installed() {
+    # Check if we can read sensors (basic functionality)
+    if ! sensors_driver_loaded; then
+        print_info "No sensor driver loaded - skipping CoolerControl installation"
+        return 0  # No sensor driver loaded, nothing to do
+    fi
+
+    # Check if CoolerControl is already installed
+    if coolercontrol_installed; then
+        print_info "CoolerControl already installed - skipping installation"
+        return 0  # Already installed
+    fi
+
+    print_info "Sensor readings available - ensuring CoolerControl is installed for fan curve control..."
+    install_coolercontrol
+    return $?
+}
+
+# Validate that CPU core unlock was successful (checks for 8c/16t)
+validate_core_unlock() {
+    local core_count thread_count
+    core_count=$(nproc 2>/dev/null || echo "0")
+    thread_count=$(nproc --all 2>/dev/null || echo "0")
+
+    # If we have more than 12 threads, assume core unlock worked (6c/12t stock -> 8c/16t unlocked)
+    # This is a heuristic - actual threshold may vary but 12 is a safe minimum for unlocked state
+    if (( thread_count > 12 )); then
+        print_info "CPU core unlock validated: ${thread_count} threads detected (expected >12 for 8c/16t)"
+        return 0
+    else
+        print_warning "CPU core unlock validation: only ${thread_count} threads detected (expected >12 for 8c/16t)"
+        print_warning "This may indicate the core unlock did not take effect or requires a cold reboot"
+        return 1  # Warning only, don't fail the entire process
+    fi
 }
 
 run_sensors_menu() {
@@ -3418,43 +3545,70 @@ run_revert_gfx1013_fix() {
 }
 
 install_combined_fix() {
-    print_step "COMBO" "Installing DP Audio/Video + GFX1013 Compute Fix (combined build)"
+    print_step "COMBO" "Installing Combined Fix (selectable components)"
 
     require_kernel_version || return 1
 
-    audio_fix_cleanup_legacy_edid
-
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
-    echo -e "  ${DIM}Combines both fix sets in a single kernel build:${RESET}"
-    echo -e "  ${DIM}  • DP audio/video clock fix + GPU metrics + DP SS disable + tunable cache${RESET}"
-    echo -e "  ${DIM}  • GFX1013 compute queue fix for async compute support${RESET}"
-    echo -e "  ${DIM}  • TTM NULL-page guard + opt-in KFD runlist flush (ROCm)${RESET}"
-    echo -e "  ${DIM}  • Widened SMU SCLK range (350-2230 MHz) for userspace governors${RESET}"
-    echo -e "  ${DIM}  • VRR over HDMI via PCON: FreeSync fallback + LFC-aware range extending${RESET}"
-    echo -e "  ${DIM}  • ALLM (Auto Low Latency Mode) via DP for PCON HDMI Game Mode${RESET}"
-    echo -e "  ${DIM}  • Patched Mesa/RADV: async compute + FSR4 V3 + mesh/task (opt-in)${RESET}"
-    echo -e "  ${DIM}  • Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3${RESET}"
-    echo -e "  ${DIM}  • FSR4 V3 deferred SDot hybrid (MAD24 chains, dense pre-pass)${RESET}"
+    echo -e "  ${DIM}Select which components to include in this build:${RESET}"
     echo ""
 
-    # Mesh shader mode selection
+    local do_audio=0 do_gfx=0 do_vrr=0 do_allm=0
+    local patch_flags=()
+
+    # Detect kernel major version for version-specific skip logic
+    local kver_major kver_minor kver_rest
+    kver_major="$(uname -r | cut -d. -f1)"
+    kver_rest="$(uname -r | cut -d. -f2-)"
+    kver_minor="${kver_rest%%.*}"
+
+    echo -e "  ${CYAN}1) Audio Fix${RESET} — DP audio/video clock + GPU metrics + DP SS disable + tunable cache"
+    if confirm "  Install Audio Fix?"; then do_audio=1; patch_flags+=(--audio); fi
+    echo ""
+    echo -e "  ${CYAN}2) GFX1013 Compute Fix + Mesa/RADV${RESET} — async compute + FSR4 V3 + mesh/task shaders"
+    if confirm "  Install GFX1013 Compute Fix + Mesa?"; then do_gfx=1; patch_flags+=(--gfx1013); fi
+    echo ""
+
+    if [[ "$kver_major" -ge 7 ]]; then
+        print_info "Kernel 7.x detected — VRR and ALLM patches are not needed (already functional upstream). Skipping."
+        echo ""
+    else
+        echo -e "  ${CYAN}3) VRR PCON FreeSync${RESET} — FreeSync fallback + HDMI VRR (VTEM) + LFC-aware range extending"
+        if confirm "  Install VRR PCON FreeSync patch?"; then do_vrr=1; patch_flags+=(--vrr); fi
+        echo ""
+        echo -e "  ${CYAN}4) ALLM via DP${RESET} — Auto Low Latency Mode for PCON HDMI Game Mode"
+        if confirm "  Install ALLM via DP patch?"; then do_allm=1; patch_flags+=(--allm); fi
+        echo ""
+    fi
+
+    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 ]]; then
+        print_info "No patches selected. Nothing to do."
+        return 0
+    fi
+
+    validate_combined_fix_prerequisites "$do_gfx" || return 1
+
+    echo -e "  ${DIM}Always included: TTM NULL-page guard + SCLK range widening (350-2230 MHz)${RESET}"
+    echo ""
+
     local mesh_flag=""
-    echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
-    echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
-    echo -e "  ${DIM}     Supports both MESH and TASK shaders. Opt-in per-game with RADV_GFX103=1.${RESET}"
-    echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
-    echo -e "  ${DIM}     MESH always available, no TASK shader support. No env var needed.${RESET}"
-    echo ""
-    local mesh_choice
-    read -rp "  Select mesh shader mode [1-MastaG/2-Native] (default 1): " mesh_choice
-    case "$mesh_choice" in
-        2|n|N|native) mesh_flag="--native-mesh"; print_info "Using native mesh shader mode." ;;
-        *) mesh_flag="--mastag-mesh"; print_info "Using MastaG mesh shader mode." ;;
-    esac
+    if [[ $do_gfx -eq 1 ]]; then
+        echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
+        echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
+        echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
+        echo ""
+        local mesh_choice
+        read -rp "  Select mesh shader mode [1-MastaG/2-Native] (default 1): " mesh_choice
+        case "$mesh_choice" in
+            2|n|N|native) mesh_flag="--native-mesh"; print_info "Using native mesh shader mode." ;;
+            *) mesh_flag="--mastag-mesh"; print_info "Using MastaG mesh shader mode." ;;
+        esac
+    fi
     echo ""
 
-    if ! confirm "Continue with the combined DP Audio + GFX1013 fix?"; then
+    local flags_str="${patch_flags[*]}"
+    if ! confirm "Continue with selected components: ${flags_str:-none}?"; then
         print_info "Cancelled."
         return 0
     fi
@@ -3467,7 +3621,7 @@ install_combined_fix() {
         return 1
     fi
 
-    print_info "Running patch-driver.sh --gfx1013 --audio (single kernel build with both patch sets)..."
+    print_info "Running patch-driver.sh ${flags_str} (single kernel build with selected patch sets)..."
     print_info "This clones the matching Valve kernel source tree and can take several minutes."
 
     audio_fix_prefetch_headers "$fix_dir"
@@ -3487,49 +3641,86 @@ install_combined_fix() {
         print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
     fi
 
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh --gfx1013 --audio"; then
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${flags_str}"; then
         fail_with_log "Combined fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Combined Fix — patch-driver.sh"
         return 1
     fi
 
-    print_info "Kernel patches installed. Now building patched Mesa/RADV..."
-    local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
-    if [[ ! -d "$mesa_dir" ]]; then
-        fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
-        return 1
+    if [[ $do_gfx -eq 1 ]]; then
+        print_info "Kernel patches installed. Now building patched Mesa/RADV..."
+        local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
+        if [[ ! -d "$mesa_dir" ]]; then
+            fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
+            return 1
+        fi
+
+        print_info "Checking for meson/ninja build tools and dev headers..."
+        if ! gfx1013_ensure_mesa_build_deps; then
+            fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
+            return 1
+        fi
+
+        print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+        if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
+            fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
+            return 1
+        fi
     fi
 
-    print_info "Checking for meson/ninja build tools and dev headers..."
-    if ! gfx1013_ensure_mesa_build_deps; then
-        fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
-        return 1
-    fi
-
-    print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
-        fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
-        return 1
-    fi
-
-    print_success "Combined DP Audio + GFX1013 fix installed! Reboot required."
-    persist_state_add "audio"
-    persist_state_add "gfx1013"
-    print_info "After reboot: DP audio/video at normal speed + async compute queues enabled."
-    print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+    print_success "Combined fix installed! Reboot required."
+    [[ $do_audio -eq 1 ]] && persist_state_add "audio"
+    [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
+    [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
 
-    echo ""
-    echo -e "  ${CYAN}The patched amdgpu.ko also includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
-    echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
-    echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
-    echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
-    echo ""
-    if audio_fix_pcon_grub_installed; then
-        print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
-    elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
-        audio_fix_ensure_pcon_grub_param
-    else
-        print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
+    if [[ $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
+        echo ""
+        echo -e "  ${CYAN}The patched amdgpu.ko includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
+        echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
+        echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
+        echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
+        echo ""
+        if audio_fix_pcon_grub_installed; then
+            print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
+        elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
+            audio_fix_ensure_pcon_grub_param
+        else
+            print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
+        fi
+    fi
+
+    # Kernel 7.x telemetry: 8-core without patched SMU BIOS needs cs_legacy_8core_metrics=1
+    if [[ "$do_audio" -eq 1 && "$kver_major" -ge 7 ]]; then
+        local core_count
+        core_count=$(nproc 2>/dev/null || echo 0)
+        if (( core_count >= 16 )); then
+            # 8 cores / 16 threads — check if SMU-patched BIOS is in use
+            if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.cs_legacy_8core_metrics=1' "$GRUB_DEFAULT" >/dev/null 2>&1; then
+                : # already set
+            else
+                echo ""
+                echo -e "  ${YELLOW}8-core detected with kernel 7.x telemetry patch.${RESET}"
+                echo -e "  ${DIM}The new telemetry patch defaults to the SMU-patched 8-core layout (136-byte tables).${RESET}"
+                echo -e "  ${DIM}If your BIOS does NOT have the SMU telemetry patch (stock BIOS P3.00),${RESET}"
+                echo -e "  ${DIM}GPU temperature and some metrics will read as 0 until you add:${RESET}"
+                echo -e "  ${CYAN}amdgpu.cs_legacy_8core_metrics=1${RESET} ${DIM}to the kernel command line.${RESET}"
+                echo ""
+                if confirm "Are you running a stock BIOS (no SMU patch)? Add cs_legacy_8core_metrics=1 to GRUB?"; then
+                    steamos_writable "
+                        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+                        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.cs_legacy_8core_metrics=1'; then
+                            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.cs_legacy_8core_metrics=1\"/' \"$GRUB_DEFAULT\"
+                        fi
+                        update-grub
+                    " || {
+                        print_info "Failed to add amdgpu.cs_legacy_8core_metrics=1 to GRUB. Add it manually."
+                    }
+                    print_info "Added amdgpu.cs_legacy_8core_metrics=1 to GRUB. Reboot to activate correct telemetry."
+                else
+                    print_info "Skipped. If GPU temperature reads 0, add amdgpu.cs_legacy_8core_metrics=1 to GRUB manually."
+                fi
+            fi
+        fi
     fi
 
     echo ""
@@ -5101,18 +5292,24 @@ install_all_progress_is_done() { [[ -f "$INSTALL_ALL_PROGRESS" ]] && grep -Fxq "
 install_all_progress_clear() { rm -f "$INSTALL_ALL_PROGRESS"; }
 
 run_install_all_step() {
-    local step="$1"; shift
-    if install_all_progress_is_done "$step"; then
-        print_info "Skipping already completed step: $step"
+    local step_num="$1"; shift
+    local total_steps="$1"; shift
+    local description="$1"; shift
+    local step_function="$1"; shift
+
+    if install_all_progress_is_done "$step_function"; then
+        print_info "Skipping already completed step: $step_function"
         return 0
     fi
-    "$step" "$@" || { print_error "Step $step failed — saved progress so you can resume later."; return 1; }
-    install_all_progress_done "$step"
+
+    print_step "$(printf "%02d" $step_num)" "[$step_num/$total_steps] $description"
+    "$step_function" "$@" || { print_error "Step $step_function failed — saved progress so you can resume later."; return 1; }
+    install_all_progress_done "$step_function"
     echo ""
 }
 
 run_install_all() {
-    print_step "00" "Install All — CPU/GPU Governor + Mitigations + Swap/ZSWAP + ACPI + Combined Audio+GFX1013 + CU Unlock + Core Unlock + RAM/VRAM + AC-3 Surround"
+    print_step "00" "Install All — Swap/ZSWAP + Mitigations + ACPI + RAM/VRAM + Sensor PWM + CoolerControl + Core Unlock + Validation + CPU/GPU Governor + CU Live Manager + Combined Fix + AC-3 Surround"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -5124,17 +5321,20 @@ run_install_all() {
         install_all_progress_init
     fi
 
-    run_install_all_step run_cpu_governor || return 1
-    run_install_all_step run_gpu_governor || return 1
-    run_install_all_step run_disable_mitigations auto || return 1
-    run_install_all_step run_configure_swap auto || return 1
-    run_install_all_step run_zram_zswap_toggle auto || return 1
-    run_install_all_step install_acpi_fix || return 1
-    run_install_all_step run_cu_live_manager || return 1
-    run_install_all_step install_core_unlock auto || return 1
-    run_install_all_step install_ram_split auto || return 1
-    run_install_all_step install_combined_fix || return 1
-    run_install_all_step install_ac3_surround auto || return 1
+    run_install_all_step 1 14 "Configuring Swap" run_configure_swap auto || return 1
+    run_install_all_step 2 14 "Enabling ZSWAP/Disabling ZRAM" run_zram_zswap_toggle auto || return 1
+    run_install_all_step 3 14 "Disabling CPU Mitigations" run_disable_mitigations auto || return 1
+    run_install_all_step 4 14 "Installing ACPI Fix" install_acpi_fix || return 1
+    run_install_all_step 5 14 "Installing RAM/VRAM Split" install_ram_split auto || return 1
+    run_install_all_step 6 14 "Ensuring Sensor PWM Driver" ensure_sensors_pwm_installed || return 1
+    run_install_all_step 7 14 "Ensuring CoolerControl Installation" ensure_coolercontrol_installed || return 1
+    run_install_all_step 8 14 "Installing Core Unlock" install_core_unlock auto || return 1
+    run_install_all_step 9 14 "Validating Core Unlock" validate_core_unlock || return 1
+    run_install_all_step 10 14 "Installing CPU Governor" run_cpu_governor || return 1
+    run_install_all_step 11 14 "Installing GPU Governor" run_gpu_governor || return 1
+    run_install_all_step 12 14 "Installing CU Live Manager" run_cu_live_manager || return 1
+    run_install_all_step 13 14 "Installing Combined Fix" install_combined_fix || return 1
+    run_install_all_step 14 14 "Installing AC-3 Surround" install_ac3_surround auto || return 1
 
     install_all_progress_clear
     print_success "Install All completed!"
@@ -5613,6 +5813,60 @@ if [[ "${1:-}" == "--reapply-all" ]]; then
     reapply_installed_components
     exit 0
 fi
+
+# Validate prerequisites for Combined Fix installation
+validate_combined_fix_prerequisites() {
+    local check_mesa="${1:-1}"
+    print_step "VALIDATE" "Validating Combined Fix prerequisites"
+
+    # Check disk space (>5GB free)
+    local required_space_gb=5
+    local free_space_gb
+    free_space_gb=$(df --output=avail -BG /home | tail -1 | tr -dc '0-9')
+
+    if [[ -z "$free_space_gb" ]] || (( free_space_gb < required_space_gb )); then
+        print_error "Insufficient disk space: ${free_space_gb:-0}GB free, ${required_space_gb}GB required"
+        print_info "Please free up at least ${required_space_gb}GB of space on /home"
+        return 1
+    fi
+
+    # Check build tools (meson/ninja are auto-installed later by gfx1013_ensure_mesa_build_deps)
+    local build_tools=("git" "make" "gcc" "patch")
+    local missing_tools=()
+    local missing_mesa_tools=()
+
+    for tool in "${build_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools+=("$tool")
+        fi
+    done
+
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        print_error "Missing build tools: ${missing_tools[*]}"
+        print_info "Please install the missing tools and try again"
+        return 1
+    fi
+
+    if [[ "$check_mesa" == "1" ]]; then
+        for tool in meson ninja; do
+            command -v "$tool" >/dev/null 2>&1 || missing_mesa_tools+=("$tool")
+        done
+        if [[ ${#missing_mesa_tools[@]} -gt 0 ]]; then
+            print_info "Note: meson/ninja not found — will be auto-installed during Mesa build."
+        fi
+    fi
+
+    # Check basic connectivity (try to reach a known host)
+    if ! ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
+        print_warning "Unable to reach external network (8.8.8.8)"
+        print_warning "The Combined Fix requires internet access to download source code"
+        print_warning "Continuing anyway, but installation may fail if network is unavailable"
+        # Don't return 1 here - just warn, as the user might be in a restricted environment
+    fi
+
+    print_success "All Combined Fix prerequisites met"
+    return 0
+}
 
 while true; do
     show_menu

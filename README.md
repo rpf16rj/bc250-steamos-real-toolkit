@@ -31,9 +31,11 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 ## Compatible System
 
-- Real SteamOS (tested on 3.8.21 beta)
+- Real SteamOS (tested on 3.8.21 beta and 3.10 with kernel 7.2)
 - AMD BC-250 board
 - Root access and an internet connection
+
+> **Updating to SteamOS 3.10 / kernel 7.2:** enable Developer Mode (Settings → System → Developer Mode), then enable Advanced Update Channels and switch the update channel to **Main**. After the update, run Install All again to reapply the toolkit patches for the new kernel.
 
 ## Quick Start
 

@@ -7,6 +7,36 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.8.0 — 2026-08-29
+
+- **Adicionado:** Suporte ao **SteamOS 3.10 com kernel 7.2** (Valve Neptune).
+  O combined fix agora detecta a versão do kernel e seleciona as variantes
+  de patch corretas automaticamente. Para atualizar para o SteamOS 3.10 /
+  kernel 7.2, ative o Modo Desenvolvedor em Configurações → Sistema →
+  Modo Desenvolvedor, depois ative Canais de Atualização Avançados e troque
+  o canal para **Main**.
+- **Adicionado:** Novo patch de telemetry-cache para kernel 7.2 (do
+  linux-cachyos-bc250 do MastaG) com suporte a telemetria 8-core e
+  parâmetros de cache ajustáveis de gfxclk/activity.
+- **Adicionado:** No kernel 7.x com 8 núcleos desbloqueados, o toolkit
+  agora pergunta se quer adicionar `amdgpu.cs_legacy_8core_metrics=1` ao
+  GRUB se estiver usando BIOS stock (sem patch de SMU), evitando que a
+  temperatura da GPU fique zerada.
+- **Alterado:** Patches de VRR e ALLM são automaticamente pulados no kernel
+  7.x — o kernel 7.2 já possui VRR funcional nativo, então esses patches
+  não são mais necessários.
+- **Corrigido:** `bfd.h` e outros headers removidos pelo SteamOS agora são
+  restaurados pelo `ensure-build-prereqs.sh` usando `pacman --overwrite '*'`,
+  corrigindo falhas de build do objtool no kernel 7.2.
+- **Corrigido:** Nome do módulo `blake2b_generic` no hook steam-deck do
+  mkinitcpio é patcheado para `blake2b` no kernel 7.x (renomeado upstream),
+  corrigindo erros de rebuild do initramfs.
+- **Corrigido:** Detecção de hardware NCT6686/87 não depende mais de
+  `outb`/`inb` (não disponíveis no SteamOS) — usa sysfs, ACPI, probe via
+  modprobe e dmesg como fallback.
+- **Removido:** Opção de limpeza de EDID legado do menu do combined fix
+  (não mais relevante para instalações atuais).
+
 ## v1.7.4 — 2026-08-27
 
 - **Adicionado:** Suporte a VRR (Variable Refresh Rate) e ALLM (Auto Low

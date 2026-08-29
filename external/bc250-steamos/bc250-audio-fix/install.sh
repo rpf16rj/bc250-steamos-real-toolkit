@@ -82,6 +82,18 @@ chmod 644 "$MARKER"
 install -m644 "$MARKER" "$METRICS_MARKER"
 depmod "$REL"
 
+# Kernel 7.x renamed blake2b_generic to builtin blake2b.
+# The steam-deck mkinitcpio hook still references the old name, causing
+# "module not found" errors during initramfs rebuild. Patch it in place.
+STEAM_DECK_HOOK=/usr/lib/initcpio/install/steam-deck
+if [ -f "$STEAM_DECK_HOOK" ] && grep -q 'blake2b_generic' "$STEAM_DECK_HOOK"; then
+    KMAJOR=$(echo "$REL" | cut -d. -f1)
+    if [ "$KMAJOR" -ge 7 ]; then
+        echo "Kernel 7.x: fixing blake2b_generic -> blake2b in steam-deck mkinitcpio hook"
+        sed -i 's/blake2b_generic/blake2b/' "$STEAM_DECK_HOOK"
+    fi
+fi
+
 RESOLVED=$(modinfo -k "$REL" -F filename amdgpu)
 echo "amdgpu now resolves to: $RESOLVED"
 if [[ "$RESOLVED" != *"/updates/"* ]]; then
