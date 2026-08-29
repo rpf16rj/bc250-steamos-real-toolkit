@@ -3521,18 +3521,31 @@ install_combined_fix() {
     local do_audio=0 do_gfx=0 do_vrr=0 do_allm=0 do_edid=0
     local patch_flags=()
 
+    # Detect kernel major version for version-specific skip logic
+    local kver_major kver_minor kver_rest
+    kver_major="$(uname -r | cut -d. -f1)"
+    kver_rest="$(uname -r | cut -d. -f2-)"
+    kver_minor="${kver_rest%%.*}"
+
     echo -e "  ${CYAN}1) Audio Fix${RESET} — DP audio/video clock + GPU metrics + DP SS disable + tunable cache"
     if confirm "  Install Audio Fix?"; then do_audio=1; patch_flags+=(--audio); fi
     echo ""
     echo -e "  ${CYAN}2) GFX1013 Compute Fix + Mesa/RADV${RESET} — async compute + FSR4 V3 + mesh/task shaders"
     if confirm "  Install GFX1013 Compute Fix + Mesa?"; then do_gfx=1; patch_flags+=(--gfx1013); fi
     echo ""
-    echo -e "  ${CYAN}3) VRR PCON FreeSync${RESET} — FreeSync fallback + HDMI VRR (VTEM) + LFC-aware range extending"
-    if confirm "  Install VRR PCON FreeSync patch?"; then do_vrr=1; patch_flags+=(--vrr); fi
-    echo ""
-    echo -e "  ${CYAN}4) ALLM via DP${RESET} — Auto Low Latency Mode for PCON HDMI Game Mode"
-    if confirm "  Install ALLM via DP patch?"; then do_allm=1; patch_flags+=(--allm); fi
-    echo ""
+
+    if [[ "$kver_major" -ge 7 ]]; then
+        print_info "Kernel 7.x detected — VRR and ALLM patches are not needed (already functional upstream). Skipping."
+        echo ""
+    else
+        echo -e "  ${CYAN}3) VRR PCON FreeSync${RESET} — FreeSync fallback + HDMI VRR (VTEM) + LFC-aware range extending"
+        if confirm "  Install VRR PCON FreeSync patch?"; then do_vrr=1; patch_flags+=(--vrr); fi
+        echo ""
+        echo -e "  ${CYAN}4) ALLM via DP${RESET} — Auto Low Latency Mode for PCON HDMI Game Mode"
+        if confirm "  Install ALLM via DP patch?"; then do_allm=1; patch_flags+=(--allm); fi
+        echo ""
+    fi
+
     echo -e "  ${CYAN}5) Legacy EDID Cleanup${RESET} — remove old EDID firmware + GRUB params + mkinitcpio hooks"
     if confirm "  Clean up legacy EDID firmware?"; then do_edid=1; fi
     echo ""
