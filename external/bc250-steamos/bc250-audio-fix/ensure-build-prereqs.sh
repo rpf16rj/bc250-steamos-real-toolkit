@@ -13,6 +13,12 @@ PACKAGES=(
     base-devel make gcc binutils patch pkgconf git curl tar zstd gzip util-linux
     kmod
 )
+# Headers that SteamOS strips from the read-only image even though pacman's
+# local DB still lists the package as installed. Checked after tool detection
+# so we only force-reinstall when actually missing.
+REQUIRED_HEADERS=(
+    /usr/include/bfd.h
+)
 
 missing_tools() {
     local tool missing=()
@@ -23,12 +29,20 @@ missing_tools() {
 }
 
 mapfile -t MISSING < <(missing_tools)
-[ "${#MISSING[@]}" -gt 0 ] || exit 0
+
+# Check for headers stripped by SteamOS even when the package is "installed"
+MISSING_HEADERS=()
+for hdr in "${REQUIRED_HEADERS[@]}"; do
+    [ -f "$hdr" ] || MISSING_HEADERS+=("$hdr")
+done
+
+[ "${#MISSING[@]}" -gt 0 ] || [ "${#MISSING_HEADERS[@]}" -gt 0 ] || exit 0
 
 if [ "$(id -u)" != 0 ]; then
     command -v sudo >/dev/null 2>&1 \
         || { echo "FATAL: missing build prerequisites (${MISSING[*]}) and sudo is unavailable" >&2; exit 1; }
-    echo "Missing build prerequisites: ${MISSING[*]}"
+    [ "${#MISSING[@]}" -gt 0 ] && echo "Missing build tools: ${MISSING[*]}"
+    [ "${#MISSING_HEADERS[@]}" -gt 0 ] && echo "Missing build headers (stripped by SteamOS): ${MISSING_HEADERS[*]}"
     echo "Restoring the SteamOS build toolchain (sudo required)..."
     exec sudo "$0"
 fi
@@ -57,10 +71,17 @@ fi
 
 pacman-key --init
 pacman-key --populate archlinux holo 2>/dev/null || pacman-key --populate
-pacman -Sy --noconfirm "${PACKAGES[@]}"
+# Use --overwrite '*' to restore files SteamOS stripped from the image
+# (e.g. bfd.h from binutils, dev headers from base-devel).
+pacman -Sy --noconfirm --overwrite '*' "${PACKAGES[@]}"
 
 mapfile -t MISSING < <(missing_tools)
 [ "${#MISSING[@]}" = 0 ] \
     || { echo "FATAL: prerequisites are still missing after package installation: ${MISSING[*]}" >&2; exit 1; }
+
+for hdr in "${REQUIRED_HEADERS[@]}"; do
+    [ -f "$hdr" ] \
+        || { echo "FATAL: header $hdr is still missing after package reinstall" >&2; exit 1; }
+done
 
 echo "SteamOS build toolchain is ready."
