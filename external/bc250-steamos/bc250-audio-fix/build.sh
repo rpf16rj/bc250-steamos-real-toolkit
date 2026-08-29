@@ -15,9 +15,10 @@
 #
 # --gfx1013 applies the GFX1013 compute queue fix patches (3 patches from
 # bc250-gfx1013-fix): repairs compute queue lifecycle on BC-250 for async
-# compute support. Requires matching Mesa/RADV patches for full functionality.
-# When --gfx1013 is used alone, audio fix patches are NOT applied. Use
-# --gfx1013 --audio to apply both sets of patches.
+# compute support on BC-250. When --gfx1013 is used alone, audio fix
+# patches are NOT applied. Use --gfx1013 --audio to apply both sets of patches.
+# --vrr applies the VRR PCON FreeSync fallback + range extending patch.
+# --allm applies the ALLM-via-DP patch (HF-VSIF for DP-to-HDMI PCON).
 #
 # Run on the BC-250 itself, as the normal user: the running kernel's
 # /proc/config.gz and `uname -r` are the ground truth everything is checked
@@ -53,11 +54,15 @@ WITH_GFX1013=0
 WITH_AUDIO=0
 PREPARE_ONLY=0
 ALLOW_MISSING_SYMVERS=0
+WITH_VRR=0
+WITH_ALLM=0
 ARGS=()
 for a in "$@"; do
     case "$a" in
         --gfx1013)        WITH_GFX1013=1 ;;
         --audio)          WITH_AUDIO=1 ;;
+        --vrr)            WITH_VRR=1 ;;
+        --allm)           WITH_ALLM=1 ;;
         --prepare-only)   PREPARE_ONLY=1 ;;
         --allow-missing-symvers) ALLOW_MISSING_SYMVERS=1 ;;
         *)                ARGS+=("$a") ;;
@@ -351,6 +356,9 @@ if [ "$WITH_AUDIO" = 1 ]; then
         die "DM spread spectrum patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
+fi
+
+if [ "$WITH_VRR" = 1 ]; then
     step "apply VRR PCON FreeSync fallback + range extending patch (amdgpu_dm)"
     VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
@@ -362,7 +370,16 @@ if [ "$WITH_AUDIO" = 1 ]; then
         die "VRR PCON FreeSync patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 else
-    step "skipping audio fix patches (--gfx1013 used without --audio)"
+    step "skipping VRR PCON FreeSync patch (not requested)"
+    VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$VRR_PATCH"
+        echo "VRR PCON FreeSync patch REVERSED (leftover from a previous build)"
+    fi
+fi
+
+if [ "$WITH_AUDIO" = 0 ]; then
+    step "skipping audio fix patches (--audio not requested)"
 fi
 
 step "GFX1013 compute queue fix patches (async compute support)"
@@ -395,15 +412,24 @@ else
     done
 fi
 
-step "apply ALLM-via-DP patch (HF-VSIF for DP-to-HDMI PCON)"
-ALLM_PATCH=$HERE/bc250-allm-via-dp.patch
-if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
-    echo "ALLM-via-DP patch already applied"
-elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
-    patch -p1 --fuzz=3 -s < "$ALLM_PATCH"
-    echo "ALLM-via-DP patch applied"
+if [ "$WITH_ALLM" = 1 ]; then
+    step "apply ALLM-via-DP patch (HF-VSIF for DP-to-HDMI PCON)"
+    ALLM_PATCH=$HERE/bc250-allm-via-dp.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
+        echo "ALLM-via-DP patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$ALLM_PATCH"
+        echo "ALLM-via-DP patch applied"
+    else
+        die "ALLM-via-DP patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 else
-    die "ALLM-via-DP patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    step "skipping ALLM-via-DP patch (not requested)"
+    ALLM_PATCH=$HERE/bc250-allm-via-dp.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$ALLM_PATCH"
+        echo "ALLM-via-DP patch REVERSED (leftover from a previous build)"
+    fi
 fi
 
 step "apply TTM NULL-page guard patch (defensive)"

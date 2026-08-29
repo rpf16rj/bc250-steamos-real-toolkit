@@ -3469,47 +3469,65 @@ run_revert_gfx1013_fix() {
 }
 
 install_combined_fix() {
-    print_step "COMBO" "Installing DP Audio/Video + GFX1013 Compute Fix (combined build)"
+    print_step "COMBO" "Installing Combined Fix (selectable components)"
 
     validate_combined_fix_prerequisites || return 1
     require_kernel_version || return 1
 
-    audio_fix_cleanup_legacy_edid
-
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
-    echo -e "  ${DIM}Combines both fix sets in a single kernel build:${RESET}"
-    echo -e "  ${DIM}  • DP audio/video clock fix + GPU metrics + DP SS disable + tunable cache${RESET}"
-    echo -e "  ${DIM}  • GFX1013 compute queue fix for async compute support${RESET}"
-    echo -e "  ${DIM}  • TTM NULL-page guard + opt-in KFD runlist flush (ROCm)${RESET}"
-    echo -e "  ${DIM}  • Widened SMU SCLK range (350-2230 MHz) for userspace governors${RESET}"
-    echo -e "  ${DIM}  • VRR over HDMI via PCON: FreeSync fallback + LFC-aware range extending${RESET}"
-    echo -e "  ${DIM}  • ALLM (Auto Low Latency Mode) via DP for PCON HDMI Game Mode${RESET}"
-    echo -e "  ${DIM}  • Patched Mesa/RADV: async compute + FSR4 V3 + mesh/task (opt-in)${RESET}"
-    echo -e "  ${DIM}  • Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3${RESET}"
-    echo -e "  ${DIM}  • FSR4 V3 deferred SDot hybrid (MAD24 chains, dense pre-pass)${RESET}"
+    echo -e "  ${DIM}Select which components to include in this build:${RESET}"
     echo ""
 
-    # Mesh shader mode selection
+    local do_audio=0 do_gfx=0 do_vrr=0 do_allm=0 do_edid=0
+    local patch_flags=()
+
+    echo -e "  ${CYAN}1) Audio Fix${RESET} — DP audio/video clock + GPU metrics + DP SS disable + tunable cache"
+    if confirm "  Install Audio Fix?"; then do_audio=1; patch_flags+=(--audio); fi
+    echo ""
+    echo -e "  ${CYAN}2) GFX1013 Compute Fix + Mesa/RADV${RESET} — async compute + FSR4 V3 + mesh/task shaders"
+    if confirm "  Install GFX1013 Compute Fix + Mesa?"; then do_gfx=1; patch_flags+=(--gfx1013); fi
+    echo ""
+    echo -e "  ${CYAN}3) VRR PCON FreeSync${RESET} — FreeSync fallback + HDMI VRR (VTEM) + LFC-aware range extending"
+    if confirm "  Install VRR PCON FreeSync patch?"; then do_vrr=1; patch_flags+=(--vrr); fi
+    echo ""
+    echo -e "  ${CYAN}4) ALLM via DP${RESET} — Auto Low Latency Mode for PCON HDMI Game Mode"
+    if confirm "  Install ALLM via DP patch?"; then do_allm=1; patch_flags+=(--allm); fi
+    echo ""
+    echo -e "  ${CYAN}5) Legacy EDID Cleanup${RESET} — remove old EDID firmware + GRUB params + mkinitcpio hooks"
+    if confirm "  Clean up legacy EDID firmware?"; then do_edid=1; fi
+    echo ""
+
+    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 ]]; then
+        print_info "No patches selected. Nothing to do."
+        return 0
+    fi
+
+    echo -e "  ${DIM}Always included: TTM NULL-page guard + SCLK range widening (350-2230 MHz)${RESET}"
+    echo ""
+
     local mesh_flag=""
-    echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
-    echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
-    echo -e "  ${DIM}     Supports both MESH and TASK shaders. Opt-in per-game with RADV_GFX103=1.${RESET}"
-    echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
-    echo -e "  ${DIM}     MESH always available, no TASK shader support. No env var needed.${RESET}"
-    echo ""
-    local mesh_choice
-    read -rp "  Select mesh shader mode [1-MastaG/2-Native] (default 1): " mesh_choice
-    case "$mesh_choice" in
-        2|n|N|native) mesh_flag="--native-mesh"; print_info "Using native mesh shader mode." ;;
-        *) mesh_flag="--mastag-mesh"; print_info "Using MastaG mesh shader mode." ;;
-    esac
+    if [[ $do_gfx -eq 1 ]]; then
+        echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
+        echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
+        echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
+        echo ""
+        local mesh_choice
+        read -rp "  Select mesh shader mode [1-MastaG/2-Native] (default 1): " mesh_choice
+        case "$mesh_choice" in
+            2|n|N|native) mesh_flag="--native-mesh"; print_info "Using native mesh shader mode." ;;
+            *) mesh_flag="--mastag-mesh"; print_info "Using MastaG mesh shader mode." ;;
+        esac
+    fi
     echo ""
 
-    if ! confirm "Continue with the combined DP Audio + GFX1013 fix?"; then
+    local flags_str="${patch_flags[*]}"
+    if ! confirm "Continue with selected components: ${flags_str:-none}?"; then
         print_info "Cancelled."
         return 0
     fi
+
+    [[ $do_edid -eq 1 ]] && audio_fix_cleanup_legacy_edid
 
     fixes_repo_sync || return 1
 
@@ -3519,7 +3537,7 @@ install_combined_fix() {
         return 1
     fi
 
-    print_info "Running patch-driver.sh --gfx1013 --audio (single kernel build with both patch sets)..."
+    print_info "Running patch-driver.sh ${flags_str} (single kernel build with selected patch sets)..."
     print_info "This clones the matching Valve kernel source tree and can take several minutes."
 
     audio_fix_prefetch_headers "$fix_dir"
@@ -3539,49 +3557,52 @@ install_combined_fix() {
         print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
     fi
 
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh --gfx1013 --audio"; then
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${flags_str}"; then
         fail_with_log "Combined fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Combined Fix — patch-driver.sh"
         return 1
     fi
 
-    print_info "Kernel patches installed. Now building patched Mesa/RADV..."
-    local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
-    if [[ ! -d "$mesa_dir" ]]; then
-        fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
-        return 1
+    if [[ $do_gfx -eq 1 ]]; then
+        print_info "Kernel patches installed. Now building patched Mesa/RADV..."
+        local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
+        if [[ ! -d "$mesa_dir" ]]; then
+            fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
+            return 1
+        fi
+
+        print_info "Checking for meson/ninja build tools and dev headers..."
+        if ! gfx1013_ensure_mesa_build_deps; then
+            fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
+            return 1
+        fi
+
+        print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+        if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
+            fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
+            return 1
+        fi
     fi
 
-    print_info "Checking for meson/ninja build tools and dev headers..."
-    if ! gfx1013_ensure_mesa_build_deps; then
-        fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
-        return 1
-    fi
-
-    print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
-        fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
-        return 1
-    fi
-
-    print_success "Combined DP Audio + GFX1013 fix installed! Reboot required."
-    persist_state_add "audio"
-    persist_state_add "gfx1013"
-    print_info "After reboot: DP audio/video at normal speed + async compute queues enabled."
-    print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+    print_success "Combined fix installed! Reboot required."
+    [[ $do_audio -eq 1 ]] && persist_state_add "audio"
+    [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
+    [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
 
-    echo ""
-    echo -e "  ${CYAN}The patched amdgpu.ko also includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
-    echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
-    echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
-    echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
-    echo ""
-    if audio_fix_pcon_grub_installed; then
-        print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
-    elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
-        audio_fix_ensure_pcon_grub_param
-    else
-        print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
+    if [[ $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
+        echo ""
+        echo -e "  ${CYAN}The patched amdgpu.ko includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
+        echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
+        echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
+        echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
+        echo ""
+        if audio_fix_pcon_grub_installed; then
+            print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
+        elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
+            audio_fix_ensure_pcon_grub_param
+        else
+            print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
+        fi
     fi
 }
 

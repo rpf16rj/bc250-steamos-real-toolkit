@@ -3,20 +3,22 @@
 # SteamOS update. Run as the normal user; sudo is invoked for missing build
 # prerequisites and installation.
 #
-#   ./patch-driver.sh [--gfx1013] [kernel-tree]  (default: ./valve-kernel)
+#   ./patch-driver.sh [--gfx1013] [--audio] [--vrr] [--allm] [kernel-tree]  (default: ./valve-kernel)
 #   ./patch-driver.sh status
 #   ./patch-driver.sh uninstall
 #
 # --gfx1013 is forwarded to build.sh (GFX1013 compute queue fix patches for
 # async compute support on BC-250). When --gfx1013 is used alone, audio fix
 # patches are NOT applied. Use --gfx1013 --audio to apply both sets of patches.
+# --vrr applies the VRR PCON FreeSync patch independently.
+# --allm applies the ALLM-via-DP patch independently.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 
 usage() {
     cat <<EOF
-Usage: $0 [--gfx1013] [kernel-tree]
+Usage: $0 [--gfx1013] [--audio] [--vrr] [--allm] [kernel-tree]
        $0 status
        $0 uninstall
 
@@ -146,15 +148,19 @@ flock 9
 
 WITH_GFX1013=()
 WITH_AUDIO=()
+WITH_VRR=()
+WITH_ALLM=()
 ARGS=()
 for a in "$@"; do
     case "$a" in
         --gfx1013)        WITH_GFX1013=(--gfx1013) ;;
         --audio)          WITH_AUDIO=(--audio) ;;
+        --vrr)            WITH_VRR=(--vrr) ;;
+        --allm)           WITH_ALLM=(--allm) ;;
         *)                ARGS+=("$a") ;;
     esac
 done
 
 "$HERE/fetch-sources.sh" "${ARGS[@]}"
-"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${ARGS[@]}"
+"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_VRR[@]}" "${WITH_ALLM[@]}" "${ARGS[@]}"
 sudo "$HERE/install.sh"
