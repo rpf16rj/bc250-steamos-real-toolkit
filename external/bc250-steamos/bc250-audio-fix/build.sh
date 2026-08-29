@@ -389,10 +389,12 @@ fi
 
 step "GFX1013 compute queue fix patches (async compute support)"
 # Patches that repair compute queue lifecycle on BC-250. The mmio-pasid-route
-# fix (0001) is already in the vendored valve-kernel tree, so only
-# compute-gfxoff-guard and scoped-pasid-type0 are applied here.
+# fix (0001) routes PASID TLB flushes through MMIO instead of KIQ for GFX1013,
+# preventing soft lockups under sustained compute workloads. The vendored
+# valve-kernel tree does NOT include this fix, so it must be applied here.
 # Requires matching Mesa/RADV patches for full async compute functionality.
 GFX1013_PATCHES=(
+    "$HERE/0001-gfx1013-mmio-pasid-route.patch"
     "$HERE/0002-gfx1013-compute-gfxoff-guard.patch"
     "$HERE/0003-gfx1013-scoped-pasid-type0.patch"
 )
