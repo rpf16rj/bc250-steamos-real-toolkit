@@ -1,0 +1,105 @@
+CONFIG_AIC_LOADFW_SUPPORT := m
+CONFIG_AIC8800_WLAN_SUPPORT := m
+CONFIG_AIC_ZLP_QUIRK := m
+
+obj-$(CONFIG_AIC_LOADFW_SUPPORT)    += aic_load_fw/
+obj-$(CONFIG_AIC8800_WLAN_SUPPORT) += aic8800_fdrv/
+obj-$(CONFIG_AIC_ZLP_QUIRK)        += aic_zlp_quirk/
+
+########## config option ##########
+export CONFIG_USE_FW_REQUEST = n
+export CONFIG_PREALLOC_RX_SKB = y
+export CONFIG_PREALLOC_TXQ = y
+export CONFIG_WOWLAN = n
+###################################
+
+########## platform support list ##########
+export CONFIG_PLATFORM_ROCKCHIP = n
+export CONFIG_PLATFORM_ALLWINNER = n
+export CONFIG_PLATFORM_AMLOGIC = n
+export CONFIG_PLATFORM_HI = n
+export CONFIG_PLATFORM_UBUNTU = y
+
+ifeq ($(CONFIG_PLATFORM_ROCKCHIP), y)
+ARCH = arm64
+KDIR = /home/yaya/E/Rockchip/3566/firefly/Android11.0/Firefly-RK356X_Android11.0_git_20210824/RK356X_Android11.0/kernel
+CROSS_COMPILE = /home/yaya/E/Rockchip/3566/firefly/Android11.0/Firefly-RK356X_Android11.0_git_20210824/RK356X_Android11.0/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
+ccflags-y += -DANDROID_PLATFORM
+endif
+
+ifeq ($(CONFIG_PLATFORM_ALLWINNER), y)
+KDIR  = /home/yaya/E/Allwinner/R818/R818/AndroidQ/lichee/kernel/linux-4.9
+ARCH = arm64
+CROSS_COMPILE = /home/yaya/E/Allwinner/R818/R818/AndroidQ/lichee/out/gcc-linaro-5.3.1-2016.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
+ccflags-y += -DANDROID_PLATFORM
+endif
+
+ifeq ($(CONFIG_PLATFORM_AMLOGIC), y)
+ccflags-y += -DANDROID_PLATFORM
+ARCH = arm
+CROSS_COMPILE = /home/yaya/D/Workspace/CyberQuantum/JinHaoYue/amls905x3/SDK/20191101-0tt-asop/android9.0/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androidkernel-
+KDIR = /home/yaya/D/Workspace/CyberQuantum/JinHaoYue/amls905x3/SDK/20191101-0tt-asop/android9.0/out/target/product/u202/obj/KERNEL_OBJ/
+endif
+
+ifeq ($(CONFIG_PLATFORM_HI), y)
+ccflags-y += -DANDROID_PLATFORM
+ARCH = arm
+CROSS_COMPILE = /home/yaya/D/Workspace/CyberQuantum/JinHaoYue/amls905x3/SDK/20191101-0tt-asop/android9.0/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androidkernel-
+KDIR = /home/yaya/D/Workspace/CyberQuantum/JinHaoYue/amls905x3/SDK/20191101-0tt-asop/android9.0/out/target/product/u202/obj/KERNEL_OBJ/
+endif
+
+ifeq ($(CONFIG_PLATFORM_UBUNTU), y)
+KVER ?= $(shell uname -r)
+KDIR ?= /lib/modules/$(KVER)/build
+PWD   = $(shell pwd)
+MODDESTDIR = /lib/modules/$(KVER)/kernel/drivers/net/wireless/aic8800
+BTMODDESTDIR = /lib/modules/$(KVER)/kernel/drivers/bluetooth/aic8800
+SUBARCH = $(shell uname -m | sed -e s/i.86/i386/ -e s/armv.l/arm/ -e s/aarch64/arm64/ -e s/loongarch64/loongarch/ -e s/loong64/loongarch/ -e s/riscv64/riscv/)
+ARCH ?= $(SUBARCH)
+CROSS_COMPILE ?=
+
+# SteamOS kernels may enable module BTF while the immutable userspace omits
+# pahole. BTF is optional debug metadata, so disable it for this build when the
+# encoder is unavailable instead of failing an otherwise valid module build.
+ifeq ($(shell command -v pahole),)
+BTF_OVERRIDE = CONFIG_DEBUG_INFO_BTF_MODULES=
+endif
+endif
+
+###########################################
+
+KERNEL_AUTOCONF := $(KDIR)/include/config/auto.conf
+KERNEL_CONFIG := $(KDIR)/.config
+KERNEL_CC_IS_CLANG := $(shell if [ -r "$(KERNEL_AUTOCONF)" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "$(KERNEL_AUTOCONF)"; then echo y; elif [ -r "$(KERNEL_CONFIG)" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "$(KERNEL_CONFIG)"; then echo y; fi)
+
+ifeq ($(KERNEL_CC_IS_CLANG),y)
+LLVM ?= 1
+endif
+
+ifneq ($(LLVM),)
+KBUILD_EXTRA_ARGS += LLVM=$(LLVM)
+endif
+
+all: modules
+modules:
+	make -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) $(KBUILD_EXTRA_ARGS) $(BTF_OVERRIDE) modules
+
+install:
+	mkdir -p $(MODDESTDIR)
+	mkdir -p $(BTMODDESTDIR)
+	install -p -m 644 aic_load_fw/aic_load_fw.ko  $(MODDESTDIR)/
+	install -p -m 644 aic8800_fdrv/aic8800_fdrv.ko  $(MODDESTDIR)/
+	install -p -m 644 aic_zlp_quirk/aic_zlp_quirk.ko  $(BTMODDESTDIR)/
+	/sbin/depmod -a ${KVER}
+
+uninstall:
+	rm -rfv $(MODDESTDIR)/aic_load_fw.ko
+	rm -rfv $(MODDESTDIR)/aic8800_fdrv.ko
+	rm -rfv $(BTMODDESTDIR)/aic_zlp_quirk.ko
+	/sbin/depmod -a ${KVER}
+
+clean:
+	cd aic_load_fw/;make clean;cd ..
+	cd aic8800_fdrv/;make clean;cd ..
+	cd aic_zlp_quirk/;make clean;cd ..
+	rm -rf modules.order Module.symvers .modules.order.cmd .Module.symvers.cmd .tmp_versions/

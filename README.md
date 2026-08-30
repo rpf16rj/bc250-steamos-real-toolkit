@@ -41,7 +41,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 - **GFX1013 compute queue fix** — async compute + patched Mesa/RADV with mesh/task shader and FSR4 V3 support
 - **ACPI power states fix** — proper CPU C-/P-state tables (6c and 8c compatible)
-- **AIC8800 WiFi/BT driver** — for AIC8800D80 USB WiFi/BT dongles
+- **AIC8800 WiFi/BT drivers** — current AIC8800D80 support plus an explicit legacy-MCU1 profile for older AIC8800DC/DW WiFi dongles
 - **BE200 Wi-Fi 7 firmware** — for Intel BE200/BE201 PCIe cards missing ucode
 - **DS5 Bridge PS Button fix** — DualSense chord combos via patched hid-playstation.ko
 - **DS5 Chord Config** — QAM-enabled chord configuration VDF patch

@@ -41,7 +41,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 - **Correção da fila de compute GFX1013** — compute assíncrono + Mesa/RADV patchadas com suporte a mesh/task shaders e FSR4 V3
 - **Correção de estados de energia ACPI** — tabelas ACPI C-/P-state corretas (compatíveis com 6c e 8c)
-- **Driver WiFi/BT AIC8800** — para dongles USB WiFi/BT AIC8800D80
+- **Drivers WiFi/BT AIC8800** — suporte atual ao AIC8800D80 e perfil legacy-MCU1 explícito para dongles WiFi AIC8800DC/DW mais antigos
 - **Firmware BE200 Wi-Fi 7** — para placas PCIe Intel BE200/BE201 sem ucode
 - **Fix do PS Button do DS5 Bridge** — chord combos do DualSense via hid-playstation.ko patchado
 - **DS5 Chord Config** — patch VDF para configuração de chords com QAM habilitado

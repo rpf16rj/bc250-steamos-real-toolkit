@@ -1,1 +1,5 @@
 *.patch whitespace=-space-before-tab
+
+# Preserve the pinned vendor driver byte-for-byte; its upstream formatting
+# contains legacy whitespace that should not obscure toolkit integration diffs.
+aic8800-legacy-mcu1/** -whitespace

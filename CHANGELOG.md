@@ -7,6 +7,18 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## Unreleased
+
+- **Added:** An explicit AIC8800DC/DW `legacy-mcu1` WiFi profile for older
+  adapters reporting `chip_id=7, chip_mcu_id=1`. It uses the pinned, matched
+  pre-SDK-V5/V3 driver and firmware set validated upstream for the
+  deterministic main-firmware start timeout.
+- **Added:** Automatic `a69c:5721` virtual-disk ejection for Tenda AIC8800DC
+  adapters that re-enumerate as WiFi device `2604:0013`.
+- **Fixed:** SteamOS update persistence now records the selected AIC8800
+  profile, preventing the current D80 profile from overwriting a working
+  legacy-MCU1 installation during unattended re-apply.
+
 ## v1.8.1 — 2026-08-30
 
 - **Added:** **DP-HDMI YCbCr 4:4:4 deep color + HDMI 2.1 FRL** support for
