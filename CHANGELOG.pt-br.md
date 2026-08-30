@@ -32,6 +32,15 @@ como histórico datado de antes da adoção de versões numeradas.
 - **Resultado:** Com um dongle PCON CH7218 e uma TV com suporte a deep color,
   **1440p@120 12-bit YCbCr 4:4:4** e **4K@60 12-bit YCbCr 4:4:4** agora são
   possíveis. 4K@120 4:4:4 é limitado pela banda do DP 1.4 (25.14 Gbps).
+- **Corrigido:** Crash do `compgen -G` em `audio_fix_ensure_mkinitcpio_preset`
+  no kernel 7.x — nenhum preset `linux-neptune-6*` existe, causando exit
+  non-zero sob `set -euo pipefail` e abortando a instalação do Combined Fix.
+- **Corrigido:** Três padrões adicionais de pipe vulneráveis a `pipefail`
+  endurecidos com `|| true` (grep|head na limpeza de cache AUR, pacman|head
+  na detecção de headers, ls|head na extração de firmware BE200).
+- **Alterado:** READMEs reescritos com funcionalidades categorizadas, novos
+  componentes (BE200, DS5 Chord Config, HPD debounce, CU/WGP Live Manager),
+  seção completa de Troubleshooting e seção profissional de Apoio.
 
 ## v1.8.0 — 2026-08-29
 

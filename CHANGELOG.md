@@ -31,6 +31,15 @@ before the toolkit adopted numbered releases.
 - **Result:** With a CH7218 PCON dongle and a deep-color-capable TV,
   **1440p@120 12-bit YCbCr 4:4:4** and **4K@60 12-bit YCbCr 4:4:4** are now
   possible. 4K@120 4:4:4 is limited by DP 1.4 bandwidth (25.14 Gbps).
+- **Fixed:** `compgen -G` crash in `audio_fix_ensure_mkinitcpio_preset` on
+  kernel 7.x — no `linux-neptune-6*.preset` exists, causing non-zero exit
+  under `set -euo pipefail` and aborting the Combined Fix installation.
+- **Fixed:** Three additional `pipefail`-prone pipe patterns hardened with
+  `|| true` (grep|head in AUR cache cleanup, pacman|head in headers
+  detection, ls|head in BE200 firmware extraction).
+- **Changed:** Rewritten READMEs with categorized features, new components
+  (BE200, DS5 Chord Config, HPD debounce, CU/WGP Live Manager), full
+  Troubleshooting section, and professional Support section.
 
 ## v1.8.0 — 2026-08-29
 
