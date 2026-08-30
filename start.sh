@@ -2415,7 +2415,7 @@ audio_fix_ensure_mkinitcpio_preset() {
     [[ -e "$expected" ]] && return 0
 
     local actual
-    actual=$(compgen -G "/etc/mkinitcpio.d/linux-neptune-6*.preset" | head -1)
+    actual=$(compgen -G "/etc/mkinitcpio.d/linux-neptune-6*.preset" 2>/dev/null | head -1) || true
     [[ -n "$actual" ]] || return 0
 
     print_info "mkinitcpio preset '$expected' missing; linking to '$(basename "$actual")' (non-standard kernel flavor)."
