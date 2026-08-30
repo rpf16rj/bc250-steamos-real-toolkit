@@ -1,16 +1,12 @@
 diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
---- a/b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-30 01:56:25.158033201 -0300
-+++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-30 02:02:04.298333309 -0300
-@@ -165,6 +165,23 @@
+--- a/b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-30 02:16:57.882746749 -0300
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-30 02:17:41.806045807 -0300
+@@ -165,6 +165,19 @@
  /* Maximum backlight level. */
  #define AMDGPU_MAX_BL_LEVEL 0xFFFF
  
 +/*
-+ * Force YCbCr 4:4:4 pixel encoding on DP to HDMI PCON dongles. The stock
-+ * driver only selects YCbCr 4:4:4 for native HDMI signals; a PCON presents
-+ * as DisplayPort and always gets RGB. When the TV's EDID advertises DC_Y444
-+ * and the PCON supports it, YCbCr 4:4:4 can produce 10-bit deep color where
-+ * 10-bit RGB fails bandwidth validation.
++ * Force YCbCr 4:4:4 pixel encoding on DP to HDMI PCON dongles.
 + */
 +static bool amdgpu_dm_force_ycbcr444;
 +module_param_named(force_ycbcr444, amdgpu_dm_force_ycbcr444, bool, 0644);
@@ -25,7 +21,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  /* ---------------------------------------------------------------------------
   *  FreeSync MCCS transition DDC/CI (deferred) helpers
   * ---------------------------------------------------------------------------
-@@ -6954,24 +6971,70 @@
+@@ -6954,24 +6967,52 @@
  convert_color_depth_from_display_info(const struct drm_connector *connector,
  				      bool is_y420, int requested_bpc)
  {
@@ -43,53 +39,38 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
 +
  	if (is_y420) {
  		bpc = 8;
- 
- 		/* Cap display bpc based on HDMI 2.0 HF-VSDB */
+-
+-		/* Cap display bpc based on HDMI 2.0 HF-VSDB */
 -		if (connector->display_info.hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_48)
 +		if (info->hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_48)
- 			bpc = 16;
--		else if (connector->display_info.hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_36)
++			bpc = 16;
 +		else if (info->hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_36)
- 			bpc = 12;
--		else if (connector->display_info.hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_30)
++			bpc = 12;
 +		else if (info->hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_30)
- 			bpc = 10;
++			bpc = 10;
 +	} else if (is_hdmi_pcon) {
-+		/*
-+		 * The downstream sink is HDMI even though DRM exposes DP.
-+		 * Use the HDMI CTA deep-color flags from the EDID, not the
-+		 * generic display_info.bpc which may not reflect deep color
-+		 * for DP connectors. For YCbCr 4:4:4, use
-+		 * edid_hdmi_ycbcr444_dc_modes; for RGB, use
-+		 * edid_hdmi_rgb444_dc_modes.
-+		 */
 +		u8 dc_modes = amdgpu_dm_force_ycbcr444 ?
 +			info->edid_hdmi_ycbcr444_dc_modes :
 +			info->edid_hdmi_rgb444_dc_modes;
-+
 +		bpc = 8;
 +		if (dc_modes & DRM_EDID_HDMI_DC_48)
-+			bpc = 16;
+ 			bpc = 16;
+-		else if (connector->display_info.hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_36)
 +		else if (dc_modes & DRM_EDID_HDMI_DC_36)
-+			bpc = 12;
+ 			bpc = 12;
+-		else if (connector->display_info.hdmi.y420_dc_modes & DRM_EDID_YCBCR420_DC_30)
 +		else if (dc_modes & DRM_EDID_HDMI_DC_30)
-+			bpc = 10;
-+
+ 			bpc = 10;
 +		pr_info("amdgpu_dm: PCON bpc from dc_modes=0x%x -> %d (rgb_dc=0x%x y444_dc=0x%x info_bpc=%u)\n",
 +			dc_modes, bpc, info->edid_hdmi_rgb444_dc_modes,
 +			info->edid_hdmi_ycbcr444_dc_modes, info->bpc);
  	} else {
 -		bpc = (uint8_t)connector->display_info.bpc;
+-		/* Assume 8 bpc by default if no bpc is specified. */
 +		bpc = (uint8_t)info->bpc;
- 		/* Assume 8 bpc by default if no bpc is specified. */
  		bpc = bpc ? bpc : 8;
  	}
  
-+	/*
-+	 * Floor the color depth at the user-specified minimum.
-+	 * This prevents silent fallback to 8-bit when the validation
-+	 * loop reduces requested_bpc due to bandwidth constraints.
-+	 */
 +	if (amdgpu_dm_force_min_bpc && !is_y420) {
 +		bpc = max_t(u8, bpc, (u8)amdgpu_dm_force_min_bpc);
 +		bpc = bpc - (bpc & 1);
@@ -100,7 +81,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  	if (requested_bpc > 0) {
  		/*
  		 * Cap display bpc based on the user requested value.
-@@ -7171,7 +7234,11 @@
+@@ -7171,7 +7212,11 @@
  			&& (aconnector->force_yuv_pixel_format == PIXEL_ENCODING_YCBCR422
  			|| aconnector->force_yuv422_output))
  		timing_out->pixel_encoding = PIXEL_ENCODING_YCBCR422;
@@ -113,7 +94,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  			&& (stream->signal == SIGNAL_TYPE_HDMI_TYPE_A ||
  			    stream->signal == SIGNAL_TYPE_HDMI_FRL)
  			&& aconnector
-@@ -7185,6 +7252,9 @@
+@@ -7185,6 +7230,9 @@
  		connector,
  		(timing_out->pixel_encoding == PIXEL_ENCODING_YCBCR420),
  		requested_bpc);
@@ -123,7 +104,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  	timing_out->scan_type = SCANNING_TYPE_NODATA;
  	timing_out->hdmi_vic = 0;
  
-@@ -8620,6 +8690,20 @@
+@@ -8620,6 +8668,20 @@
  	     aconnector->dc_link->dpcd_caps.dongle_type == DISPLAY_DONGLE_DP_HDMI_CONVERTER))
  		bpc_limit = 8;
  
@@ -144,7 +125,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  	do {
  		drm_dbg_kms(connector->dev, "Trying with %d bpc\n", requested_bpc);
  		stream = create_stream_for_sink(connector, drm_mode,
-@@ -8642,6 +8726,10 @@
+@@ -8642,6 +8704,10 @@
  			dc_result = dm_validate_stream_and_context(adev->dm.dc, stream);
  
  		if (dc_result != DC_OK) {
@@ -155,16 +136,10 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  			drm_dbg_kms(connector->dev, "Pruned mode %d x %d (clk %d) %s %s -- %s\n",
  				      drm_mode->hdisplay,
  				      drm_mode->vdisplay,
-@@ -8666,6 +8754,24 @@
+@@ -8666,6 +8732,18 @@
  	 */
  	case DC_FAIL_ENC_VALIDATE:
  	case DC_EXCEED_DONGLE_CAP:
-+		/*
-+		 * Before falling back to bandwidth-reducing 4:2:2 / 4:2:0,
-+		 * try YCbCr 4:4:4 if we haven't already. Some PCONs handle
-+		 * 10-bit YCbCr 4:4:4 where 10-bit RGB fails validation, and
-+		 * 4:4:4 preserves full chroma resolution unlike 4:2:2.
-+		 */
 +		if (aconnector &&
 +		    !amdgpu_dm_force_ycbcr444 &&
 +		    !(aconnector->force_yuv422_output ||
@@ -182,8 +157,8 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  		if (aconnector->force_yuv422_output && aconnector->force_yuv420_output)
 
 diff --git a/drivers/gpu/drm/amd/display/dc/link/link_validation.c b/drivers/gpu/drm/amd/display/dc/link/link_validation.c
---- a/b/drivers/gpu/drm/amd/display/dc/link/link_validation.c	2026-08-30 01:56:25.160521662 -0300
-+++ b/drivers/gpu/drm/amd/display/dc/link/link_validation.c	2026-08-30 02:02:36.239355110 -0300
+--- a/b/drivers/gpu/drm/amd/display/dc/link/link_validation.c	2026-08-30 02:16:57.886390458 -0300
++++ b/drivers/gpu/drm/amd/display/dc/link/link_validation.c	2026-08-30 02:18:14.436250637 -0300
 @@ -76,6 +76,12 @@
  
  	if (dpcd_caps->dongle_type == DISPLAY_DONGLE_DP_HDMI_CONVERTER &&
@@ -199,17 +174,12 @@ diff --git a/drivers/gpu/drm/amd/display/dc/link/link_validation.c b/drivers/gpu
  		case PIXEL_ENCODING_RGB:
 
 diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
---- a/b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c	2026-08-30 01:56:25.162733445 -0300
-+++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c	2026-08-30 02:01:29.377750257 -0300
-@@ -1168,6 +1168,30 @@
+--- a/b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c	2026-08-30 02:16:57.889226292 -0300
++++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c	2026-08-30 02:18:42.410546812 -0300
+@@ -1168,6 +1168,25 @@
  
  	/* decode converter info*/
  	if (!ds_port.fields.PORT_PRESENT) {
-+		/*
-+		 * CH7218 PCON quirk: some firmware reports no downstream port
-+		 * at DPCD 0x005, but the device identity and EDID describe a
-+		 * DP-to-HDMI 2.1 PCON. Restore the documented converter caps.
-+		 */
 +		if (link->dpcd_caps.branch_dev_id == DP_BRANCH_DEVICE_ID_2B02F0 &&
 +				!memcmp(link->dpcd_caps.branch_dev_name, "CH7218",
 +					sizeof(link->dpcd_caps.branch_dev_name)) &&
@@ -232,16 +202,11 @@ diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c 
  		link->dpcd_caps.dongle_type = DISPLAY_DONGLE_NONE;
  		set_dongle_type(link->ddc,
  				link->dpcd_caps.dongle_type);
-@@ -1202,7 +1226,28 @@
+@@ -1202,7 +1221,23 @@
  			switch (port_caps->bits.DWN_STRM_PORTX_TYPE) {
  			/*Handle DP case as DONGLE_NONE*/
  			case DOWN_STREAM_DETAILED_DP:
 -				link->dpcd_caps.dongle_type = DISPLAY_DONGLE_NONE;
-+				/*
-+				 * CH7218 PCON quirk: some firmware reports the detailed
-+				 * downstream port as DP instead of HDMI, but the device is
-+				 * a DP-to-HDMI 2.1 PCON. Restore converter caps.
-+				 */
 +				if (link->dpcd_caps.branch_dev_id == DP_BRANCH_DEVICE_ID_2B02F0 &&
 +						!memcmp(link->dpcd_caps.branch_dev_name, "CH7218",
 +							sizeof(link->dpcd_caps.branch_dev_name)) &&
@@ -262,7 +227,7 @@ diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c 
  				break;
  			case DOWN_STREAM_DETAILED_VGA:
  				link->dpcd_caps.dongle_type =
-@@ -1228,6 +1273,16 @@
+@@ -1228,6 +1263,16 @@
  					link->dpcd_caps.dongle_caps.dp_hdmi_max_pixel_clk_in_khz =
  						det_caps[1] * 2500;
  
@@ -279,3 +244,16 @@ diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c 
  					link->dpcd_caps.dongle_caps.is_dp_hdmi_s3d_converter =
  						hdmi_caps.bits.FRAME_SEQ_TO_FRAME_PACK;
  					/*YCBCR capability only for HDMI case*/
+
+diff --git a/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c
+--- a/b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c	2026-08-30 02:16:57.891956495 -0300
++++ b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c	2026-08-30 02:18:59.360519863 -0300
+@@ -1331,6 +1331,8 @@
+ 
+ 	dc->caps.max_odm_combine_factor = 2;
+ 
++	dc->caps.dp_hdmi21_pcon_support = true;
++
+ 	dc->cap_funcs = cap_funcs;
+ 
+ 	return true;
