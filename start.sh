@@ -2481,6 +2481,43 @@ audio_fix_ensure_hpd_debounce_grub_param() {
     print_info "Added amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB for HDMI HPD debounce."
 }
 
+# --- YCbCr 4:4:4 deep color for DP-HDMI PCON dongles -------------------------
+# The patched amdgpu.ko includes module params amdgpu.force_ycbcr444 and
+# amdgpu.force_min_bpc. These are set via modprobe.d since SteamOS's
+# steamenv_boot filters unknown params from the GRUB command line.
+
+YCBCR444_MODPROBE_FILE="/etc/modprobe.d/amdgpu-ycbcr444.conf"
+
+ycbcr444_modprobe_installed() {
+    [[ -f "$YCBCR444_MODPROBE_FILE" ]] && \
+    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
+}
+
+ycbcr444_ensure_modprobe() {
+    if ycbcr444_modprobe_installed; then
+        return 0
+    fi
+    steamos_writable "
+        mkdir -p /etc/modprobe.d
+        echo 'options amdgpu force_ycbcr444=1 force_min_bpc=10' > \"$YCBCR444_MODPROBE_FILE\"
+    " || {
+        print_info "Failed to create $YCBCR444_MODPROBE_FILE. Create it manually."
+        return 0
+    }
+    print_info "Created $YCBCR444_MODPROBE_FILE with force_ycbcr444=1 force_min_bpc=10."
+    print_info "Rebuild initramfs with: sudo mkinitcpio -P"
+    steamos_writable "mkinitcpio -P" 2>/dev/null || true
+}
+
+ycbcr444_remove_modprobe() {
+    if ! ycbcr444_modprobe_installed; then
+        return 0
+    fi
+    steamos_writable "rm -f \"$YCBCR444_MODPROBE_FILE\"" 2>/dev/null || true
+    print_info "Removed $YCBCR444_MODPROBE_FILE. Rebuild initramfs and reboot to apply."
+    steamos_writable "mkinitcpio -P" 2>/dev/null || true
+}
+
 audio_fix_remove_pcon_grub_param() {
     if ! audio_fix_pcon_grub_installed; then
         return 0
@@ -2695,6 +2732,15 @@ run_revert_audio_fix() {
             audio_fix_remove_hpd_debounce_grub_param
         else
             print_info "HPD debounce param kept. Remove manually if no longer needed."
+        fi
+    fi
+
+    if ycbcr444_modprobe_installed; then
+        echo ""
+        if confirm "Also remove YCbCr 4:4:4 deep color modprobe.d config?"; then
+            ycbcr444_remove_modprobe
+        else
+            print_info "YCbCr 4:4:4 config kept. Remove $YCBCR444_MODPROBE_FILE manually if no longer needed."
         fi
     fi
 }
@@ -3730,6 +3776,21 @@ install_combined_fix() {
         audio_fix_ensure_hpd_debounce_grub_param
     else
         print_info "Skipped HPD debounce param. Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 manually if needed."
+    fi
+
+    echo ""
+    echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color for DP-HDMI PCON${RESET}"
+    echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + 10-bit minimum on DP→HDMI adapters.${RESET}"
+    echo -e "  ${DIM}Eliminates color banding on TVs that support HDMI deep color (DC_Y444).${RESET}"
+    echo -e "  ${DIM}Requires a DP-HDMI PCON dongle and a TV with YCbCr 4:4:4 deep color support.${RESET}"
+    echo -e "  ${DIM}Max refresh at 1440p: 60 Hz (TMDS bandwidth limit). 120 Hz at 1080p.${RESET}"
+    echo ""
+    if ycbcr444_modprobe_installed; then
+        print_info "YCbCr 4:4:4 deep color is already enabled (modprobe.d config present)."
+    elif confirm "Enable YCbCr 4:4:4 deep color for DP-HDMI PCON output?"; then
+        ycbcr444_ensure_modprobe
+    else
+        print_info "Skipped YCbCr 4:4:4. Enable manually with: echo 'options amdgpu force_ycbcr444=1 force_min_bpc=10' > $YCBCR444_MODPROBE_FILE"
     fi
 }
 

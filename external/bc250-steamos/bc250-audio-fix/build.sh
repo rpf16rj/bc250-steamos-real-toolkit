@@ -311,7 +311,8 @@ git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/display/dc/dio/dcn20/dcn20_stream_encoder.h \
     drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c \
     drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c \
-    drivers/gpu/drm/amd/display/dc/link/link_detection.c
+    drivers/gpu/drm/amd/display/dc/link/link_detection.c \
+    drivers/gpu/drm/amd/display/dc/link/link_validation.c
 
 if [ "$WITH_AUDIO" = 1 ]; then
     step "apply DP-audio patch (runbook step 7)"
@@ -481,6 +482,17 @@ elif patch -p1 --dry-run --fuzz=3 -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
     echo "KFD flush-TLB-by-runlist patch applied"
 else
     die "KFD flush-TLB-by-runlist patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+fi
+
+step "apply DP-HDMI YCbCr 4:4:4 deep color patch (PCON color quality)"
+YCBCR444_PATCH=$HERE/bc250-dp-hdmi-ycbcr444-deep-color.patch
+if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
+    echo "DP-HDMI YCbCr 4:4:4 deep color patch already applied"
+elif patch -p1 --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
+    patch -p1 --fuzz=3 -s < "$YCBCR444_PATCH"
+    echo "DP-HDMI YCbCr 4:4:4 deep color patch applied"
+else
+    die "DP-HDMI YCbCr 4:4:4 deep color patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
 fi
 
 step "modules_prepare + config re-verify (runbook step 7)"
