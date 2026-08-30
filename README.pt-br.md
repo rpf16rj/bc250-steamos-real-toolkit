@@ -10,24 +10,54 @@
 
 🇺🇸 Prefer English? Read the [README.md](./README.md).
 
+---
+
 ## O que é isso?
 
-Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish / GFX1013) rodando o **SteamOS de verdade** — não é um port do CachyOS. Ele reúne ajuste de CPU/GPU, desbloqueio de unidades de computação, controle de sensores/fans e algumas correções feitas pela comunidade em um único script interativo, para você não precisar tocar no bootloader ou compilar nada manualmente.
+Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish / GFX1013) rodando o **SteamOS de verdade** — não é um port do CachyOS. Ele reúne ajuste de CPU/GPU, desbloqueio de unidades de computação, controle de sensores/fans, correções de display e áudio, e patches da comunidade em um único script interativo, para você não precisar tocar no bootloader ou compilar nada manualmente.
 
-## Principais Funcionalidades
+---
 
-- Governors de performance de CPU & GPU, com perfis prontos (Padrão → Extremo) ou combinações totalmente personalizadas
-- Desbloqueio de Compute Units (CU) — até 40 CUs em tempo real, com persistência após reiniciar
-- Desbloqueio de Núcleos de CPU — ⚠ experimental, 6c/12t → 8c/16t via escrita na mailbox da SMU, com serviço de reaplicação no boot
-- RAM/VRAM Split — UMA_SIZE=512MB dinâmico + teto do ttm.pages_limit elevado, libera quase toda a RAM de 16GB em idle
-- Alternância de mitigações de CPU (desabilitar/reabilitar)
-- Monitoramento de sensores e fans, com controle total de PWM opcional
-- Integração com CoolerControl para curvas de fan personalizadas via interface web
-- Plugin Decky Toolkit SteamOS Control pré-compilado, com controles automático/manual/gerenciado da Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
-- Controle de HDMI-CEC / TV e receiver
-- Codificação AC-3 Surround via HDMI — Dolby Digital 5.1 por HDMI/DP via eARC, antes impossível no SteamOS com o BC-250; funciona com qualquer adaptador DP-para-HDMI ativo
-- Correções feitas pela comunidade: estados de energia ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, correção da fila de compute GFX1013 (compute assíncrono, kernel + Mesa/RADV patchados com suporte a mesh shaders e FSR4 V3), fix do PS Button do DS5 Bridge (chord combos do DualSense via hid-playstation.ko patchado)
-- Instalação em um clique, atalho de área de trabalho automático, e lançamentos versionados com changelog — tudo totalmente reversível
+## Funcionalidades
+
+### Performance & Ajustes
+
+- **Governors de performance de CPU & GPU** — perfis prontos (Padrão → Extremo) ou combinações totalmente personalizadas
+- **Desbloqueio de Compute Units (CU)** — até 40 CUs em tempo real, com persistência após reiniciar
+- **Desbloqueio de Núcleos de CPU** — ⚠ experimental, 6c/12t → 8c/16t via escrita na mailbox da SMU, com serviço de reaplicação no boot
+- **RAM/VRAM Split** — UMA_SIZE=512MB dinâmico + teto do ttm.pages_limit elevado, libera quase toda a RAM de 16GB em idle
+- **Alternância de mitigações de CPU** — desabilitar/reabilitar mitigações Spectre/Meltdown para performance
+- **Swap & ZSWAP** — swapfile configurável + ZSWAP comprimido com lz4 substituindo ZRAM
+
+### Display & Áudio
+
+- **DP-HDMI YCbCr 4:4:4 Deep Color + HDMI 2.1 FRL** — força YCbCr 4:4:4 com deep color 10/12 bits em adaptadores PCON DP-HDMI (ex. Ugreen CH7218). Habilita HDMI 2.1 FRL a 48 Gbps para **1440p@120 12-bit** e **4K@60 12-bit**. Veja [docs/dp-hdmi-ycbcr444-frl.md](./docs/dp-hdmi-ycbcr444-frl.md) para tabelas de banda.
+- **Correção de clock de áudio/vídeo do DisplayPort** — corrige timing de áudio/vídeo DP e desabilita spread spectrum
+- **Codificação AC-3 Surround via HDMI** — Dolby Digital 5.1 por HDMI/DP via eARC, codificação nativa a52 sem latência
+- **Controle de HDMI-CEC / TV** — controle sua TV ou receiver via HDMI-CEC
+- **HPD debounce** — previne eventos espúrios de hot-plug detect quando a TV é ligada/desligada
+
+### Drivers & Correções
+
+- **Correção da fila de compute GFX1013** — compute assíncrono + Mesa/RADV patchadas com suporte a mesh/task shaders e FSR4 V3
+- **Correção de estados de energia ACPI** — tabelas ACPI C-/P-state corretas (compatíveis com 6c e 8c)
+- **Driver WiFi/BT AIC8800** — para dongles USB WiFi/BT AIC8800D80
+- **Firmware BE200 Wi-Fi 7** — para placas PCIe Intel BE200/BE201 sem ucode
+- **Fix do PS Button do DS5 Bridge** — chord combos do DualSense via hid-playstation.ko patchado
+- **DS5 Chord Config** — patch VDF para configuração de chords com QAM habilitado
+
+### Monitoramento & Controle
+
+- **Monitoramento de sensores e fans** — com controle total de PWM opcional
+- **Integração com CoolerControl** — curvas de fan personalizadas via interface web
+- **Plugin Decky pré-compilado** — Toolkit SteamOS Control com controles de Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
+- **CU/WGP Live Manager** — habilitar/desabilitar CU/WGP em tempo real sem reiniciar
+
+### Qualidade de Vida
+
+- **Instalação em um clique** — atalho de área de trabalho automático, lançamentos versionados com changelog
+- **Tudo totalmente reversível** — reverte componentes individuais ou tudo de uma vez
+- **Persistência após atualizações do SteamOS** — rastreia componentes instalados e reaplica após atualizações do sistema
 
 ## Sistema Compatível
 
@@ -49,6 +79,48 @@ sudo ./start.sh
 É só isso — o script pede `sudo` se necessário, cria um atalho na área de trabalho no primeiro uso, e guia você pelo resto a partir do próprio menu.
 
 Para atualizar depois, baixe o zip da release mais nova, extraia por cima da pasta antiga (ou em uma pasta nova), e rode o `start.sh` de novo — veja o aviso acima sobre o `Install All`.
+
+---
+
+## Troubleshooting
+
+### Depois de uma atualização do SteamOS, algo parou de funcionar
+
+Atualizações do SteamOS podem substituir o kernel, módulos e configuração de boot. Rode **Install All** no menu do toolkit para reaplicar todos os patches. Se a versão do kernel mudou, o Combined Fix vai recompilar o `amdgpu.ko` para o novo kernel automaticamente.
+
+### Sem vídeo após reiniciar (Combined Fix)
+
+O toolkit inclui guardas de vermagic e ABI que recusam instalar um módulo incompatível. Se o build falhar, o `amdgpu.ko` original permanece intacto e seu display deve funcionar. Se ainda assim não houver vídeo:
+
+1. Inicie no Modo Desktop (ou conecte via SSH)
+2. Rode `sudo ./start.sh` → Revert Combined Fix
+3. Reinicie
+
+### Temperatura da GPU aparece como 0
+
+No kernel 7.x com 8 núcleos desbloqueados e BIOS stock (sem patch de SMU), adicione `amdgpu.cs_legacy_8core_metrics=1` ao GRUB. O toolkit pergunta isso durante a instalação.
+
+### Adaptador DP-HDMI: sem deep color / banding de cor
+
+1. Verifique se o Combined Fix está instalado (o patch está sempre ativo em todo build)
+2. Verifique se `/etc/modprobe.d/amdgpu-ycbcr444.conf` existe com `force_ycbcr444=1 force_min_bpc=10 dcfeaturemask=0x402`
+3. Reinicie e verifique: `sudo dmesg | grep -iE "FRL PCON|frl_bw|CH7218"`
+4. Você deve ver `frl_bw=48000000` — se `frl_bw=0`, o FRL feature mask ou o quirk do PCON não está ativo
+5. Veja [docs/dp-hdmi-ycbcr444-frl.md](./docs/dp-hdmi-ycbcr444-frl.md) para tabelas completas de banda
+
+### DP-HDMI: não consigo 4K@120 com 4:4:4
+
+Isso é uma limitação de hardware. O link DisplayPort 1.4 do BC-250 fornece 25.14 Gbps (HBR3, 4 lanes). 4K@120 10-bit 4:4:4 requer ~35.6 Gbps — excedendo a capacidade do DP 1.4. Use 4K@60 12-bit 4:4:4, 1440p@120 12-bit 4:4:4, ou 4K@120 com YCbCr 4:2:0.
+
+### Travamentos ou reinicializações aleatórias sob carga
+
+Se estiver rodando 8 núcleos + 40 CUs, sua fonte pode estar subdimensionada. Tente o perfil **Mild (undervolt)** primeiro. Se os travamentos persistirem, reverta para 6c/12t + 32 CUs e teste a estabilidade.
+
+### Build falha após atualização do SteamOS
+
+Rode `sudo ./ensure-build-prereqs.sh` para restaurar headers removidos e dependências de build. O toolkit faz isso automaticamente durante o Install All, mas rodar manualmente pode ajudar a diagnosticar problemas.
+
+---
 
 ## Agradecimentos
 
@@ -72,18 +144,45 @@ Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um 
 
 Sem o trabalho deles, nada disso seria possível. 🙏
 
+---
+
 ## Changelog
 
 Veja o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md) para o histórico completo de versões (ou [CHANGELOG.md](./CHANGELOG.md) em inglês).
+
+---
 
 ## Licença
 
 Estes scripts são baseados em trabalho da comunidade para o BC-250. Use por sua conta e risco.
 
+---
+
 ## Comunidade
 
 Tem dúvidas, encontrou algum problema, ou só quer trocar uma ideia sobre o BC-250? Entre no nosso [Discord](https://discord.com/channels/1315924807128449065/).
 
-## Apoie o projeto
+---
 
-Se este toolkit te economizou tempo, considere me pagar um café: [buymeacoffee.com/rpf16rj](https://buymeacoffee.com/rpf16rj) ☕
+## Apoie o Projeto
+
+Se este toolkit te economizou tempo, te ajudou a tirar o máximo do seu BC-250, ou simplesmente facilitou sua vida, considere apoiar o desenvolvimento contínuo:
+
+### ☕ Buy Me a Coffee
+
+[**buymeacoffee.com/rpf16rj**](https://buymeacoffee.com/rpf16rj)
+
+Seu apoio ajuda a cobrir:
+
+- **Custos de hardware** — adaptadores, dongles e equipamentos de teste para desenvolvimento contínuo
+- **Tempo investido** — engenharia reversa de quirks de PCON, debugging de patches de kernel, testes em diferentes configurações
+- **Infraestrutura** — CI/CD, hospedagem de releases e documentação
+
+Cada contribuição — grande ou pequena — financia diretamente a próxima feature, correção ou atualização de compatibilidade. Obrigado! 🙏
+
+### Outras Formas de Ajudar
+
+- ⭐ **Dê uma estrela no repo** — ajuda outros a descobrirem o toolkit
+- 🐛 **Reporte bugs** — abra uma issue com logs de diagnóstico e detalhes do sistema
+- 💬 **Compartilhe seu setup** — deixe a comunidade saber o que funciona (e o que não funciona)
+- 🔀 **Contribua** — PRs são bem-vindos para novas correções, drivers ou melhorias

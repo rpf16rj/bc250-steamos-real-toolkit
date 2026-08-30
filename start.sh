@@ -498,7 +498,7 @@ run_with_retry() {
             # Clean AUR cache on validity-check failures to avoid stale downloads
             if echo "$output" | grep -qiE "validity check|did not pass"; then
                 local pkg
-                pkg=$(echo "$output" | grep -oiE "cyan-skillfish-governor[a-z-]*" | head -1)
+                pkg=$(echo "$output" | grep -oiE "cyan-skillfish-governor[a-z-]*" | head -1) || true
                 [[ -n "$pkg" ]] && aur_clean_cache "$pkg"
             fi
             prompt_retry_or_abort "$context" || return 1
@@ -1527,7 +1527,7 @@ sensors_active_driver() {
 
 detect_kernel_headers_package() {
     local kernel_pkg
-    kernel_pkg=$(pacman -Qoq "/usr/lib/modules/$(uname -r)" 2>/dev/null | head -1)
+    kernel_pkg=$(pacman -Qoq "/usr/lib/modules/$(uname -r)" 2>/dev/null | head -1) || true
     [[ -z "$kernel_pkg" ]] && return 1
     echo "${kernel_pkg}-headers"
 }
@@ -2415,7 +2415,7 @@ audio_fix_ensure_mkinitcpio_preset() {
     [[ -e "$expected" ]] && return 0
 
     local actual
-    actual=$(compgen -G "/etc/mkinitcpio.d/linux-neptune-6*.preset" | head -1)
+    actual=$(compgen -G "/etc/mkinitcpio.d/linux-neptune-6*.preset" 2>/dev/null | head -1) || true
     [[ -n "$actual" ]] || return 0
 
     print_info "mkinitcpio preset '$expected' missing; linking to '$(basename "$actual")' (non-standard kernel flavor)."
@@ -2792,7 +2792,7 @@ install_ds5_chord_vdf() {
         print_info "Steam PS5 chord config not found yet — will be applied on next Steam restart."
         # Install to a well-known location; Steam will pick it up when it creates the config
         local steam_id
-        steam_id="$(ls "$steam_cfg" 2>/dev/null | head -1)"
+        steam_id="$(ls "$steam_cfg" 2>/dev/null | head -1)" || true
         if [[ -n "$steam_id" ]]; then
             local dest_dir="$steam_cfg/$steam_id/config/443510"
             mkdir -p "$dest_dir"
@@ -4019,7 +4019,7 @@ install_be200_firmware() {
         cd "$workdir"
         ar x "$deb_file" 2>/dev/null || { echo "ERROR: ar extraction failed" >&2; exit 1; }
         local data_tar
-        data_tar=$(ls data.tar.* 2>/dev/null | head -1)
+        data_tar=$(ls data.tar.* 2>/dev/null | head -1) || true
         [[ -n "$data_tar" ]] || { echo "ERROR: no data.tar found" >&2; exit 1; }
         tar -xf "$data_tar" 2>/dev/null || true
     ) || {
