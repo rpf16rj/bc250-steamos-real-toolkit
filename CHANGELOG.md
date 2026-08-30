@@ -7,6 +7,31 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.8.1 — 2026-08-30
+
+- **Added:** **DP-HDMI YCbCr 4:4:4 deep color + HDMI 2.1 FRL** support for
+  PCON dongles (e.g. Ugreen CH7218). The patched amdgpu.ko now includes:
+  - `amdgpu.force_ycbcr444=1` — forces YCbCr 4:4:4 pixel encoding on DP-HDMI
+    PCON outputs (stock driver only sends RGB over DP).
+  - `amdgpu.force_min_bpc=10` — floors color depth at 10-bit minimum,
+    preventing silent 8-bit fallback during bandwidth validation.
+  - `amdgpu.dcfeaturemask=0x402` — enables DC_FRL_MASK (HDMI 2.1 FRL) which
+    is disabled by default in kernel 7.2.
+  - CH7218 PCON quirk — restores FRL 48 Gbps capability when the dongle
+    reports a malformed downstream port topology.
+  - `dp_hdmi21_pcon_support=true` on DCN201 (Van Gogh) — was missing in the
+    stock kernel, preventing FRL capability parsing.
+  - Deep color from HDMI CTA EDID flags (`edid_hdmi_ycbcr444_dc_modes` /
+    `edid_hdmi_rgb444_dc_modes`) instead of generic `display_info.bpc`.
+- **Added:** Toolkit prompt for YCbCr 4:4:4 + FRL at the end of the Combined
+  Fix installation (creates `/etc/modprobe.d/amdgpu-ycbcr444.conf` and
+  rebuilds initramfs automatically).
+- **Added:** Documentation at `docs/dp-hdmi-ycbcr444-frl.md` with bandwidth
+  tables and troubleshooting guide.
+- **Result:** With a CH7218 PCON dongle and a deep-color-capable TV,
+  **1440p@120 12-bit YCbCr 4:4:4** and **4K@60 12-bit YCbCr 4:4:4** are now
+  possible. 4K@120 4:4:4 is limited by DP 1.4 bandwidth (25.14 Gbps).
+
 ## v1.8.0 — 2026-08-29
 
 - **Added:** Support for **SteamOS 3.10 with kernel 7.2** (Valve Neptune).
