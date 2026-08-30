@@ -153,7 +153,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  			drm_dbg_kms(connector->dev, "Pruned mode %d x %d (clk %d) %s %s -- %s\n",
  				      drm_mode->hdisplay,
  				      drm_mode->vdisplay,
-@@ -8666,7 +8732,20 @@
+@@ -8666,6 +8732,21 @@
  	 */
  	case DC_FAIL_ENC_VALIDATE:
  	case DC_EXCEED_DONGLE_CAP:
@@ -170,7 +170,8 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
 +			if (stream)
 +				return stream;
 +		}
- 	case DC_NO_DP_LINK_BANDWIDTH:
++		fallthrough;
++	case DC_NO_DP_LINK_BANDWIDTH:
  		/* recursively entered twice and already tried both YUV422 and YUV420 */
  		if (aconnector->force_yuv422_output && aconnector->force_yuv420_output)
 
