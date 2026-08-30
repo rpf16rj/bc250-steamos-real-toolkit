@@ -1,6 +1,6 @@
 diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
---- a/b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-30 02:16:57.882746749 -0300
-+++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-30 02:17:41.806045807 -0300
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-30 02:29:24.836356782 -0300
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2026-08-30 02:29:54.694348187 -0300
 @@ -165,6 +165,19 @@
  /* Maximum backlight level. */
  #define AMDGPU_MAX_BL_LEVEL 0xFFFF
@@ -157,8 +157,8 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  		if (aconnector->force_yuv422_output && aconnector->force_yuv420_output)
 
 diff --git a/drivers/gpu/drm/amd/display/dc/link/link_validation.c b/drivers/gpu/drm/amd/display/dc/link/link_validation.c
---- a/b/drivers/gpu/drm/amd/display/dc/link/link_validation.c	2026-08-30 02:16:57.886390458 -0300
-+++ b/drivers/gpu/drm/amd/display/dc/link/link_validation.c	2026-08-30 02:18:14.436250637 -0300
+--- a/drivers/gpu/drm/amd/display/dc/link/link_validation.c	2026-08-30 02:29:24.840765794 -0300
++++ b/drivers/gpu/drm/amd/display/dc/link/link_validation.c	2026-08-30 02:30:29.314808117 -0300
 @@ -76,6 +76,12 @@
  
  	if (dpcd_caps->dongle_type == DISPLAY_DONGLE_DP_HDMI_CONVERTER &&
@@ -172,10 +172,21 @@ diff --git a/drivers/gpu/drm/amd/display/dc/link/link_validation.c b/drivers/gpu
  		/* Check Pixel Encoding */
  		switch (timing->pixel_encoding) {
  		case PIXEL_ENCODING_RGB:
+@@ -503,6 +509,10 @@
+ 
+ 	req_bw = dc_bandwidth_in_kbps_from_timing(timing, dc_link_get_highest_encoding_format(link));
+ 	max_bw = dp_link_bandwidth_kbps(link, link_setting);
++	printk(KERN_INFO "amdgpu_dm: dp_validate req_bw=%u max_bw=%u link_rate=%d lanes=%d encoding=%d pix_clk=%d depth=%d enc=%d\n",
++		req_bw, max_bw, link_setting->link_rate, link_setting->lane_count,
++		dc_link_get_highest_encoding_format(link),
++		timing->pix_clk_100hz, timing->display_color_depth, timing->pixel_encoding);
+ 	uint32_t max_uncompressed_pixel_rate_100hz =
+ 		link->dpcd_caps.max_uncompressed_pixel_rate_cap.bits.max_uncompressed_pixel_rate_cap * 10000U;
+ 
 
 diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
---- a/b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c	2026-08-30 02:16:57.889226292 -0300
-+++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c	2026-08-30 02:18:42.410546812 -0300
+--- a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c	2026-08-30 02:29:24.844836484 -0300
++++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c	2026-08-30 02:29:54.695617119 -0300
 @@ -1168,6 +1168,25 @@
  
  	/* decode converter info*/
@@ -246,8 +257,8 @@ diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c 
  					/*YCBCR capability only for HDMI case*/
 
 diff --git a/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c
---- a/b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c	2026-08-30 02:16:57.891956495 -0300
-+++ b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c	2026-08-30 02:18:59.360519863 -0300
+--- a/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c	2026-08-30 02:29:24.848384727 -0300
++++ b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c	2026-08-30 02:29:54.696047261 -0300
 @@ -1331,6 +1331,8 @@
  
  	dc->caps.max_odm_combine_factor = 2;
