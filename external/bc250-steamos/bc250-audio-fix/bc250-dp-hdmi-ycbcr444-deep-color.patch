@@ -21,7 +21,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  /* ---------------------------------------------------------------------------
   *  FreeSync MCCS transition DDC/CI (deferred) helpers
   * ---------------------------------------------------------------------------
-@@ -6954,24 +6967,52 @@
+@@ -6954,24 +6967,54 @@
  convert_color_depth_from_display_info(const struct drm_connector *connector,
  				      bool is_y420, int requested_bpc)
  {
@@ -83,7 +83,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  	if (requested_bpc > 0) {
  		/*
  		 * Cap display bpc based on the user requested value.
-@@ -7171,7 +7212,11 @@
+@@ -7171,7 +7212,12 @@
  			&& (aconnector->force_yuv_pixel_format == PIXEL_ENCODING_YCBCR422
  			|| aconnector->force_yuv422_output))
  		timing_out->pixel_encoding = PIXEL_ENCODING_YCBCR422;
@@ -97,7 +97,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  			&& (stream->signal == SIGNAL_TYPE_HDMI_TYPE_A ||
  			    stream->signal == SIGNAL_TYPE_HDMI_FRL)
  			&& aconnector
-@@ -7185,6 +7230,9 @@
+@@ -7185,6 +7230,10 @@
  		connector,
  		(timing_out->pixel_encoding == PIXEL_ENCODING_YCBCR420),
  		requested_bpc);
@@ -108,7 +108,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  	timing_out->scan_type = SCANNING_TYPE_NODATA;
  	timing_out->hdmi_vic = 0;
  
-@@ -8620,6 +8668,20 @@
+@@ -8620,5 +8668,33 @@
  	     aconnector->dc_link->dpcd_caps.dongle_type == DISPLAY_DONGLE_DP_HDMI_CONVERTER))
  		bpc_limit = 8;
  
@@ -142,7 +142,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
 +	do {
  		drm_dbg_kms(connector->dev, "Trying with %d bpc\n", requested_bpc);
  		stream = create_stream_for_sink(connector, drm_mode,
-@@ -8642,6 +8704,10 @@
+@@ -8642,6 +8704,11 @@
  			dc_result = dm_validate_stream_and_context(adev->dm.dc, stream);
  
  		if (dc_result != DC_OK) {
@@ -154,7 +154,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  			drm_dbg_kms(connector->dev, "Pruned mode %d x %d (clk %d) %s %s -- %s\n",
  				      drm_mode->hdisplay,
  				      drm_mode->vdisplay,
-@@ -8666,6 +8732,18 @@
+@@ -8666,7 +8732,20 @@
  	 */
  	case DC_FAIL_ENC_VALIDATE:
  	case DC_EXCEED_DONGLE_CAP:
@@ -191,7 +191,7 @@ diff --git a/drivers/gpu/drm/amd/display/dc/link/link_validation.c b/drivers/gpu
  		/* Check Pixel Encoding */
  		switch (timing->pixel_encoding) {
  		case PIXEL_ENCODING_RGB:
-@@ -503,6 +509,10 @@
+@@ -503,7 +509,11 @@
  
  	req_bw = dc_bandwidth_in_kbps_from_timing(timing, dc_link_get_highest_encoding_format(link));
  	max_bw = dp_link_bandwidth_kbps(link, link_setting);
@@ -257,7 +257,7 @@ diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c 
  				break;
  			case DOWN_STREAM_DETAILED_VGA:
  				link->dpcd_caps.dongle_type =
-@@ -1228,6 +1263,16 @@
+@@ -1228,7 +1263,17 @@
  					link->dpcd_caps.dongle_caps.dp_hdmi_max_pixel_clk_in_khz =
  						det_caps[1] * 2500;
  
