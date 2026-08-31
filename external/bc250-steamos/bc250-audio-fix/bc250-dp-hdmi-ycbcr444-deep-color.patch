@@ -83,16 +83,40 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  	if (requested_bpc > 0) {
  		/*
  		 * Cap display bpc based on the user requested value.
-@@ -7171,7 +7212,12 @@
+@@ -7171,7 +7212,36 @@
  			&& (aconnector->force_yuv_pixel_format == PIXEL_ENCODING_YCBCR422
  			|| aconnector->force_yuv422_output))
  		timing_out->pixel_encoding = PIXEL_ENCODING_YCBCR422;
 -	else if ((connector->display_info.color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
-+	else if (amdgpu_dm_force_ycbcr444 && aconnector) {
-+		timing_out->pixel_encoding = PIXEL_ENCODING_YCBCR444;
-+		drm_dbg_kms(connector->dev,
-+			"force_ycbcr444=Y -> YCBCR444 (signal=%d dongle=%d)\n",
-+			stream->signal, aconnector->dc_link ? aconnector->dc_link->dpcd_caps.dongle_type : -1);
++	else if (amdgpu_dm_force_ycbcr444 && aconnector &&
++			(stream->signal == SIGNAL_TYPE_HDMI_TYPE_A ||
++			 stream->signal == SIGNAL_TYPE_HDMI_FRL)) {
++		/*
++		 * Only force YCbCr 4:4:4 when the mode fits within PCON bandwidth.
++		 * TMDS limit: 340 MHz pixel clock (HDMI 2.0).
++		 * FRL limit: check against dongle's FRL max bandwidth if available.
++		 * For high-bandwidth modes (e.g. 4K60), let the driver fall back
++		 * to 4:2:0 naturally instead of forcing 4:4:4 and losing sync.
++		 */
++		bool pcon_has_bw = false;
++		u32 pix_clk_khz = timing_out->pix_clk_100hz / 10;
++		if (stream->signal == SIGNAL_TYPE_HDMI_FRL && aconnector->dc_link) {
++			u32 frl_bw = aconnector->dc_link->dpcd_caps.dongle_caps.dp_hdmi_frl_max_link_bw_in_kbps;
++			pcon_has_bw = (frl_bw > 0);
++		} else {
++			pcon_has_bw = (pix_clk_khz <= 340000);
++		}
++		if (pcon_has_bw) {
++			timing_out->pixel_encoding = PIXEL_ENCODING_YCBCR444;
++			drm_dbg_kms(connector->dev,
++				"force_ycbcr444=Y -> YCBCR444 (signal=%d dongle=%d pix_clk=%u)\n",
++				stream->signal, aconnector->dc_link ? aconnector->dc_link->dpcd_caps.dongle_type : -1,
++				pix_clk_khz);
++		} else {
++			drm_dbg_kms(connector->dev,
++				"force_ycbcr444=Y but pix_clk=%u exceeds PCON bandwidth, letting driver decide\n",
++				pix_clk_khz);
++		}
 +	} else if ((connector->display_info.color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR444))
  			&& (stream->signal == SIGNAL_TYPE_HDMI_TYPE_A ||
  			    stream->signal == SIGNAL_TYPE_HDMI_FRL)
@@ -153,7 +177,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  			drm_dbg_kms(connector->dev, "Pruned mode %d x %d (clk %d) %s %s -- %s\n",
  				      drm_mode->hdisplay,
  				      drm_mode->vdisplay,
-@@ -8666,6 +8732,21 @@
+@@ -8666,6 +8732,20 @@
  	 */
  	case DC_FAIL_ENC_VALIDATE:
  	case DC_EXCEED_DONGLE_CAP:
@@ -171,8 +195,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
 +				return stream;
 +		}
 +		fallthrough;
-+	case DC_NO_DP_LINK_BANDWIDTH:
- 		/* recursively entered twice and already tried both YUV422 and YUV420 */
+ 	case DC_NO_DP_LINK_BANDWIDTH:		/* recursively entered twice and already tried both YUV422 and YUV420 */
  		if (aconnector->force_yuv422_output && aconnector->force_yuv420_output)
 
 diff --git a/drivers/gpu/drm/amd/display/dc/link/link_validation.c b/drivers/gpu/drm/amd/display/dc/link/link_validation.c
