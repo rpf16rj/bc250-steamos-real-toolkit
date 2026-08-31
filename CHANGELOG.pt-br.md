@@ -7,6 +7,20 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.8.2 — 2026-08-31
+
+- **Corrigido:** Instalação do CPU Governor não falha mais no SteamOS Main quando
+  `python-pipx` não está disponível via pacman — agora faz fallback para `pip3 install pipx`.
+- **Corrigido:** Prompt de telemetria (`cs_legacy_8core_metrics=1`) agora aparece
+  durante a instalação manual do Combined Fix no kernel 7.x. Antes era pulado
+  porque `nproc` retornava apenas os núcleos ativados (Core Unlock pode não ter
+  sido aplicado ainda).
+- **Corrigido:** Patch YCbCr 4:4:4 deep color agora é ignorado em kernels < 7.x
+  (foi escrito para 7.2 apenas e causava erro fatal de build no 6.18).
+- **Corrigido:** Três erros de compilação no patch YCbCr 4:4:4 (cabeçalhos de
+  hunk malformados, `DC_LOG_DC` usado em arquivo sem `DC_LOGGER`, chave sem
+  par, `do {` duplicado).
+
 ## v1.8.1 — 2026-08-30
 
 - **Adicionado:** Suporte a **YCbCr 4:4:4 deep color + HDMI 2.1 FRL** via
