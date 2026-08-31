@@ -9,6 +9,13 @@ before the toolkit adopted numbered releases.
 
 ## v1.8.2 — 2026-08-31
 
+- **Added:** AIC8800DC/DW `legacy-mcu1` WiFi profile for older adapters reporting
+  `chip_id=7, chip_mcu_id=1` (e.g. Tenda W311MI WiFi 6 USB). Uses pinned pre-SDK-V5/V3
+  driver and firmware validated upstream. Opt-in via Extras → AIC8800 → L.
+- **Added:** Automatic `a69c:5721` virtual-disk ejection for Tenda AIC8800DC adapters
+  that re-enumerate as WiFi device `2604:0013`.
+- **Fixed:** SteamOS update persistence now records the selected AIC8800 profile,
+  preventing the D80 profile from overwriting a working legacy-MCU1 installation.
 - **Fixed:** CPU Governor install no longer fails on SteamOS Main branch when
   `python-pipx` is unavailable via pacman — now falls back to `pip3 install pipx`.
 - **Fixed:** Telemetry prompt (`cs_legacy_8core_metrics=1`) now appears during

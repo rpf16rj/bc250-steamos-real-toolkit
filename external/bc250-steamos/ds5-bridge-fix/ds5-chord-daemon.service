@@ -1,0 +1,14 @@
+[Unit]
+Description=DS5 Chord Combo Daemon
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/bc250-steamos-real-toolkit/external/bc250-steamos/ds5-bridge-fix/ds5-chord-daemon.py
+Restart=on-failure
+RestartSec=3
+Slice=session.slice
+
+[Install]
+WantedBy=graphical-session.target

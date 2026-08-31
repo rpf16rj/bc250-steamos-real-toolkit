@@ -23,6 +23,7 @@ cd ~/.local/share/bc250-fixes/bc250-steamos
 | [`decky-plugin/`](#big-picture-plugin) | Quick Access interface for daily controls |
 | [`bc250-audio-fix/`](#display-clock) | DisplayPort video and audio clock correction |
 | [`aic8800/`](#wifi-and-bluetooth) | AIC8800D80 USB WiFi and Bluetooth driver |
+| [`aic8800-legacy-mcu1/`](aic8800-legacy-mcu1/README.md) | Pinned AIC8800DC/DW legacy-MCU1 WiFi profile used by the parent toolkit |
 
 `bc250-40cu.sh`, `bc250-power.sh`, and `bc250-cec.sh` open an interactive menu when launched in a terminal. Each also provides a command interface through `<script> help`.
 
@@ -172,6 +173,11 @@ sudo bash aic8800/steamdeck-setup.sh
 The installer snapshots driver source and firmware into root-owned storage. The
 boot helper rebuilds from that trusted snapshot for a new kernel, then validates
 and stages the exact module files it loads.
+
+Older AIC8800DC/DW adapters reporting `chip_id=7, chip_mcu_id=1` require the
+separate matched profile in [`aic8800-legacy-mcu1/`](aic8800-legacy-mcu1/README.md).
+Select that profile from the parent toolkit's AIC8800 submenu; do not install it
+on newer MCU0 hardware.
 
 ## SteamOS Updates
 

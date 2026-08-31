@@ -1,0 +1,431 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [PATCH v6 00/15] HDMI FRL and DSC Support for amdgpu
+   </TITLE>
+   <LINK REL="Index" HREF="index.html" >
+   <LINK REL="made" HREF="mailto:amd-gfx%40lists.freedesktop.org?Subject=Re%3A%20%5BPATCH%20v6%2000/15%5D%20HDMI%20FRL%20and%20DSC%20Support%20for%20amdgpu&In-Reply-To=%3C20260520202929.555119-1-harry.wentland%40amd.com%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="145056.html">
+   <LINK REL="Next"  HREF="145017.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[PATCH v6 00/15] HDMI FRL and DSC Support for amdgpu</H1>
+    <B>Harry Wentland</B> 
+    <A HREF="mailto:amd-gfx%40lists.freedesktop.org?Subject=Re%3A%20%5BPATCH%20v6%2000/15%5D%20HDMI%20FRL%20and%20DSC%20Support%20for%20amdgpu&In-Reply-To=%3C20260520202929.555119-1-harry.wentland%40amd.com%3E"
+       TITLE="[PATCH v6 00/15] HDMI FRL and DSC Support for amdgpu">harry.wentland at amd.com
+       </A><BR>
+    <I>Wed May 20 20:29:13 UTC 2026</I>
+    <P><UL>
+        <LI>Previous message (by thread): <A HREF="145056.html">[PATCH] drm/amd/display: fix kernel-doc warnings
+</A></li>
+        <LI>Next message (by thread): <A HREF="145017.html">[PATCH v6 03/15] drm/amd/display: Add DML changes to support HDMI FRL
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#145009">[ date ]</a>
+              <a href="thread.html#145009">[ thread ]</a>
+              <a href="subject.html#145009">[ subject ]</a>
+              <a href="author.html#145009">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>This patch series adds HDMI FRL and FRL DSC support to the amdgpu
+display driver.
+
+This work passed a representative subset of HDMI compliance and a full
+compliance run on this branch is in the works. We don't expect the full
+run to show any failures since it passes in other environments.
+
+Thanks to Siqueira who prepared this work a couple years back and
+unfortunately didn't manage to send them while he was still working
+at AMD.
+
+Thanks to Jerry who has been making this code solid on Linux and
+running the compliance tests.
+
+FRL will be disabled by default since we don't have the VRR bits yet.
+Without those VRR will regress for users with FRL displays since we
+don't support VRR with FRL yet. Once VRR patches are ready we'll
+enable FRL by default.
+
+v6:
+- Disable FRL by default and add dc_feature_mask 0x400 to enable
+- Add FP guard to new DSC code
+- bug fix for DSC
+
+v5:
+- One more missing FP compilation fix
+
+v4:
+- Disable FRL over DP MST due to lack of testing
+- FP compilation fix
+- squash fixup commit
+
+v3:
+- Add missing DML2 bits
+- Merged register headers to asdn and removed from patchset
+
+v2:
+- Add missing function pointers on DCN 3.x
+- Add DSC
+
+Fangzhi Zuo (2):
+  drm/amd/display: add HDMI 2.1 Compliance Support
+  drm/amd/display: Disable FRL and add module param to enable it
+
+Harry Wentland (12):
+  drm/amd/display: Add HDMI FRL definitions to includes
+  drm/amd/display: Add DML changes to support HDMI FRL
+  drm/amd/display: add HDMI 2.1 FRL base support to DML 2.0
+  drm/amd/display: Add DCCG DIO, HPO, OPP, and OPTC support for FRL
+  drm/amd/display: Add FRL support to clk_mgr, dsc, hdcp
+  drm/amd/display: Tie FRL programming together in HWSS
+  drm/amd/display: Add DC resource support for FRL
+  drm/amd/display Add DC link support for FRL
+  drm/amd/display: Add support for FRL to DC core
+  drm/amd/display: Update HDCP and info_packet modules for FRL
+  drm/amd/display: Tie FRL support into amdgpu_dm
+  drm/amd/display: add HDMI 2.1 DSC over FRL support
+
+Ivan Lipski (1):
+  drm/amd/display: Initialize dsc_caps to 0
+
+ .../gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c |  165 ++-
+ .../gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.h |   13 +-
+ .../amd/display/amdgpu_dm/amdgpu_dm_debugfs.c |   28 +
+ .../amd/display/amdgpu_dm/amdgpu_dm_hdcp.c    |    2 +
+ .../amd/display/amdgpu_dm/amdgpu_dm_helpers.c |   74 +-
+ .../display/amdgpu_dm/amdgpu_dm_mst_types.c   |   79 ++
+ .../drm/amd/display/dc/bios/bios_parser2.c    |   21 +
+ .../drm/amd/display/dc/bios/command_table2.c  |    6 +
+ .../dce112/command_table_helper2_dce112.c     |    3 +
+ .../bios/dce112/command_table_helper_dce112.c |    3 +
+ .../display/dc/clk_mgr/dcn31/dcn31_clk_mgr.c  |    3 +
+ .../dc/clk_mgr/dcn314/dcn314_clk_mgr.c        |    3 +
+ .../dc/clk_mgr/dcn315/dcn315_clk_mgr.c        |    3 +
+ .../dc/clk_mgr/dcn316/dcn316_clk_mgr.c        |    3 +
+ .../display/dc/clk_mgr/dcn32/dcn32_clk_mgr.c  |   12 +
+ .../display/dc/clk_mgr/dcn35/dcn35_clk_mgr.c  |   14 +
+ .../dc/clk_mgr/dcn401/dcn401_clk_mgr.c        |   18 +
+ drivers/gpu/drm/amd/display/dc/core/dc.c      |   32 +-
+ .../gpu/drm/amd/display/dc/core/dc_debug.c    |    4 +
+ .../drm/amd/display/dc/core/dc_hw_sequencer.c |   49 +
+ .../drm/amd/display/dc/core/dc_link_enc_cfg.c |    3 +
+ .../drm/amd/display/dc/core/dc_link_exports.c |   45 +
+ .../gpu/drm/amd/display/dc/core/dc_resource.c |  289 ++++
+ .../gpu/drm/amd/display/dc/core/dc_stream.c   |   35 +
+ drivers/gpu/drm/amd/display/dc/dc.h           |  129 ++
+ drivers/gpu/drm/amd/display/dc/dc_dsc.h       |    8 +
+ .../gpu/drm/amd/display/dc/dc_hdmi_types.h    |  164 ++-
+ drivers/gpu/drm/amd/display/dc/dc_hw_types.h  |    8 +
+ drivers/gpu/drm/amd/display/dc/dc_types.h     |   24 +
+ .../amd/display/dc/dccg/dcn30/dcn30_dccg.c    |   40 +
+ .../amd/display/dc/dccg/dcn30/dcn30_dccg.h    |    8 +
+ .../amd/display/dc/dccg/dcn31/dcn31_dccg.c    |   88 ++
+ .../amd/display/dc/dccg/dcn31/dcn31_dccg.h    |   13 +
+ .../amd/display/dc/dccg/dcn314/dcn314_dccg.c  |   25 +
+ .../amd/display/dc/dccg/dcn32/dcn32_dccg.c    |   68 +
+ .../amd/display/dc/dccg/dcn35/dcn35_dccg.c    |  321 +++++
+ .../amd/display/dc/dccg/dcn401/dcn401_dccg.c  |   73 +
+ .../amd/display/dc/dccg/dcn401/dcn401_dccg.h  |    4 +
+ .../amd/display/dc/dccg/dcn42/dcn42_dccg.c    |   33 +
+ .../gpu/drm/amd/display/dc/dce/dce_audio.c    |    8 +
+ .../drm/amd/display/dc/dce/dce_clock_source.c |   30 +-
+ .../display/dc/dio/dcn10/dcn10_link_encoder.c |    3 +-
+ .../display/dc/dio/dcn20/dcn20_link_encoder.h |    1 +
+ .../dc/dio/dcn30/dcn30_dio_link_encoder.c     |  250 ++++
+ .../dc/dio/dcn30/dcn30_dio_link_encoder.h     |   17 +
+ .../dc/dio/dcn301/dcn301_dio_link_encoder.c   |   18 +
+ .../dc/dio/dcn31/dcn31_dio_link_encoder.c     |  114 ++
+ .../dc/dio/dcn31/dcn31_dio_link_encoder.h     |    8 +
+ .../dc/dio/dcn32/dcn32_dio_link_encoder.c     |  214 +++
+ .../dc/dio/dcn32/dcn32_dio_link_encoder.h     |   16 +
+ .../dc/dio/dcn321/dcn321_dio_link_encoder.c   |   20 +
+ .../dc/dio/dcn35/dcn35_dio_link_encoder.c     |   21 +
+ .../dc/dio/dcn401/dcn401_dio_link_encoder.c   |  220 +++
+ .../dc/dio/dcn401/dcn401_dio_link_encoder.h   |   16 +
+ .../dc/dio/dcn42/dcn42_dio_link_encoder.c     |   21 +
+ drivers/gpu/drm/amd/display/dc/dm_cp_psp.h    |    1 +
+ .../drm/amd/display/dc/dm_services_types.h    |    1 +
+ drivers/gpu/drm/amd/display/dc/dml/Makefile   |    3 +
+ .../drm/amd/display/dc/dml/dcn20/dcn20_fpu.c  |    5 +
+ .../drm/amd/display/dc/dml/dcn30/dcn30_fpu.c  |  127 ++
+ .../drm/amd/display/dc/dml/dcn30/dcn30_fpu.h  |   22 +
+ .../dc/dml/dcn30/display_mode_vba_30.c        |  280 +++-
+ .../amd/display/dc/dml/dcn302/dcn302_fpu.c    |    1 +
+ .../amd/display/dc/dml/dcn303/dcn303_fpu.c    |    1 +
+ .../dc/dml/dcn31/display_mode_vba_31.c        |  243 ++++
+ .../dc/dml/dcn314/display_mode_vba_314.c      |  241 ++++
+ .../drm/amd/display/dc/dml/dcn32/dcn32_fpu.c  |   10 +
+ .../drm/amd/display/dc/dml/dcn32/dcn32_fpu.h  |    2 +
+ .../dc/dml/dcn32/display_mode_vba_32.c        |   16 +-
+ .../dc/dml/dcn32/display_mode_vba_util_32.c   |  127 +-
+ .../amd/display/dc/dml/display_mode_enums.h   |    1 +
+ .../drm/amd/display/dc/dml/dml1_frl_cap_chk.c |  790 +++++++++++
+ .../drm/amd/display/dc/dml/dml1_frl_cap_chk.h |  173 +++
+ .../gpu/drm/amd/display/dc/dml2_0/Makefile    |    2 +
+ .../amd/display/dc/dml2_0/display_mode_core.c |  104 +-
+ .../amd/display/dc/dml2_0/display_mode_util.c |    3 +
+ .../dml2_0/dml21/dml21_translation_helper.c   |    4 +
+ .../dml21/src/dml2_core/dml2_core_dcn4.c      |    1 +
+ .../src/dml2_core/dml2_core_dcn4_calcs.c      |   29 +-
+ .../src/dml2_core/dml2_core_shared_types.h    |    3 +
+ .../lib_frl_cap_check.c                       |  396 ++++++
+ .../lib_frl_cap_check.h                       |   90 ++
+ .../dc/dml2_0/dml2_translation_helper.c       |    4 +
+ .../drm/amd/display/dc/dml2_0/dml2_utils.c    |    2 +
+ .../amd/display/dc/dml2_0/dml_frl_cap_chk.c   |  413 ++++++
+ .../amd/display/dc/dml2_0/dml_frl_cap_chk.h   |  109 ++
+ drivers/gpu/drm/amd/display/dc/dsc/dc_dsc.c   |  704 ++++++++++
+ drivers/gpu/drm/amd/display/dc/dsc/dsc.h      |    5 +
+ .../gpu/drm/amd/display/dc/hdcp/hdcp_msg.c    |    1 +
+ drivers/gpu/drm/amd/display/dc/hpo/Makefile   |   10 +
+ .../dc/hpo/dcn30/dcn30_hpo_frl_link_encoder.c |  286 ++++
+ .../dc/hpo/dcn30/dcn30_hpo_frl_link_encoder.h |  146 ++
+ .../hpo/dcn30/dcn30_hpo_frl_stream_encoder.c  | 1043 +++++++++++++++
+ .../hpo/dcn30/dcn30_hpo_frl_stream_encoder.h  |  436 ++++++
+ .../dcn401/dcn401_hpo_frl_stream_encoder.c    |  907 +++++++++++++
+ .../dcn401/dcn401_hpo_frl_stream_encoder.h    |  335 +++++
+ .../hpo/dcn42/dcn42_hpo_frl_stream_encoder.c  |  207 +++
+ .../hpo/dcn42/dcn42_hpo_frl_stream_encoder.h  |   59 +
+ .../amd/display/dc/hwss/dce110/dce110_hwseq.c |   99 +-
+ .../amd/display/dc/hwss/dcn10/dcn10_hwseq.c   |   37 +
+ .../amd/display/dc/hwss/dcn20/dcn20_hwseq.c   |   19 +-
+ .../amd/display/dc/hwss/dcn30/dcn30_hwseq.c   |   49 +-
+ .../amd/display/dc/hwss/dcn30/dcn30_hwseq.h   |   13 +
+ .../amd/display/dc/hwss/dcn30/dcn30_init.c    |    1 +
+ .../amd/display/dc/hwss/dcn31/dcn31_hwseq.c   |   13 +-
+ .../amd/display/dc/hwss/dcn31/dcn31_init.c    |    1 +
+ .../amd/display/dc/hwss/dcn314/dcn314_hwseq.c |    3 +-
+ .../amd/display/dc/hwss/dcn314/dcn314_init.c  |    1 +
+ .../amd/display/dc/hwss/dcn32/dcn32_hwseq.c   |   13 +-
+ .../amd/display/dc/hwss/dcn32/dcn32_init.c    |    3 +
+ .../amd/display/dc/hwss/dcn35/dcn35_hwseq.c   |   42 +
+ .../amd/display/dc/hwss/dcn35/dcn35_hwseq.h   |    2 +
+ .../amd/display/dc/hwss/dcn35/dcn35_init.c    |    2 +
+ .../amd/display/dc/hwss/dcn351/dcn351_init.c  |    2 +
+ .../amd/display/dc/hwss/dcn401/dcn401_hwseq.c |   13 +
+ .../amd/display/dc/hwss/dcn401/dcn401_init.c  |    1 +
+ .../amd/display/dc/hwss/dcn42/dcn42_hwseq.c   |   38 +-
+ .../amd/display/dc/hwss/dcn42/dcn42_init.c    |    2 +
+ .../drm/amd/display/dc/hwss/hw_sequencer.h    |   34 +
+ .../display/dc/hwss/hw_sequencer_private.h    |    3 +
+ .../gpu/drm/amd/display/dc/inc/core_status.h  |    2 +
+ .../gpu/drm/amd/display/dc/inc/core_types.h   |   12 +
+ drivers/gpu/drm/amd/display/dc/inc/hw/dccg.h  |   10 +
+ .../gpu/drm/amd/display/dc/inc/hw/hw_shared.h |    1 +
+ .../drm/amd/display/dc/inc/hw/link_encoder.h  |  176 +++
+ .../amd/display/dc/inc/hw/stream_encoder.h    |  231 ++++
+ .../amd/display/dc/inc/hw/timing_generator.h  |    5 +
+ .../gpu/drm/amd/display/dc/inc/link_service.h |   15 +
+ drivers/gpu/drm/amd/display/dc/inc/resource.h |    7 +
+ drivers/gpu/drm/amd/display/dc/link/Makefile  |    2 +
+ .../display/dc/link/hwss/link_hwss_hpo_frl.c  |  113 ++
+ .../display/dc/link/hwss/link_hwss_hpo_frl.h  |   34 +
+ .../drm/amd/display/dc/link/link_detection.c  |  111 ++
+ .../gpu/drm/amd/display/dc/link/link_dpms.c   |  223 +++-
+ .../gpu/drm/amd/display/dc/link/link_dpms.h   |    1 +
+ .../drm/amd/display/dc/link/link_factory.c    |   44 +
+ .../drm/amd/display/dc/link/link_validation.c |  298 +++++
+ .../drm/amd/display/dc/link/link_validation.h |   13 +
+ .../amd/display/dc/link/protocols/link_ddc.c  |   90 ++
+ .../amd/display/dc/link/protocols/link_ddc.h  |    4 +
+ .../display/dc/link/protocols/link_hdmi_frl.c | 1187 +++++++++++++++++
+ .../display/dc/link/protocols/link_hdmi_frl.h |   53 +
+ .../amd/display/dc/link/protocols/link_hpd.c  |    1 +
+ .../drm/amd/display/dc/opp/dcn10/dcn10_opp.c  |    1 +
+ .../amd/display/dc/optc/dcn10/dcn10_optc.h    |    5 +-
+ .../amd/display/dc/optc/dcn30/dcn30_optc.c    |    8 +-
+ .../amd/display/dc/optc/dcn30/dcn30_optc.h    |    8 +-
+ .../amd/display/dc/optc/dcn31/dcn31_optc.c    |    2 +
+ .../amd/display/dc/optc/dcn401/dcn401_optc.c  |    2 +
+ .../dc/resource/dce112/dce112_resource.c      |    3 +
+ .../dc/resource/dcn30/dcn30_resource.c        |  126 ++
+ .../dc/resource/dcn301/dcn301_resource.c      |    1 +
+ .../dc/resource/dcn302/dcn302_resource.c      |  109 ++
+ .../dc/resource/dcn303/dcn303_resource.c      |  109 ++
+ .../dc/resource/dcn31/dcn31_resource.c        |  127 ++
+ .../dc/resource/dcn314/dcn314_resource.c      |  127 ++
+ .../dc/resource/dcn315/dcn315_resource.c      |  128 ++
+ .../dc/resource/dcn316/dcn316_resource.c      |  126 ++
+ .../dc/resource/dcn32/dcn32_resource.c        |  131 ++
+ .../dc/resource/dcn32/dcn32_resource.h        |   79 +-
+ .../dc/resource/dcn321/dcn321_resource.c      |  132 ++
+ .../dc/resource/dcn35/dcn35_resource.c        |  121 ++
+ .../dc/resource/dcn351/dcn351_resource.c      |  121 ++
+ .../dc/resource/dcn36/dcn36_resource.c        |  121 ++
+ .../dc/resource/dcn401/dcn401_resource.c      |  121 ++
+ .../dc/resource/dcn42/dcn42_resource.c        |  121 ++
+ .../gpu/drm/amd/display/dmub/inc/dmub_cmd.h   |    5 +-
+ .../gpu/drm/amd/display/include/audio_types.h |    1 +
+ .../amd/display/include/bios_parser_types.h   |   14 +-
+ .../drm/amd/display/include/logger_types.h    |    2 +
+ .../drm/amd/display/include/signal_types.h    |   12 +-
+ .../gpu/drm/amd/display/modules/hdcp/hdcp.c   |    2 +
+ .../gpu/drm/amd/display/modules/hdcp/hdcp.h   |    6 +
+ .../drm/amd/display/modules/hdcp/hdcp_psp.c   |    2 +
+ .../drm/amd/display/modules/hdcp/hdcp_psp.h   |    2 +
+ .../amd/display/modules/inc/mod_freesync.h    |    3 +
+ .../drm/amd/display/modules/inc/mod_hdcp.h    |    1 +
+ .../amd/display/modules/inc/mod_info_packet.h |    2 +-
+ .../display/modules/info_packet/info_packet.c |  122 +-
+ drivers/gpu/drm/amd/include/amd_shared.h      |    4 +
+ 180 files changed, 15147 insertions(+), 117 deletions(-)
+ create mode 100644 drivers/gpu/drm/amd/display/dc/dml/dml1_frl_cap_chk.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/dml/dml1_frl_cap_chk.h
+ create mode 100644 drivers/gpu/drm/amd/display/dc/dml2_0/dml21/src/dml2_standalone_libraries/lib_frl_cap_check.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/dml2_0/dml21/src/dml2_standalone_libraries/lib_frl_cap_check.h
+ create mode 100644 drivers/gpu/drm/amd/display/dc/dml2_0/dml_frl_cap_chk.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/dml2_0/dml_frl_cap_chk.h
+ create mode 100644 drivers/gpu/drm/amd/display/dc/hpo/dcn30/dcn30_hpo_frl_link_encoder.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/hpo/dcn30/dcn30_hpo_frl_link_encoder.h
+ create mode 100644 drivers/gpu/drm/amd/display/dc/hpo/dcn30/dcn30_hpo_frl_stream_encoder.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/hpo/dcn30/dcn30_hpo_frl_stream_encoder.h
+ create mode 100644 drivers/gpu/drm/amd/display/dc/hpo/dcn401/dcn401_hpo_frl_stream_encoder.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/hpo/dcn401/dcn401_hpo_frl_stream_encoder.h
+ create mode 100644 drivers/gpu/drm/amd/display/dc/hpo/dcn42/dcn42_hpo_frl_stream_encoder.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/hpo/dcn42/dcn42_hpo_frl_stream_encoder.h
+ create mode 100644 drivers/gpu/drm/amd/display/dc/link/hwss/link_hwss_hpo_frl.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/link/hwss/link_hwss_hpo_frl.h
+ create mode 100644 drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c
+ create mode 100644 drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.h
+
+--
+2.54.0
+
+</PRE>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message (by thread): <A HREF="145056.html">[PATCH] drm/amd/display: fix kernel-doc warnings
+</A></li>
+	<LI>Next message (by thread): <A HREF="145017.html">[PATCH v6 03/15] drm/amd/display: Add DML changes to support HDMI FRL
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#145009">[ date ]</a>
+              <a href="thread.html#145009">[ thread ]</a>
+              <a href="subject.html#145009">[ subject ]</a>
+              <a href="author.html#145009">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.freedesktop.org/mailman/listinfo/amd-gfx">More information about the amd-gfx
+mailing list</a><br>
+</body></html>
