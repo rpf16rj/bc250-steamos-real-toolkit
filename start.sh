@@ -705,11 +705,18 @@ run_cpu_governor() {
         fi
     fi
 
-    print_info "Installing dependencies: python-pipx, stress"
-    steamos_writable 'pacman -Syu python-pipx stress --noconfirm' || {
-        fail_with_log "Failed to install dependencies." "CPU Governor Install — dependencies"
-        return 1
-    }
+    print_info "Installing dependencies: pipx, stress"
+    if ! steamos_writable 'pacman -Syu python-pipx stress --noconfirm'; then
+        print_info "python-pipx not in pacman repos — trying pip fallback..."
+        steamos_writable 'pacman -Syu stress --noconfirm' || true
+        if ! command -v pipx &>/dev/null; then
+            python3 -m ensurepip --default-pip 2>/dev/null || true
+            pip3 install --break-system-packages pipx 2>/dev/null || pip3 install pipx 2>/dev/null || {
+                fail_with_log "Failed to install pipx (pacman and pip fallback both failed). Try: pacman -S python-pipx or pip3 install pipx manually." "CPU Governor Install — pipx dependency"
+                return 1
+            }
+        fi
+    fi
 
     CPU_GOVERNOR_DIR="$EXTERNAL_DIR/bc250_smu_oc"
     if [[ ! -d "$CPU_GOVERNOR_DIR" ]]; then
@@ -3737,10 +3744,8 @@ install_combined_fix() {
 
     # Kernel 7.x telemetry: 8-core without patched SMU BIOS needs cs_legacy_8core_metrics=1
     if [[ "$do_audio" -eq 1 && "$kver_major" -ge 7 ]]; then
-        local core_count
-        core_count=$(nproc 2>/dev/null || echo 0)
-        if (( core_count >= 16 )); then
-            # 8 cores / 16 threads — check if SMU-patched BIOS is in use
+        # BC-250 always has 8 cores / 16 threads physically — don't check nproc
+        # (core unlock may not be applied yet in manual install)
             if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.cs_legacy_8core_metrics=1' "$GRUB_DEFAULT" >/dev/null 2>&1; then
                 : # already set
             else
@@ -3766,7 +3771,6 @@ install_combined_fix() {
                     print_info "Skipped. If GPU temperature reads 0, add amdgpu.cs_legacy_8core_metrics=1 to GRUB manually."
                 fi
             fi
-        fi
     fi
 
     echo ""
