@@ -83,7 +83,7 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
  	if (requested_bpc > 0) {
  		/*
  		 * Cap display bpc based on the user requested value.
-@@ -7171,7 +7212,37 @@
+@@ -7171,7 +7212,45 @@
  			&& (aconnector->force_yuv_pixel_format == PIXEL_ENCODING_YCBCR422
  			|| aconnector->force_yuv422_output))
  		timing_out->pixel_encoding = PIXEL_ENCODING_YCBCR422;
@@ -93,19 +93,27 @@ diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm
 +			 stream->signal == SIGNAL_TYPE_HDMI_FRL)) {
 +		/*
 +		 * Only force YCbCr 4:4:4 when the mode fits within PCON bandwidth.
-+		 * Use the dongle's max pixel clock (typically 600 MHz for CH7218)
-+		 * as the threshold. For modes that exceed it (e.g. 4K60 at 594 MHz
-+		 * with 10-bit 4:4:4), let the driver fall back to 4:2:0 naturally
-+		 * instead of forcing 4:4:4 and losing sync.
++		 * The effective bandwidth depends on pixel clock * color depth
++		 * multiplier (8bpc=1x, 10bpc=1.25x, 12bpc=1.5x for 4:4:4).
++		 * Use the dongle's max pixel clock (600 MHz for CH7218) as the
++		 * threshold. For modes that exceed it (e.g. 4K60 10-bit at
++		 * 594*1.25=742 MHz), let the driver fall back to 4:2:0 naturally.
 +		 */
 +		bool pcon_has_bw = false;
 +		u32 pix_clk_khz = timing_out->pix_clk_100hz / 10;
 +		if (aconnector->dc_link) {
 +			u32 max_pix_clk = aconnector->dc_link->dpcd_caps.dongle_caps.dp_hdmi_max_pixel_clk_in_khz;
++			u32 depth_mult = 1;
++			switch (timing_out->display_color_depth) {
++			case COLOR_DEPTH_101010: depth_mult = 5; break;  /* 10/8 = 1.25 */
++			case COLOR_DEPTH_121212: depth_mult = 3; break;  /* 12/8 = 1.5  */
++			default: depth_mult = 4; break;                  /* 8/8 = 1.0   */
++			}
++			u32 effective_clk = (pix_clk_khz * depth_mult) / 4;
 +			if (max_pix_clk > 0)
-+				pcon_has_bw = (pix_clk_khz <= max_pix_clk);
++				pcon_has_bw = (effective_clk <= max_pix_clk);
 +			else
-+				pcon_has_bw = (pix_clk_khz <= 340000);
++				pcon_has_bw = (effective_clk <= 340000);
 +		}
 +		if (pcon_has_bw) {
 +			timing_out->pixel_encoding = PIXEL_ENCODING_YCBCR444;
