@@ -486,13 +486,23 @@ fi
 
 step "apply DP-HDMI YCbCr 4:4:4 deep color patch (PCON color quality)"
 YCBCR444_PATCH=$HERE/bc250-dp-hdmi-ycbcr444-deep-color.patch
-if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
-    echo "DP-HDMI YCbCr 4:4:4 deep color patch already applied"
-elif patch -p1 --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
-    patch -p1 --fuzz=3 -s < "$YCBCR444_PATCH"
-    echo "DP-HDMI YCbCr 4:4:4 deep color patch applied"
+YCBCR444_MAJOR=$(echo "$BASE" | cut -d. -f1)
+if [ "$YCBCR444_MAJOR" -lt 7 ]; then
+    echo "skipping YCbCr 4:4:4 deep color patch (requires kernel 7.x; running $BASE)"
+    # Reverse if leftover from a previous build on a different kernel
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$YCBCR444_PATCH"
+        echo "YCbCr 4:4:4 deep color patch REVERSED (leftover from a previous build)"
+    fi
 else
-    die "DP-HDMI YCbCr 4:4:4 deep color patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
+        echo "DP-HDMI YCbCr 4:4:4 deep color patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$YCBCR444_PATCH"
+        echo "DP-HDMI YCbCr 4:4:4 deep color patch applied"
+    else
+        die "DP-HDMI YCbCr 4:4:4 deep color patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 fi
 
 step "modules_prepare + config re-verify (runbook step 7)"
