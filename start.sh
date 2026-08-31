@@ -109,7 +109,16 @@ persist_detect_and_record_installed() {
     [[ -f /etc/sysctl.d/99-swappiness.conf || -f /home/swapfile || -f /swapfile ]] && persist_state_add "swap"
     [[ -f /etc/default/grub.zram.bak ]] && persist_state_add "zswap"
     acpi_fix_installed 2>/dev/null && persist_state_add "acpi"
-    aic8800_installed 2>/dev/null && persist_state_add "aic8800"
+    if aic8800_installed 2>/dev/null; then
+        if [[ -f /etc/bc250-aic8800-profile ]] \
+            && [[ "$(< /etc/bc250-aic8800-profile)" == "legacy-mcu1" ]]; then
+            persist_state_remove "aic8800"
+            persist_state_add "aic8800_legacy_mcu1"
+        else
+            persist_state_remove "aic8800_legacy_mcu1"
+            persist_state_add "aic8800"
+        fi
+    fi
     be200_firmware_installed 2>/dev/null && persist_state_add "be200_fw"
     lsmod 2>/dev/null | grep -qE 'nct6687|nct6686' && persist_state_add "sensors"
     coolercontrol_installed 2>/dev/null && persist_state_add "coolercontrol"
@@ -3799,9 +3808,19 @@ install_combined_fix() {
     fi
 }
 
-# --- AIC8800D80 USB WiFi/BT dongle driver -----------------------------------
+# --- AIC8800 USB WiFi/BT dongle drivers -------------------------------------
+AIC8800_PROFILE_FILE=/etc/bc250-aic8800-profile
+
 aic8800_installed() {
     [[ -d /sys/module/aic8800_fdrv || -f /etc/modprobe.d/aic8800.conf ]]
+}
+
+aic8800_profile() {
+    if [[ -r "$AIC8800_PROFILE_FILE" ]]; then
+        cat "$AIC8800_PROFILE_FILE"
+    else
+        printf '%s\n' "d80"
+    fi
 }
 
 # The vendor Makefile's "steamos-headers" target hardcodes the "jupiter-main"
@@ -3831,7 +3850,7 @@ aic8800_prefetch_headers() {
 }
 
 install_aic8800_wifi() {
-    print_step "WIFI" "Installing AIC8800D80 USB WiFi/BT Driver"
+    print_step "WIFI" "Installing AIC8800D80 USB WiFi/BT Driver (current profile)"
 
     require_kernel_version || return 1
 
@@ -3916,10 +3935,168 @@ EOF
             -M "555342431234567800000000000010fd0000000000000000000000000000f2" -R 2>/dev/null || true
     fi
 
-    print_success "AIC8800 WiFi/BT driver installed!"
+    steamos_writable "printf '%s\\n' d80 > '$AIC8800_PROFILE_FILE'" || {
+        fail_with_log "Failed to record the selected AIC8800 profile." "AIC8800 WiFi — profile marker"
+        return 1
+    }
+    persist_state_remove "aic8800_legacy_mcu1"
     persist_state_add "aic8800"
+    print_success "AIC8800 WiFi/BT driver installed!"
     print_info "Check with: ${CYAN}ip link${RESET} (WiFi) and ${CYAN}bluetoothctl${RESET} (Bluetooth)."
     print_info "${YELLOW}Note:${RESET} rebuild after each SteamOS update — safe to re-run this option any time."
+}
+
+install_aic8800_legacy_mcu1() {
+    print_step "WIFI-MCU1" "Installing AIC8800DC/DW legacy MCU1 WiFi Driver"
+
+    require_kernel_version || return 1
+
+    echo -e "  ${DIM}For older AIC8800DC/DW adapters that report${RESET}"
+    echo -e "  ${DIM}chip_id=7, chip_mcu_id=1 (for example Tenda 2604:0013).${RESET}"
+    echo -e "  ${YELLOW}Do not use this profile for chip_mcu_id=0 hardware.${RESET}"
+    echo ""
+
+    fixes_repo_sync || return 1
+
+    local aic_dir="$FIXES_REPO_DIR/aic8800-legacy-mcu1"
+    local drv="$aic_dir/drivers/aic8800"
+    local fw_source="$aic_dir/fw/aic8800DC"
+    local expected_main="bfd8ea1d174242e7ec823813b6c5d849"
+    local expected_table="7b5fde609392c2e6c2c5874838dda718"
+
+    if [[ ! -f "$drv/Makefile" || ! -d "$fw_source" ]]; then
+        fail_with_log "AIC8800 legacy-MCU1 source profile not found in the fixes repository." "AIC8800 legacy MCU1 — missing source"
+        return 1
+    fi
+    # Exact SteamOS headers legitimately contain symlinks. Exclude the generated
+    # header staging directory so a failed or repeated install remains retryable.
+    if { find "$drv" -path "$drv/steamos-headers" -prune -o -type l -print -quit; \
+        find "$fw_source" -type l -print -quit; } | grep -q .; then
+        fail_with_log "Refusing to build AIC8800 legacy-MCU1 source containing symlinks." "AIC8800 legacy MCU1 — source validation"
+        return 1
+    fi
+    if [[ "$(md5sum "$fw_source/fmacfw_patch_8800dc_u02.bin" | awk '{print $1}')" != "$expected_main" \
+        || "$(md5sum "$fw_source/fmacfw_patch_tbl_8800dc_u02.bin" | awk '{print $1}')" != "$expected_table" ]]; then
+        fail_with_log "AIC8800 legacy-MCU1 firmware hashes do not match the validated profile." "AIC8800 legacy MCU1 — firmware validation"
+        return 1
+    fi
+
+    aic8800_prefetch_headers "$drv"
+
+    local krel kdir mod_dir
+    krel="$(uname -r)"
+    if [[ -d "/lib/modules/$krel/build" ]]; then
+        kdir="/lib/modules/$krel/build"
+    else
+        kdir="$drv/steamos-headers/usr/lib/modules/$krel/build"
+    fi
+    if [[ ! -d "$kdir" ]]; then
+        fail_with_log "Exact kernel headers are unavailable for $krel." "AIC8800 legacy MCU1 — kernel headers"
+        return 1
+    fi
+    mod_dir="/usr/lib/modules/$krel/updates/aic8800"
+
+    print_info "Installing build tools for AIC8800 legacy MCU1..."
+    steamos_writable 'pacman -Sy --noconfirm --needed base-devel util-linux usb_modeswitch' || {
+        fail_with_log "Failed to install AIC8800 build dependencies." "AIC8800 legacy MCU1 — build deps"
+        return 1
+    }
+
+    print_info "Building the pinned legacy-MCU1 modules..."
+    if command -v runuser >/dev/null 2>&1; then
+        runuser -u "$REAL_USER" -- make -C "$drv" KDIR="$kdir" clean || true
+        runuser -u "$REAL_USER" -- make -C "$drv" KDIR="$kdir" || {
+            fail_with_log "Failed to build AIC8800 legacy-MCU1 modules." "AIC8800 legacy MCU1 — build"
+            return 1
+        }
+    else
+        make -C "$drv" KDIR="$kdir" clean || true
+        make -C "$drv" KDIR="$kdir" || {
+            fail_with_log "Failed to build AIC8800 legacy-MCU1 modules." "AIC8800 legacy MCU1 — build"
+            return 1
+        }
+    fi
+
+    if [[ "$(modinfo -F vermagic "$drv/aic8800_fdrv/aic8800_fdrv.ko" 2>/dev/null | cut -d' ' -f1)" != "$krel" ]]; then
+        fail_with_log "Built AIC8800 module does not match running kernel $krel." "AIC8800 legacy MCU1 — module validation"
+        return 1
+    fi
+
+    print_info "Installing legacy-MCU1 modules, firmware and mode-switch rules..."
+    local stage
+    stage=$(mktemp -d /tmp/aic8800-mcu1-XXXXXX)
+    mkdir -p "$stage/firmware/aic8800DC"
+    cp -a "$fw_source"/. "$stage/firmware/aic8800DC/"
+
+    cat > "$stage/aic8800.conf" <<'EOF'
+options aic_load_fw aic_fw_path=/usr/lib/firmware
+EOF
+
+    cat > "$stage/40-aic8800-modeswitch.rules" <<'EOF'
+# AIC8800DC adapters such as Tenda 2604:0013 initially expose a virtual disk.
+KERNEL=="sd*", ATTRS{idVendor}=="a69c", ATTRS{idProduct}=="5721", SYMLINK+="aicudisk", RUN+="/usr/bin/eject /dev/%k"
+
+# AIC8800D80 fallback supported by the same legacy driver tree.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1111", ATTR{idProduct}=="1111", RUN+="/usr/lib/udev/usb_modeswitch '%b/%k'"
+EOF
+
+    cat > "$stage/1111:1111" <<'EOF'
+# AIC8800D80 WiFi dongle: fake mass-storage -> WiFi mode
+MessageContent="555342431234567800000000000010fd0000000000000000000000000000f2"
+ResetUSB=1
+EOF
+
+    steamos_writable "mkdir -p \"$mod_dir\" && install -m 644 \"$drv/aic_load_fw/aic_load_fw.ko\" \"$mod_dir/aic_load_fw.ko\" && install -m 644 \"$drv/aic8800_fdrv/aic8800_fdrv.ko\" \"$mod_dir/aic8800_fdrv.ko\" && depmod -a && rm -rf /usr/lib/firmware/aic8800DC && mkdir -p /usr/lib/firmware/aic8800DC && cp -a \"$stage/firmware/aic8800DC\"/. /usr/lib/firmware/aic8800DC/ && cp \"$stage/aic8800.conf\" /etc/modprobe.d/aic8800.conf && cp \"$stage/40-aic8800-modeswitch.rules\" /etc/udev/rules.d/ && cp \"$stage/1111:1111\" /etc/usb_modeswitch.d/1111:1111" || {
+        fail_with_log "Failed to install AIC8800 legacy-MCU1 driver to /usr and /etc." "AIC8800 legacy MCU1 — install"
+        rm -rf "$stage"
+        return 1
+    }
+    rm -rf "$stage"
+
+    if [[ "$(readlink -f "$(modinfo -n aic8800_fdrv 2>/dev/null)")" != "$mod_dir/aic8800_fdrv.ko" \
+        || "$(readlink -f "$(modinfo -n aic_load_fw 2>/dev/null)")" != "$mod_dir/aic_load_fw.ko" ]]; then
+        fail_with_log "depmod did not select the newly installed AIC8800 legacy-MCU1 modules." "AIC8800 legacy MCU1 — module resolution"
+        return 1
+    fi
+
+    steamos_writable "printf '%s\\n' legacy-mcu1 > '$AIC8800_PROFILE_FILE'" || {
+        fail_with_log "Failed to record the selected AIC8800 profile." "AIC8800 legacy MCU1 — profile marker"
+        return 1
+    }
+    udevadm control --reload
+    udevadm trigger --subsystem-match=block --action=add 2>/dev/null || true
+
+    print_info "Loading AIC8800 legacy-MCU1 modules..."
+    modprobe -r aic8800_fdrv aic_load_fw 2>/dev/null || true
+    modprobe aic_load_fw 2>/dev/null || true
+    modprobe aic8800_fdrv 2>/dev/null || true
+
+    # Reloading the modules removes and recreates wlan0 underneath the active
+    # WiFi backend. Restart it so NetworkManager can scan and reconnect without
+    # requiring a reboot or a manual service restart.
+    if systemctl is-active --quiet iwd.service; then
+        print_info "Restarting iwd after the WiFi interface reload..."
+        systemctl restart iwd.service || true
+    elif systemctl is-active --quiet wpa_supplicant.service; then
+        print_info "Restarting wpa_supplicant after the WiFi interface reload..."
+        systemctl restart wpa_supplicant.service || true
+    fi
+
+    if [[ -e /dev/aicudisk ]]; then
+        print_info "Switching AIC8800DC virtual disk to WiFi mode..."
+        eject /dev/aicudisk 2>/dev/null || true
+    elif grep -q '1111' /sys/bus/usb/devices/*/idVendor 2>/dev/null \
+        && grep -q '1111' /sys/bus/usb/devices/*/idProduct 2>/dev/null; then
+        print_info "Switching AIC8800D80-compatible dongle to WiFi mode..."
+        usb_modeswitch -v 1111 -p 1111 \
+            -M "555342431234567800000000000010fd0000000000000000000000000000f2" -R 2>/dev/null || true
+    fi
+
+    persist_state_remove "aic8800"
+    persist_state_add "aic8800_legacy_mcu1"
+    print_success "AIC8800DC/DW legacy-MCU1 WiFi driver installed!"
+    print_info "Cold-unplug the adapter for 10 seconds if it previously timed out while starting firmware."
+    print_info "Verify with: ${CYAN}iw dev${RESET} and ${CYAN}nmcli device wifi list${RESET}."
 }
 
 run_revert_aic8800_wifi() {
@@ -3943,7 +4120,9 @@ run_revert_aic8800_wifi() {
         steamos-readonly disable || true
     fi
 
-    rm -f /etc/modprobe.d/aic8800.conf /etc/udev/rules.d/40-aic8800-modeswitch.rules '/etc/usb_modeswitch.d/1111:1111'
+    rm -f /etc/modprobe.d/aic8800.conf /etc/udev/rules.d/40-aic8800-modeswitch.rules \
+        '/etc/usb_modeswitch.d/1111:1111' "$AIC8800_PROFILE_FILE"
+    rm -rf /usr/lib/firmware/aic8800DC
     local mod_dir="/usr/lib/modules/$(uname -r)/updates/aic8800"
     if [[ -d "$mod_dir" ]]; then
         rm -rf "$mod_dir"
@@ -3957,6 +4136,7 @@ run_revert_aic8800_wifi() {
 
     print_success "AIC8800 driver configuration removed."
     persist_state_remove "aic8800"
+    persist_state_remove "aic8800_legacy_mcu1"
 }
 
 # --- Intel BE200 Wi-Fi 7 firmware -------------------------------------------
@@ -5291,7 +5471,12 @@ run_status() {
 
     local wifi_icon wifi_color wifi_label
     if aic8800_installed; then
-        wifi_icon="$ICON_OK"; wifi_color="$GREEN"; wifi_label="installed"
+        wifi_icon="$ICON_OK"; wifi_color="$GREEN"
+        if [[ "$(aic8800_profile)" == "legacy-mcu1" ]]; then
+            wifi_label="installed (DC/DW legacy MCU1)"
+        else
+            wifi_label="installed (D80 current)"
+        fi
     else
         wifi_icon="$DIM"; wifi_color="$DIM"; wifi_label="not installed"
     fi
@@ -5547,16 +5732,18 @@ run_aic8800_menu() {
         print_banner
         print_section "AIC8800 WiFi/BT Driver"
         echo ""
-        print_item "I" "Install AIC8800 WiFi/BT Driver" "For AIC8800D80 USB WiFi/BT dongles"
-        print_item "R" "Revert AIC8800 WiFi/BT Driver"  "Remove AIC8800 driver"
+        print_item "I" "Install current AIC8800 driver" "For AIC8800D80 MCU0 USB WiFi/BT dongles"
+        print_item "L" "Install legacy MCU1 driver"     "For older AIC8800DC/DW chip_mcu_id=1 dongles"
+        print_item "R" "Revert AIC8800 driver"          "Remove either AIC8800 profile"
         print_item "0" "Back"                           ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
         read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" aic_choice
 
         case "${aic_choice^^}" in
-            I) install_aic8800_wifi;     press_enter ;;
-            R) run_revert_aic8800_wifi;  press_enter ;;
+            I) install_aic8800_wifi;        press_enter ;;
+            L) install_aic8800_legacy_mcu1; press_enter ;;
+            R) run_revert_aic8800_wifi;     press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$aic_choice'"
@@ -5611,7 +5798,7 @@ run_extras_menu() {
         print_banner
         print_section "Extras"
         echo ""
-        print_item "A" "AIC8800 WiFi/BT Driver"      "Install/revert AIC8800D80 USB WiFi/BT dongles"
+        print_item "A" "AIC8800 WiFi/BT Driver"      "Current D80 and legacy DC/DW MCU1 profiles"
         print_item "E" "BE200 Wi-Fi 7 Firmware"      "Install/revert Intel BE200 PCIe firmware (-100/-101 ucode)"
         print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
         print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
@@ -5675,6 +5862,7 @@ reapply_installed_components() {
             core_unlock) print_info "CPU Core Unlock boot service persists via the atomic-update keep list — skipped in unattended re-apply." ;;
             ram_split)  print_info "RAM/VRAM split persists on its own (CMOS is hardware state; GRUB config is in the atomic-update keep list) — skipped in unattended re-apply." ;;
             aic8800)    install_aic8800_wifi || print_error "AIC8800 WiFi reapply failed" ;;
+            aic8800_legacy_mcu1) install_aic8800_legacy_mcu1 || print_error "AIC8800 legacy-MCU1 WiFi reapply failed" ;;
             sensors)    install_sensors_pwm || print_error "Sensors PWM reapply failed" ;;
             coolercontrol) install_coolercontrol || print_error "CoolerControl reapply failed" ;;
             xbox)       install_xbox_adapter || print_error "Xbox adapter reapply failed" ;;
@@ -5734,6 +5922,7 @@ EOF
 # Toolkit state preserved across SteamOS atomic updates
 # generated by bc250-steamos-real-toolkit
 /etc/default/grub
+/etc/bc250-aic8800-profile
 /etc/modprobe.d/aic8800.conf
 /etc/modprobe.d/sensors.conf
 /etc/modules-load.d/99-sensors.conf
@@ -5790,6 +5979,7 @@ EOF
             /etc/cyan-skillfish-governor-smu/freq-state \
             /etc/coolercontrol \
             /etc/coolercontrold \
+            /etc/bc250-aic8800-profile \
             /etc/modprobe.d/aic8800.conf \
             /etc/modprobe.d/sensors.conf \
             /etc/modules-load.d/99-sensors.conf \

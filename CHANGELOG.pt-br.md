@@ -9,6 +9,15 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## v1.8.2 — 2026-08-31
 
+- **Adicionado:** Perfil WiFi AIC8800DC/DW `legacy-mcu1` para adaptadores antigos
+  que reportam `chip_id=7, chip_mcu_id=1` (ex. Tenda W311MI WiFi 6 USB). Usa o
+  conjunto pre-SDK-V5/V3 de driver e firmware validado upstream. Opt-in via
+  Extras → AIC8800 → L.
+- **Adicionado:** Ejeção automática do disco virtual `a69c:5721` para adaptadores
+  Tenda AIC8800DC que reaparecem como dispositivo WiFi `2604:0013`.
+- **Corrigido:** Persistência de atualizações do SteamOS agora registra o perfil
+  AIC8800 selecionado, evitando que o perfil D80 sobrescreva uma instalação
+  legacy-MCU1 funcional durante reaplicação automática.
 - **Corrigido:** Instalação do CPU Governor não falha mais no SteamOS Main quando
   `python-pipx` não está disponível via pacman — agora faz fallback para `pip3 install pipx`.
 - **Corrigido:** Prompt de telemetria (`cs_legacy_8core_metrics=1`) agora aparece
