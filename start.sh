@@ -2506,7 +2506,7 @@ YCBCR444_MODPROBE_FILE="/etc/modprobe.d/amdgpu-ycbcr444.conf"
 
 ycbcr444_modprobe_installed() {
     [[ -f "$YCBCR444_MODPROBE_FILE" ]] && \
-    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
+    grep -q 'dcfeaturemask=0x402' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
 }
 
 ycbcr444_ensure_modprobe() {
@@ -2515,12 +2515,12 @@ ycbcr444_ensure_modprobe() {
     fi
     steamos_writable "
         mkdir -p /etc/modprobe.d
-        echo 'options amdgpu force_ycbcr444=1 force_min_bpc=10 dcfeaturemask=0x402' > \"$YCBCR444_MODPROBE_FILE\"
+        echo 'options amdgpu dcfeaturemask=0x402' > \"$YCBCR444_MODPROBE_FILE\"
     " || {
         print_info "Failed to create $YCBCR444_MODPROBE_FILE. Create it manually."
         return 0
     }
-    print_info "Created $YCBCR444_MODPROBE_FILE with force_ycbcr444=1 force_min_bpc=10 dcfeaturemask=0x402."
+    print_info "Created $YCBCR444_MODPROBE_FILE with dcfeaturemask=0x402 (FRL only)."
     print_info "Rebuild initramfs with: sudo mkinitcpio -P"
     steamos_writable "mkinitcpio -P" 2>/dev/null || true
 }
@@ -3792,19 +3792,18 @@ install_combined_fix() {
     fi
 
     echo ""
-    echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color + HDMI 2.1 FRL for DP-HDMI PCON${RESET}"
-    echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + 10-bit minimum on DP→HDMI adapters.${RESET}"
-    echo -e "  ${DIM}Eliminates color banding on TVs that support HDMI deep color (DC_Y444).${RESET}"
+    echo -e "  ${CYAN}HDMI 2.1 FRL for DP-HDMI PCON${RESET}"
     echo -e "  ${DIM}Enables HDMI 2.1 FRL (dcfeaturemask=0x402) for CH7218 PCON dongles.${RESET}"
-    echo -e "  ${DIM}Requires a DP-HDMI PCON dongle (e.g. Ugreen CH7218) and a TV with deep color support.${RESET}"
-    echo -e "  ${DIM}With FRL: 1440p@120 12-bit or 4K@60 12-bit. Without FRL: 1440p@60 or 1080p@120.${RESET}"
+    echo -e "  ${DIM}FRL allows higher bandwidth: 1440p@120 10-bit or 4K@60 10-bit.${RESET}"
+    echo -e "  ${DIM}The driver auto-negotiates pixel encoding and color depth per mode.${RESET}"
+    echo -e "  ${DIM}Requires a DP-HDMI PCON dongle (e.g. Ugreen CH7218).${RESET}"
     echo ""
     if ycbcr444_modprobe_installed; then
-        print_info "YCbCr 4:4:4 deep color is already enabled (modprobe.d config present)."
-    elif confirm "Enable YCbCr 4:4:4 deep color for DP-HDMI PCON output?"; then
+        print_info "HDMI 2.1 FRL is already enabled (modprobe.d config present)."
+    elif confirm "Enable HDMI 2.1 FRL for DP-HDMI PCON output?"; then
         ycbcr444_ensure_modprobe
     else
-        print_info "Skipped YCbCr 4:4:4. Enable manually with: echo 'options amdgpu force_ycbcr444=1 force_min_bpc=10 dcfeaturemask=0x402' > $YCBCR444_MODPROBE_FILE"
+        print_info "Skipped FRL. Enable manually with: echo 'options amdgpu dcfeaturemask=0x402' > $YCBCR444_MODPROBE_FILE"
     fi
 }
 
