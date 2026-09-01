@@ -2534,6 +2534,125 @@ ycbcr444_remove_modprobe() {
     steamos_writable "mkinitcpio -P" 2>/dev/null || true
 }
 
+# --- EDID override for HDMI 2.1 PCON passthrough ------------------------------
+# DP-HDMI PCON dongles (e.g. CH7218) often don't pass the HF-VSDB (HDMI Forum
+# Vendor Specific Data Block) in the EDID they present to the GPU. Without it,
+# the kernel thinks the TV is HDMI 2.0 (max TMDS 300 MHz) and can't detect VRR,
+# ALLM, or FRL capabilities — causing sync instability and missing features.
+# The EDID override binary adds the HF-VSDB with FRL 48 Gbps, VRR, and ALLM.
+
+EDID_OVERRIDE_DIR="/lib/firmware/edid"
+EDID_OVERRIDE_BIN="samsung-q80a-hdmi21.bin"
+EDID_OVERRIDE_SRC="$SCRIPT_DIR/edid/$EDID_OVERRIDE_BIN"
+EDID_GRUB_PARAM="drm.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN"
+
+edid_override_installed() {
+    [[ -f "$EDID_OVERRIDE_DIR/$EDID_OVERRIDE_BIN" ]] && \
+    [[ -f "$GRUB_DEFAULT" ]] && \
+    grep -q "drm\.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN" "$GRUB_DEFAULT" 2>/dev/null
+}
+
+edid_override_install() {
+    if edid_override_installed; then
+        print_info "EDID override already installed."
+        return 0
+    fi
+    if [[ ! -f "$EDID_OVERRIDE_SRC" ]]; then
+        print_info "EDID override binary not found at $EDID_OVERRIDE_SRC. Skipping."
+        return 1
+    fi
+    echo -e "  ${DIM}Installing EDID override: $EDID_OVERRIDE_BIN${RESET}"
+    echo -e "  ${DIM}This adds HF-VSDB (HDMI 2.1) to the EDID the kernel sees.${RESET}"
+    echo -e "  ${DIM}Enables: FRL 48 Gbps, VRR 48-120 Hz, ALLM, 600 MHz TMDS.${RESET}"
+    echo -e "  ${DIM}Requires reboot. The TV must be on an HDMI 2.1 port (3/4 on Samsung Q80A).${RESET}"
+    echo ""
+    if ! confirm "Install EDID override for Samsung Q80A HDMI 2.1?"; then
+        print_info "Skipped EDID override."
+        return 0
+    fi
+    steamos_writable "
+        mkdir -p '$EDID_OVERRIDE_DIR'
+        cp '$EDID_OVERRIDE_SRC' '$EDID_OVERRIDE_DIR/$EDID_OVERRIDE_BIN'
+    " || {
+        print_info "Failed to copy EDID binary to $EDID_OVERRIDE_DIR."
+        return 1
+    }
+    print_info "Copied $EDID_OVERRIDE_BIN to $EDID_OVERRIDE_DIR."
+    if [[ -f "$GRUB_DEFAULT" ]] && command -v update-grub >/dev/null 2>&1; then
+        steamos_writable "
+            cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+            if ! grep -q 'drm\.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN' \"$GRUB_DEFAULT\"; then
+                sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 $EDID_GRUB_PARAM\"/' \"$GRUB_DEFAULT\"
+            fi
+            update-grub
+        " || {
+            print_info "Failed to add drm.edid_firmware to GRUB. Add manually: $EDID_GRUB_PARAM"
+            return 1
+        }
+        print_info "Added $EDID_GRUB_PARAM to GRUB."
+    else
+        print_info "Could not update GRUB. Add manually: $EDID_GRUB_PARAM"
+    fi
+    print_info "Rebuilding initramfs to include EDID firmware..."
+    steamos_writable "mkinitcpio -P" 2>/dev/null || true
+    print_success "EDID override installed! Reboot to apply."
+    print_info "After reboot verify with: edid-decode /sys/class/drm/card0-DP-1/edid | grep 'HDMI Forum'"
+}
+
+edid_override_remove() {
+    if ! [[ -f "$EDID_OVERRIDE_DIR/$EDID_OVERRIDE_BIN" ]] && \
+       ! { [[ -f "$GRUB_DEFAULT" ]] && grep -q "drm\.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN" "$GRUB_DEFAULT" 2>/dev/null; }; then
+        print_info "EDID override not installed."
+        return 0
+    fi
+    if ! confirm "Remove EDID override and restore native EDID?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+    steamos_writable "rm -f '$EDID_OVERRIDE_DIR/$EDID_OVERRIDE_BIN'" 2>/dev/null || true
+    if [[ -z "$(ls -A '$EDID_OVERRIDE_DIR' 2>/dev/null)" ]]; then
+        steamos_writable "rmdir '$EDID_OVERRIDE_DIR' 2>/dev/null" || true
+    fi
+    if [[ -f "$GRUB_DEFAULT" ]] && command -v update-grub >/dev/null 2>&1; then
+        steamos_writable "
+            cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+            sed -i 's/ drm\\.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN//g; s/drm\\.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN //g; s/drm\\.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN//g' \"$GRUB_DEFAULT\"
+            update-grub
+        " || {
+            print_info "Failed to remove drm.edid_firmware from GRUB. Remove manually."
+        }
+    fi
+    steamos_writable "mkinitcpio -P" 2>/dev/null || true
+    print_success "EDID override removed. Reboot to use native EDID."
+}
+
+grub_cleanup_stale_params() {
+    if [[ ! -f "$GRUB_DEFAULT" ]]; then
+        return 0
+    fi
+    local changed=0
+    if grep -q 'amdgpu\.force_ycbcr444=1' "$GRUB_DEFAULT" 2>/dev/null; then
+        print_info "Removing stale amdgpu.force_ycbcr444=1 from GRUB..."
+        changed=1
+    fi
+    if grep -q 'amdgpu\.force_min_bpc=10' "$GRUB_DEFAULT" 2>/dev/null; then
+        print_info "Removing stale amdgpu.force_min_bpc=10 from GRUB..."
+        changed=1
+    fi
+    if (( changed )); then
+        steamos_writable "
+            cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+            sed -i 's/ amdgpu\\.force_ycbcr444=1//g; s/amdgpu\\.force_ycbcr444=1 //g; s/amdgpu\\.force_ycbcr444=1//g' \"$GRUB_DEFAULT\"
+            sed -i 's/ amdgpu\\.force_min_bpc=10//g; s/amdgpu\\.force_min_bpc=10 //g; s/amdgpu\\.force_min_bpc=10//g' \"$GRUB_DEFAULT\"
+            update-grub
+        " || {
+            print_info "Failed to clean stale params from GRUB. Remove manually."
+            return 0
+        }
+        print_info "Stale force_ycbcr444/force_min_bpc removed from GRUB."
+    fi
+}
+
 audio_fix_remove_pcon_grub_param() {
     if ! audio_fix_pcon_grub_installed; then
         return 0
@@ -2555,11 +2674,13 @@ audio_fix_remove_pcon_grub_param() {
 audio_fix_cleanup_legacy_edid() {
     local changed=0
 
-    # Remove all legacy EDID firmware binaries (any .bin in /lib/firmware/edid)
+    # Remove legacy EDID firmware binaries (any .bin in /lib/firmware/edid)
+    # but preserve the HDMI 2.1 PCON override if present
     local edid_dir="/lib/firmware/edid"
     if [[ -d "$edid_dir" ]]; then
         local legacy_bins=()
         while IFS= read -r f; do
+            [[ "$(basename "$f")" == "$EDID_OVERRIDE_BIN" ]] && continue
             legacy_bins+=("$f")
         done < <(find "$edid_dir" -maxdepth 1 -name '*.bin' -type f 2>/dev/null)
 
@@ -2575,15 +2696,16 @@ audio_fix_cleanup_legacy_edid() {
         fi
     fi
 
-    # Remove any drm.edid_firmware=... from GRUB cmdline (any connector, any path)
-    if [[ -f "$GRUB_DEFAULT" ]] && grep -q 'drm\.edid_firmware' "$GRUB_DEFAULT" 2>/dev/null; then
-        print_info "Removing drm.edid_firmware from GRUB cmdline (using native EDID now)."
+    # Remove legacy drm.edid_firmware=... from GRUB cmdline, but preserve our HDMI 2.1 override
+    if [[ -f "$GRUB_DEFAULT" ]] && grep -q 'drm\.edid_firmware' "$GRUB_DEFAULT" 2>/dev/null && \
+       ! grep -q "drm\\.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN" "$GRUB_DEFAULT" 2>/dev/null; then
+        print_info "Removing legacy drm.edid_firmware from GRUB cmdline (using native EDID now)."
         steamos_writable "
             cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
             sed -i 's/ drm\\.edid_firmware=[^ \"\\t]*//g; s/drm\\.edid_firmware=[^ \"\\t]* //g; s/drm\\.edid_firmware=[^ \"\\t]*//g' \"$GRUB_DEFAULT\"
             update-grub
         " || {
-            print_info "Failed to remove drm.edid_firmware from GRUB. Remove it manually."
+            print_info "Failed to remove legacy drm.edid_firmware from GRUB. Remove it manually."
         }
         changed=1
     fi
@@ -2707,6 +2829,22 @@ install_audio_fix() {
         audio_fix_ensure_hpd_debounce_grub_param
     else
         print_info "Skipped HPD debounce param. Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 manually if needed."
+    fi
+
+    grub_cleanup_stale_params
+
+    echo ""
+    echo -e "  ${CYAN}EDID Override for HDMI 2.1 PCON${RESET}"
+    echo -e "  ${DIM}DP-HDMI PCON dongles may not pass the HF-VSDB in the EDID.${RESET}"
+    echo -e "  ${DIM}Without it, the kernel can't detect VRR, ALLM, or FRL — causing sync instability.${RESET}"
+    echo -e "  ${DIM}The override adds HDMI 2.1 capabilities (FRL 48 Gbps, VRR 48-120, ALLM) to the EDID.${RESET}"
+    echo ""
+    if edid_override_installed; then
+        print_info "EDID override already installed."
+    elif confirm "Install EDID override for HDMI 2.1 PCON (Samsung Q80A)?"; then
+        edid_override_install
+    else
+        print_info "Skipped EDID override. Install manually if experiencing sync issues."
     fi
 }
 
@@ -3804,6 +3942,22 @@ install_combined_fix() {
         ycbcr444_ensure_modprobe
     else
         print_info "Skipped FRL. Enable manually with: echo 'options amdgpu dcfeaturemask=0x402' > $YCBCR444_MODPROBE_FILE"
+    fi
+
+    grub_cleanup_stale_params
+
+    echo ""
+    echo -e "  ${CYAN}EDID Override for HDMI 2.1 PCON${RESET}"
+    echo -e "  ${DIM}DP-HDMI PCON dongles may not pass the HF-VSDB in the EDID.${RESET}"
+    echo -e "  ${DIM}Without it, the kernel can't detect VRR, ALLM, or FRL — causing sync instability.${RESET}"
+    echo -e "  ${DIM}The override adds HDMI 2.1 capabilities (FRL 48 Gbps, VRR 48-120, ALLM) to the EDID.${RESET}"
+    echo ""
+    if edid_override_installed; then
+        print_info "EDID override already installed."
+    elif confirm "Install EDID override for HDMI 2.1 PCON (Samsung Q80A)?"; then
+        edid_override_install
+    else
+        print_info "Skipped EDID override. Install manually if experiencing sync issues."
     fi
 }
 
@@ -5616,6 +5770,8 @@ run_revert_all() {
     echo ""
     run_revert_gfx1013_fix
     echo ""
+    edid_override_remove
+    echo ""
     run_revert_aic8800_wifi
 }
 
@@ -5646,6 +5802,8 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
+        print_item "12"  "Install EDID Override (HDMI 2.1)"  "HF-VSDB override for PCON: FRL 48G, VRR 48-120, ALLM — fixes sync"
+        print_item "12R" "Revert EDID Override"             "Restore native EDID from display"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -5673,6 +5831,8 @@ run_install_manual() {
             10R) run_revert_gfx1013_fix; press_enter ;;
             11) install_ac3_surround;      press_enter ;;
             11R) run_revert_ac3_surround;  press_enter ;;
+            12) edid_override_install;      press_enter ;;
+            12R) edid_override_remove;     press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
