@@ -7,6 +7,21 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.8.3 — 2026-09-01
+
+- **Fixed:** Duplicate `DC_NO_DP_LINK_BANDWIDTH` case label in the YCbCr 4:4:4
+  patch caused a fatal compile error (`duplicate case value`). This affected
+  all users building from the v1.8.2 release.
+- **Fixed:** `force_ycbcr444=1` no longer forces 4:4:4 unconditionally — it now
+  only applies when FRL is negotiated for the mode. This fixes sync instability
+  in gamescope at resolutions other than 1440p120 (e.g. 4K60, 1080p).
+- **Changed:** Default modprobe config now only enables `dcfeaturemask=0x402`
+  (FRL). `force_ycbcr444=1` and `force_min_bpc=10` are no longer set by
+  default — the driver auto-negotiates pixel encoding and color depth per
+  mode. This fixes gamescope color range changes (auto → full) causing sync
+  loss, and oversaturated colors from conflicting with gamescope's BT2020_RGB
+  colorimetry. The module params remain available for advanced manual use.
+
 ## v1.8.2 — 2026-08-31
 
 - **Added:** AIC8800DC/DW `legacy-mcu1` WiFi profile for older adapters reporting
