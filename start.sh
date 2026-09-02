@@ -2570,6 +2570,10 @@ audio_fix_hpd_debounce_grub_installed() {
     [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.hdmi_hpd_debounce_delay_ms=1500' "$GRUB_DEFAULT" >/dev/null 2>&1
 }
 
+audio_fix_allm_grub_installed() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.allm_mode=2' "$GRUB_DEFAULT" >/dev/null 2>&1
+}
+
 audio_fix_ensure_pcon_grub_param() {
     if audio_fix_pcon_grub_installed; then
         return 0
@@ -2590,6 +2594,28 @@ audio_fix_ensure_pcon_grub_param() {
         return 0
     }
     print_info "Added amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON."
+}
+
+audio_fix_ensure_allm_grub_param() {
+    if audio_fix_allm_grub_installed; then
+        return 0
+    fi
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        print_info "Could not add amdgpu.allm_mode=2 to GRUB (missing $GRUB_DEFAULT or update-grub)."
+        print_info "Add it manually for ALLM via DP/PCON: edit $GRUB_DEFAULT and run sudo update-grub."
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.allm_mode=2'; then
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.allm_mode=2\"/' \"$GRUB_DEFAULT\"
+        fi
+        update-grub
+    " || {
+        print_info "Failed to add amdgpu.allm_mode=2 to GRUB. Add it manually for ALLM via DP/PCON."
+        return 0
+    }
+    print_info "Added amdgpu.allm_mode=2 to GRUB for ALLM via DP/PCON."
 }
 
 audio_fix_ensure_hpd_debounce_grub_param() {
@@ -2757,6 +2783,40 @@ edid_override_remove() {
     fi
     steamos_writable "mkinitcpio -P" 2>/dev/null || true
     print_success "EDID override removed. Reboot to use native EDID."
+}
+
+GAMESCOPE_SESSION=/usr/lib/steamos/gamescope-session
+
+gamescope_session_bc250_patched() {
+    [[ -f "$GAMESCOPE_SESSION" ]] && grep -q 'AMD BC-250' "$GAMESCOPE_SESSION" 2>/dev/null
+}
+
+gamescope_session_patch_bc250() {
+    if gamescope_session_bc250_patched; then
+        return 0
+    fi
+    if [[ ! -f "$GAMESCOPE_SESSION" ]]; then
+        print_info "gamescope-session not found at $GAMESCOPE_SESSION — skipping BC-250 profile patch."
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GAMESCOPE_SESSION\" \"$GAMESCOPE_SESSION.bak\"
+        sed -i '/elif \[\[ \$board_name = \"Jupiter\" \]\]; then/,/else/{
+            /else/i\\
+elif [[ \$board_name = \"AMD BC-250\" ]]; then\\
+\\tui_background=/usr/share/plymouth/themes/steamos/steamos-galileo.png\\
+\\
+\\t# BC-250 (PS5 APU) with external display via DP→HDMI PCON\\
+\\t# VRR range 48-120 Hz via FreeSync over PCON, HDR capable\\
+\\texport STEAM_DISPLAY_REFRESH_LIMITS=48,120\\
+\\texport STEAM_GAMESCOPE_FORCE_HDR_DEFAULT=1\\
+\\texport STEAM_GAMESCOPE_FORCE_OUTPUT_TO_HDR10PQ_DEFAULT=1
+        }' \"$GAMESCOPE_SESSION\"
+    " || {
+        print_info "Failed to patch gamescope-session for BC-250 profile."
+        return 0
+    }
+    print_info "Patched gamescope-session with BC-250 profile (HDR + VRR 48-120Hz refresh limits)."
 }
 
 grub_cleanup_stale_params() {
@@ -2983,6 +3043,15 @@ install_audio_fix() {
     fi
 
     echo ""
+    if audio_fix_allm_grub_installed; then
+        print_info "amdgpu.allm_mode=2 is already in GRUB — ALLM via DP/PCON active."
+    elif confirm "Add amdgpu.allm_mode=2 to GRUB for ALLM via DP/PCON?"; then
+        audio_fix_ensure_allm_grub_param
+    else
+        print_info "Skipped ALLM param. Add amdgpu.allm_mode=2 manually for ALLM via DP/PCON."
+    fi
+
+    echo ""
     if audio_fix_hpd_debounce_grub_installed; then
         print_info "amdgpu.hdmi_hpd_debounce_delay_ms=1500 is already in GRUB — HPD debounce active."
     elif confirm "Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB for HDMI HPD debounce (prevents spurious HPD on TV power cycling)?"; then
@@ -2992,6 +3061,8 @@ install_audio_fix() {
     fi
 
     grub_cleanup_stale_params
+
+    gamescope_session_patch_bc250
 
     echo ""
     echo -e "  ${CYAN}EDID Override for HDMI 2.1 PCON${RESET}"
@@ -4148,6 +4219,8 @@ install_combined_fix() {
     fi
 
     grub_cleanup_stale_params
+
+    gamescope_session_patch_bc250
 
     echo ""
     echo -e "  ${CYAN}EDID Override for HDMI 2.1 PCON${RESET}"
