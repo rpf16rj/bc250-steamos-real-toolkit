@@ -2,6 +2,11 @@
 description: Cut a new numbered release (GitFlow) with EN/PT changelogs and a downloadable zip
 ---
 
+## Knowledge Base
+
+Read `.kb/start_sh.md` and `.kb/build.md` for architecture context before
+cutting a release. The KB is local-only (in `.gitignore`), never commit it.
+
 Branching model: `develop` is where all ongoing work happens (commit directly
 or via short-lived feature branches merged into `develop`). `main` only ever
 receives fast-forward-free merges from `develop` at release time, and every

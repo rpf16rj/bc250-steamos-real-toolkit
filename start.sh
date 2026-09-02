@@ -273,6 +273,122 @@ confirm() {
     [[ "$ans" =~ ^[Yy]$ ]]
 }
 
+# pick_items: multi-select checklist using whiptail (arrow keys + space).
+# Usage: pick_items "Select components:" "item1:Description one" "item2:Description two" ...
+# Items starting with '+' are pre-selected (e.g. "+item1:Description one").
+# Sets PICK_SELECTED[] with the names of selected items (without + prefix).
+pick_items() {
+    local title="$1"; shift
+    local -a items=() descs=() states=()
+    local i
+
+    while [[ $# -gt 0 ]]; do
+        local entry="$1"; shift
+        local pre="OFF"
+        [[ "$entry" == +* ]] && { pre="ON"; entry="${entry#+}"; }
+        local name="${entry%%:*}"
+        local desc="${entry#*:}"
+        [[ "$name" == "$entry" ]] && desc=""
+        items+=("$name")
+        descs+=("$desc")
+        states+=("$pre")
+    done
+
+    local count=${#items[@]}
+    if [[ $count -eq 0 ]]; then
+        PICK_SELECTED=()
+        return 0
+    fi
+
+    if [[ "$AUTO" == "1" ]]; then
+        PICK_SELECTED=()
+        for ((i=0; i<count; i++)); do
+            [[ "${states[$i]}" == "ON" ]] && PICK_SELECTED+=("${items[$i]}")
+        done
+        return 0
+    fi
+
+    # Fallback to simple read-based toggle if whiptail is not available
+    if ! command -v whiptail >/dev/null 2>&1; then
+        local -a sel=()
+        for ((i=0; i<count; i++)); do
+            [[ "${states[$i]}" == "ON" ]] && sel+=("1") || sel+=("0")
+        done
+        local changed=1
+        while true; do
+            if [[ $changed -eq 1 ]]; then
+                echo ""
+                echo -e "  ${BOLD}${WHITE}${title}${RESET}"
+                echo ""
+                for ((i=0; i<count; i++)); do
+                    if [[ "${sel[$i]}" == "1" ]]; then
+                        printf "  ${BOLD}${WHITE}[${GREEN}x${WHITE}]${RESET} ${CYAN}%d${RESET}  %-28s ${DIM}%s${RESET}\n" \
+                            "$((i+1))" "${items[$i]}" "${descs[$i]}"
+                    else
+                        printf "  ${BOLD}${WHITE}[ ${WHITE}]${RESET} ${DIM}%d${RESET}  %-28s ${DIM}%s${RESET}\n" \
+                            "$((i+1))" "${items[$i]}" "${descs[$i]}"
+                    fi
+                done
+                echo ""
+                echo -e "  ${DIM}Toggle by number, or: all / none / done${RESET}"
+                changed=0
+            fi
+            read -rp "  → " ans
+            ans="${ans,,}"
+            case "$ans" in
+                done|d|"") break ;;
+                all)  for ((i=0; i<count; i++)); do sel[$i]=1; done; changed=1 ;;
+                none) for ((i=0; i<count; i++)); do sel[$i]=0; done; changed=1 ;;
+                *)
+                    local valid=0
+                    for tok in $ans; do
+                        tok="${tok//,/}"
+                        if [[ "$tok" =~ ^[0-9]+$ ]] && (( tok >= 1 && tok <= count )); then
+                            (( sel[tok-1] ^= 1 )); valid=1
+                        fi
+                    done
+                    [[ $valid -eq 1 ]] && changed=1 || echo -e "  ${DIM}Invalid. Use numbers, all, none, or done.${RESET}"
+                    ;;
+            esac
+        done
+        PICK_SELECTED=()
+        for ((i=0; i<count; i++)); do
+            [[ "${sel[$i]}" == "1" ]] && PICK_SELECTED+=("${items[$i]}")
+        done
+        return 0
+    fi
+
+    # whiptail checklist: arrow keys to navigate, space to toggle, Enter to confirm
+    local -a wt_args=()
+    for ((i=0; i<count; i++)); do
+        wt_args+=("${items[$i]}" "${descs[$i]}" "${states[$i]}")
+    done
+
+    local menu_h=$(( count + 7 ))
+    (( menu_h > 20 )) && menu_h=20
+    local box_h=$(( count + 6 ))
+    (( box_h > 18 )) && box_h=18
+
+    local result rc
+    result=$(whiptail --title "$title" --checklist \
+        "Use ↑↓ to navigate, Space to toggle, Enter to confirm" \
+        "$box_h" 76 "$menu_h" "${wt_args[@]}" 3>&1 1>&2 2>&3)
+    rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+        PICK_SELECTED=()
+        for ((i=0; i<count; i++)); do
+            [[ "${states[$i]}" == "ON" ]] && PICK_SELECTED+=("${items[$i]}")
+        done
+        return 0
+    fi
+
+    PICK_SELECTED=()
+    while IFS= read -r item; do
+        [[ -n "$item" ]] && PICK_SELECTED+=("$item")
+    done < <(printf '%s\n' "$result" | tr -d '"' | tr ' ' '\n' | grep -v '^$')
+}
+
 open_url() {
     local url="$1"
     if command -v xdg-open >/dev/null 2>&1; then
@@ -2635,17 +2751,44 @@ install_audio_fix() {
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
-    echo -e "  ${DIM}Fixes DisplayPort video/audio played back at ~82% speed (pitched down).${RESET}"
-    echo -e "  ${DIM}Also queries GFX clock directly from the SMU and adds GPU utilization reporting${RESET}"
-    echo -e "  ${DIM}(needed for correct GPU clock/load readings once CPU Core Unlock is active).${RESET}"
-    echo -e "  ${DIM}Disables DP spread spectrum at the display manager layer for cleaner audio output.${RESET}"
-    echo -e "  ${DIM}Adds tunable gfxclk/activity cache (cs_gfxclk_cache_ms, cs_activity_cache_ms module params).${RESET}"
-    echo -e "  ${DIM}VRR over HDMI via PCON: FreeSync fallback + LFC-aware range extending${RESET}"
-    echo -e "  ${DIM}ALLM (Auto Low Latency Mode) via DP for PCON HDMI Game Mode${RESET}"
     echo ""
     if ! confirm "Continue with the DisplayPort audio/video fix?"; then
         print_info "Cancelled."
         return 0
+    fi
+
+    # Detect kernel major version
+    local kver_major
+    kver_major="$(uname -r | cut -d. -f1)"
+
+    # Build checklist — all patches individually selectable
+    local -a checklist_items=(
+        "+DP Audio Clock:Fixes audio/video at ~82% speed via DP/HDMI"
+        "+DP Spread Spectrum:Cleaner audio output via DP/HDMI"
+        "+TTM NULL-page Guard:Prevents crashes from NULL page mappings"
+        "+SCLK Range (350-2230):Widened GPU clock range for userspace governors"
+        "+KFD Flush TLB:Compute memory coherency fix"
+        "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
+        "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
+    )
+    if [[ "$kver_major" -ge 7 ]]; then
+        checklist_items+=("+YCbCr 4:4:4 Deep Color:PCON color quality + CH7218 quirk")
+    fi
+
+    pick_items "Select kernel patches to include:" "${checklist_items[@]}"
+
+    local selected_str="${PICK_SELECTED[*]}"
+    local audio_flags="--audio"
+
+    [[ " $selected_str " == *" DP Audio Clock "* ]] || audio_flags="$audio_flags --no-audio-clock"
+    [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || audio_flags="$audio_flags --no-telemetry"
+    [[ " $selected_str " == *" DP Spread Spectrum "* ]] || audio_flags="$audio_flags --no-ss"
+    [[ " $selected_str " == *" PCON FRL Hotplug "* ]] || audio_flags="$audio_flags --no-frl-hp"
+    [[ " $selected_str " == *" TTM NULL-page Guard "* ]] || audio_flags="$audio_flags --no-ttm"
+    [[ " $selected_str " == *" SCLK Range (350-2230) "* ]] || audio_flags="$audio_flags --no-sclk"
+    [[ " $selected_str " == *" KFD Flush TLB "* ]] || audio_flags="$audio_flags --no-kfd"
+    if [[ "$kver_major" -ge 7 ]]; then
+        [[ " $selected_str " == *" YCbCr 4:4:4 Deep Color "* ]] || audio_flags="$audio_flags --no-ycbcr444"
     fi
 
     fixes_repo_sync || return 1
@@ -2676,7 +2819,7 @@ install_audio_fix() {
     else
         print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
     fi
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh"; then
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${audio_flags}"; then
         fail_with_log "DisplayPort audio/video fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Audio Fix — patch-driver.sh"
         return 1
     fi
@@ -3625,23 +3768,73 @@ install_combined_fix() {
     kver_rest="$(uname -r | cut -d. -f2-)"
     kver_minor="${kver_rest%%.*}"
 
-    echo -e "  ${CYAN}1) Audio Fix${RESET} — DP audio/video clock + GPU metrics + DP SS disable + tunable cache"
-    if confirm "  Install Audio Fix?"; then do_audio=1; patch_flags+=(--audio); fi
-    echo ""
-    echo -e "  ${CYAN}2) GFX1013 Compute Fix + Mesa/RADV${RESET} — async compute + FSR4 V3 + mesh/task shaders"
-    if confirm "  Install GFX1013 Compute Fix + Mesa?"; then do_gfx=1; patch_flags+=(--gfx1013); fi
-    echo ""
+    # Build the checklist items — all patches individually selectable
+    local -a checklist_items=(
+        "+DP Audio Clock:Fixes audio/video at ~82% speed via DP/HDMI"
+        "+DP Spread Spectrum:Cleaner audio output via DP/HDMI"
+        "+TTM NULL-page Guard:Prevents crashes from NULL page mappings"
+        "+SCLK Range (350-2230):Widened GPU clock range for userspace governors"
+        "+KFD Flush TLB:Compute memory coherency fix"
+        "+GFX1013 Compute+Mesa:Async compute queue + FSR4 + mesh/task shaders"
+        "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
+        "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
+    )
+
+    # YCbCr 4:4:4 only on kernel 7.x
+    if [[ "$kver_major" -ge 7 ]]; then
+        checklist_items+=("+YCbCr 4:4:4 Deep Color:PCON color quality + CH7218 quirk")
+    fi
+
+    # VRR and ALLM only on kernel <7
+    if [[ "$kver_major" -lt 7 ]]; then
+        checklist_items+=("+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC range")
+        checklist_items+=("+ALLM via DP:Auto Low Latency Mode for PCON HDMI Game Mode")
+    fi
+
+    pick_items "Select kernel patches to include:" "${checklist_items[@]}"
+
+    # Map selected items to patch-driver.sh flags
+    local selected_str="${PICK_SELECTED[*]}"
+
+    # Audio sub-patches (require --audio base flag)
+    [[ " $selected_str " == *" DP Audio Clock "* ]] || patch_flags+=(--no-audio-clock)
+    [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || patch_flags+=(--no-telemetry)
+    [[ " $selected_str " == *" DP Spread Spectrum "* ]] || patch_flags+=(--no-ss)
+
+    # If any audio sub-patch is selected, add --audio
+    if [[ " $selected_str " == *" DP Audio Clock "* ]] || \
+       [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || \
+       [[ " $selected_str " == *" DP Spread Spectrum "* ]]; then
+        do_audio=1
+        patch_flags=(--audio "${patch_flags[@]}")
+    fi
+
+    # Always-applied patches (now individually excludable)
+    [[ " $selected_str " == *" PCON FRL Hotplug "* ]] || patch_flags+=(--no-frl-hp)
+    [[ " $selected_str " == *" TTM NULL-page Guard "* ]] || patch_flags+=(--no-ttm)
+    [[ " $selected_str " == *" SCLK Range (350-2230) "* ]] || patch_flags+=(--no-sclk)
+    [[ " $selected_str " == *" KFD Flush TLB "* ]] || patch_flags+=(--no-kfd)
 
     if [[ "$kver_major" -ge 7 ]]; then
-        print_info "Kernel 7.x detected — VRR and ALLM patches are not needed (already functional upstream). Skipping."
-        echo ""
-    else
-        echo -e "  ${CYAN}3) VRR PCON FreeSync${RESET} — FreeSync fallback + HDMI VRR (VTEM) + LFC-aware range extending"
-        if confirm "  Install VRR PCON FreeSync patch?"; then do_vrr=1; patch_flags+=(--vrr); fi
-        echo ""
-        echo -e "  ${CYAN}4) ALLM via DP${RESET} — Auto Low Latency Mode for PCON HDMI Game Mode"
-        if confirm "  Install ALLM via DP patch?"; then do_allm=1; patch_flags+=(--allm); fi
-        echo ""
+        [[ " $selected_str " == *" YCbCr 4:4:4 Deep Color "* ]] || patch_flags+=(--no-ycbcr444)
+    fi
+
+    # GFX1013
+    if [[ " $selected_str " == *" GFX1013 Compute+Mesa "* ]]; then
+        do_gfx=1
+        patch_flags+=(--gfx1013)
+    fi
+
+    # VRR and ALLM (kernel <7)
+    if [[ "$kver_major" -lt 7 ]]; then
+        if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
+            do_vrr=1
+            patch_flags+=(--vrr)
+        fi
+        if [[ " $selected_str " == *" ALLM via DP "* ]]; then
+            do_allm=1
+            patch_flags+=(--allm)
+        fi
     fi
 
     if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 ]]; then
@@ -3650,9 +3843,6 @@ install_combined_fix() {
     fi
 
     validate_combined_fix_prerequisites "$do_gfx" || return 1
-
-    echo -e "  ${DIM}Always included: TTM NULL-page guard + SCLK range widening (350-2230 MHz)${RESET}"
-    echo ""
 
     local mesh_flag=""
     if [[ $do_gfx -eq 1 ]]; then
