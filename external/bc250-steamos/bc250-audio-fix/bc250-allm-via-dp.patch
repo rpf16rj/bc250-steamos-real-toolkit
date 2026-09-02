@@ -1,24 +1,13 @@
-diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
---- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
-+++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
-@@ -208,6 +208,7 @@ int amdgpu_emu_mode;
- uint amdgpu_smu_memory_pool_size;
- int amdgpu_smu_pptable_id = -1;
-+int amdgpu_allm_mode = 0;
- /*
-  * FBC (bit 0) disabled by default
-  * MULTI_MON_PP_MCLK_SWITCH (bit 1) enabled by default
-   - With this, for multiple monitors in sync(e.g. with the same model),
-@@ -591,6 +592,9 @@ MODULE_PARM_DESC(emu_mode, "Emulation mode, (1 = enable, 0 = disable)");
- module_param_named_unsafe(emu_mode, amdgpu_emu_mode, int, 0444);
- 
-+MODULE_PARM_DESC(allm_mode, "ALLM via DP mode (0 = off, 1 = HDMI only, 2 = force for DP/PCON)");
-+module_param_named_unsafe(allm_mode, amdgpu_allm_mode, int, 0444);
-+
- /**
-  * DOC: ras_enable (int)
-  * Enable RAS features on the GPU (0 = disable, 1 = enable, -1 = auto (default))
-  */
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu.h b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu.h
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+@@ -209,6 +209,7 @@ extern int amdgpu_freesync_pcon_allow_all;
+ extern uint amdgpu_dc_debug_mask;
+ extern uint amdgpu_dc_visual_confirm;
++extern int amdgpu_allm_mode;
+ extern int amdgpu_dm_abm_level;
+ extern int amdgpu_backlight;
+ extern int amdgpu_damage_clips;
 
 diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
 --- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
