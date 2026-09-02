@@ -3,7 +3,7 @@
 # SteamOS update. Run as the normal user; sudo is invoked for missing build
 # prerequisites and installation.
 #
-#   ./patch-driver.sh [--gfx1013] [--audio] [--vrr] [--allm] [kernel-tree]  (default: ./valve-kernel)
+#   ./patch-driver.sh [--gfx1013] [--audio] [--vrr] [--allm] [--no-audio-clock] [--no-ss] [--no-telemetry] [--no-ttm] [--no-sclk] [--no-kfd] [--no-frl-hp] [--no-ycbcr444] [kernel-tree]  (default: ./valve-kernel)
 #   ./patch-driver.sh status
 #   ./patch-driver.sh uninstall
 #
@@ -12,13 +12,21 @@
 # patches are NOT applied. Use --gfx1013 --audio to apply both sets of patches.
 # --vrr applies the VRR PCON FreeSync patch independently.
 # --allm applies the ALLM-via-DP patch independently.
+# --no-audio-clock skips the DP audio clock patch (within --audio).
+# --no-ss skips the DP spread spectrum disable patch (within --audio).
+# --no-telemetry skips the Cyan Skillfish telemetry+cache patch (within --audio).
+# --no-ttm skips the TTM NULL-page guard patch.
+# --no-sclk skips the SCLK range patch.
+# --no-kfd skips the KFD flush-TLB-by-runlist patch.
+# --no-frl-hp skips the PCON FRL hotplug preserve patch.
+# --no-ycbcr444 skips the DP-HDMI YCbCr 4:4:4 deep color patch.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 
 usage() {
     cat <<EOF
-Usage: $0 [--gfx1013] [--audio] [--vrr] [--allm] [kernel-tree]
+Usage: $0 [--gfx1013] [--audio] [--vrr] [--allm] [--no-audio-clock] [--no-ss] [--no-telemetry] [--no-ttm] [--no-sclk] [--no-kfd] [--no-frl-hp] [--no-ycbcr444] [kernel-tree]
        $0 status
        $0 uninstall
 
@@ -150,6 +158,14 @@ WITH_GFX1013=()
 WITH_AUDIO=()
 WITH_VRR=()
 WITH_ALLM=()
+NO_AUDIO_CLOCK=()
+NO_SS=()
+NO_TELEMETRY=()
+NO_TTM=()
+NO_SCLK=()
+NO_KFD=()
+NO_FRL_HP=()
+NO_YCBCR444=()
 ARGS=()
 for a in "$@"; do
     case "$a" in
@@ -157,10 +173,18 @@ for a in "$@"; do
         --audio)          WITH_AUDIO=(--audio) ;;
         --vrr)            WITH_VRR=(--vrr) ;;
         --allm)           WITH_ALLM=(--allm) ;;
+        --no-audio-clock) NO_AUDIO_CLOCK=(--no-audio-clock) ;;
+        --no-ss)          NO_SS=(--no-ss) ;;
+        --no-telemetry)   NO_TELEMETRY=(--no-telemetry) ;;
+        --no-ttm)         NO_TTM=(--no-ttm) ;;
+        --no-sclk)        NO_SCLK=(--no-sclk) ;;
+        --no-kfd)         NO_KFD=(--no-kfd) ;;
+        --no-frl-hp)      NO_FRL_HP=(--no-frl-hp) ;;
+        --no-ycbcr444)    NO_YCBCR444=(--no-ycbcr444) ;;
         *)                ARGS+=("$a") ;;
     esac
 done
 
 "$HERE/fetch-sources.sh" "${ARGS[@]}"
-"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_VRR[@]}" "${WITH_ALLM[@]}" "${ARGS[@]}"
+"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_VRR[@]}" "${WITH_ALLM[@]}" "${NO_AUDIO_CLOCK[@]}" "${NO_SS[@]}" "${NO_TELEMETRY[@]}" "${NO_TTM[@]}" "${NO_SCLK[@]}" "${NO_KFD[@]}" "${NO_FRL_HP[@]}" "${NO_YCBCR444[@]}" "${ARGS[@]}"
 sudo "$HERE/install.sh"

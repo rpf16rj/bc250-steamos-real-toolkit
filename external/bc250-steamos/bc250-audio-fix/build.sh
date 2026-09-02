@@ -52,10 +52,18 @@ relax_libbpf_host_tool_werror() {
 
 WITH_GFX1013=0
 WITH_AUDIO=0
-PREPARE_ONLY=0
-ALLOW_MISSING_SYMVERS=0
 WITH_VRR=0
 WITH_ALLM=0
+NO_AUDIO_CLOCK=0
+NO_SS=0
+NO_TELEMETRY=0
+NO_TTM=0
+NO_SCLK=0
+NO_KFD=0
+NO_FRL_HP=0
+NO_YCBCR444=0
+PREPARE_ONLY=0
+ALLOW_MISSING_SYMVERS=0
 ARGS=()
 for a in "$@"; do
     case "$a" in
@@ -63,6 +71,14 @@ for a in "$@"; do
         --audio)          WITH_AUDIO=1 ;;
         --vrr)            WITH_VRR=1 ;;
         --allm)           WITH_ALLM=1 ;;
+        --no-audio-clock) NO_AUDIO_CLOCK=1 ;;
+        --no-ss)          NO_SS=1 ;;
+        --no-telemetry)   NO_TELEMETRY=1 ;;
+        --no-ttm)         NO_TTM=1 ;;
+        --no-sclk)        NO_SCLK=1 ;;
+        --no-kfd)         NO_KFD=1 ;;
+        --no-frl-hp)      NO_FRL_HP=1 ;;
+        --no-ycbcr444)    NO_YCBCR444=1 ;;
         --prepare-only)   PREPARE_ONLY=1 ;;
         --allow-missing-symvers) ALLOW_MISSING_SYMVERS=1 ;;
         *)                ARGS+=("$a") ;;
@@ -315,51 +331,87 @@ git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/display/dc/link/link_validation.c
 
 if [ "$WITH_AUDIO" = 1 ]; then
-    step "apply DP-audio patch (runbook step 7)"
-    # SteamOS 3.8.x (6.16) needs both hunks; 3.9.x (6.18) already carries the
-    # clk_mgr DCN 2.01 reorder upstream, leaving only the dcn201
-    # spread-spectrum-state hunk. New kernel major: check which hunks are upstream
-    # before adding a variant here.
-    case "$BASE" in
-        6.16.*) PATCH=$HERE/bc250-dp-audio-clock-6.16.patch ;;
-        6.18.*) PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
-        7.2.*)  PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;  # same hunk applies to 7.2
-        *)      die "no DP-audio patch variant for kernel $BASE — check which hunks are already upstream, then add a case above" ;;
-    esac
-    echo "kernel $BASE -> $(basename "$PATCH")"
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PATCH" >/dev/null 2>&1; then
-        echo "patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$PATCH"
-        echo "patch applied"
+    if [ "$NO_AUDIO_CLOCK" = 1 ]; then
+        step "skipping DP-audio clock patch (--no-audio-clock requested)"
+        # Reverse if leftover from a previous build
+        case "$BASE" in
+            6.16.*) PATCH=$HERE/bc250-dp-audio-clock-6.16.patch ;;
+            6.18.*) PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
+            7.2.*)  PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
+            *)      PATCH= ;;
+        esac
+        if [ -n "$PATCH" ] && patch -p1 -R --dry-run --fuzz=3 -s -f < "$PATCH" >/dev/null 2>&1; then
+            patch -p1 -R --fuzz=3 -s < "$PATCH"
+            echo "DP-audio clock patch REVERSED (leftover from a previous build)"
+        fi
     else
-        die "patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        step "apply DP-audio patch (runbook step 7)"
+        # SteamOS 3.8.x (6.16) needs both hunks; 3.9.x (6.18) already carries the
+        # clk_mgr DCN 2.01 reorder upstream, leaving only the dcn201
+        # spread-spectrum-state hunk. New kernel major: check which hunks are upstream
+        # before adding a variant here.
+        case "$BASE" in
+            6.16.*) PATCH=$HERE/bc250-dp-audio-clock-6.16.patch ;;
+            6.18.*) PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
+            7.2.*)  PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;  # same hunk applies to 7.2
+            *)      die "no DP-audio patch variant for kernel $BASE — check which hunks are already upstream, then add a case above" ;;
+        esac
+        echo "kernel $BASE -> $(basename "$PATCH")"
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PATCH" >/dev/null 2>&1; then
+            echo "patch already applied"
+        elif patch -p1 --dry-run --fuzz=3 -s -f < "$PATCH" >/dev/null 2>&1; then
+            patch -p1 --fuzz=3 -s < "$PATCH"
+            echo "patch applied"
+        else
+            die "patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        fi
     fi
 
-    step "apply Cyan Skillfish consolidated telemetry + cache patch"
-    case "$BASE" in
-        7.2.*)  METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache-7.2.patch ;;
-        *)      METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache.patch ;;
-    esac
-
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
-        echo "Cyan Skillfish telemetry+cache patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$METRICS_PATCH"
-        echo "Cyan Skillfish telemetry+cache patch applied"
+    if [ "$NO_TELEMETRY" = 1 ]; then
+        step "skipping Cyan Skillfish telemetry+cache patch (--no-telemetry requested)"
+        case "$BASE" in
+            7.2.*)  METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache-7.2.patch ;;
+            *)      METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache.patch ;;
+        esac
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
+            patch -p1 -R --fuzz=3 -s < "$METRICS_PATCH"
+            echo "Cyan Skillfish telemetry+cache patch REVERSED (leftover from a previous build)"
+        fi
     else
-        die "Cyan Skillfish telemetry+cache patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        step "apply Cyan Skillfish consolidated telemetry + cache patch"
+        case "$BASE" in
+            7.2.*)  METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache-7.2.patch ;;
+            *)      METRICS_PATCH=$HERE/bc250-cyan-skillfish-telemetry-cache.patch ;;
+        esac
+
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
+            echo "Cyan Skillfish telemetry+cache patch already applied"
+        elif patch -p1 --dry-run --fuzz=3 -s -f < "$METRICS_PATCH" >/dev/null 2>&1; then
+            patch -p1 --fuzz=3 -s < "$METRICS_PATCH"
+            echo "Cyan Skillfish telemetry+cache patch applied"
+        else
+            die "Cyan Skillfish telemetry+cache patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        fi
     fi
 
-    step "apply DP spread spectrum disable patch (amdgpu_dm)"
-    DM_SS_PATCH=$HERE/bc250-dp-audio-dm-ignore-ss.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DM_SS_PATCH" >/dev/null 2>&1; then
-        echo "DM spread spectrum patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$DM_SS_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$DM_SS_PATCH"
-        echo "DM spread spectrum patch applied"
+    if [ "$NO_SS" = 1 ]; then
+        step "skipping DP spread spectrum disable patch (--no-ss requested)"
+        DM_SS_PATCH=$HERE/bc250-dp-audio-dm-ignore-ss.patch
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DM_SS_PATCH" >/dev/null 2>&1; then
+            patch -p1 -R --fuzz=3 -s < "$DM_SS_PATCH"
+            echo "DM spread spectrum patch REVERSED (leftover from a previous build)"
+        fi
     else
-        die "DM spread spectrum patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        step "apply DP spread spectrum disable patch (amdgpu_dm)"
+        DM_SS_PATCH=$HERE/bc250-dp-audio-dm-ignore-ss.patch
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DM_SS_PATCH" >/dev/null 2>&1; then
+            echo "DM spread spectrum patch already applied"
+        elif patch -p1 --dry-run --fuzz=3 -s -f < "$DM_SS_PATCH" >/dev/null 2>&1; then
+            patch -p1 --fuzz=3 -s < "$DM_SS_PATCH"
+            echo "DM spread spectrum patch applied"
+        else
+            die "DM spread spectrum patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        fi
     fi
 
 fi
@@ -440,68 +492,113 @@ else
     fi
 fi
 
-step "apply PCON FRL hotplug preserve patch (link_detection)"
-FRL_HP_PATCH=$HERE/bc250-pcon-frl-hotplug-preserve.patch
-if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
-    echo "PCON FRL hotplug preserve patch already applied"
-elif patch -p1 --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
-    patch -p1 --fuzz=3 -s < "$FRL_HP_PATCH"
-    echo "PCON FRL hotplug preserve patch applied"
+if [ "$NO_FRL_HP" = 1 ]; then
+    step "skipping PCON FRL hotplug preserve patch (--no-frl-hp requested)"
+    FRL_HP_PATCH=$HERE/bc250-pcon-frl-hotplug-preserve.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$FRL_HP_PATCH"
+        echo "PCON FRL hotplug preserve patch REVERSED (leftover from a previous build)"
+    fi
 else
-    die "PCON FRL hotplug preserve patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    step "apply PCON FRL hotplug preserve patch (link_detection)"
+    FRL_HP_PATCH=$HERE/bc250-pcon-frl-hotplug-preserve.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
+        echo "PCON FRL hotplug preserve patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$FRL_HP_PATCH"
+        echo "PCON FRL hotplug preserve patch applied"
+    else
+        die "PCON FRL hotplug preserve patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 fi
 
-step "apply TTM NULL-page guard patch (defensive)"
-TTM_PATCH=$HERE/bc250-ttm-null-page-guard.patch
-if patch -p1 -R --dry-run --fuzz=3 -s -f < "$TTM_PATCH" >/dev/null 2>&1; then
-    echo "TTM NULL-page guard already applied"
-elif patch -p1 --dry-run --fuzz=3 -s -f < "$TTM_PATCH" >/dev/null 2>&1; then
-    patch -p1 --fuzz=3 -s < "$TTM_PATCH"
-    echo "TTM NULL-page guard applied"
+if [ "$NO_TTM" = 1 ]; then
+    step "skipping TTM NULL-page guard patch (--no-ttm requested)"
+    TTM_PATCH=$HERE/bc250-ttm-null-page-guard.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$TTM_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$TTM_PATCH"
+        echo "TTM NULL-page guard patch REVERSED (leftover from a previous build)"
+    fi
 else
-    die "TTM NULL-page guard neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    step "apply TTM NULL-page guard patch (defensive)"
+    TTM_PATCH=$HERE/bc250-ttm-null-page-guard.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$TTM_PATCH" >/dev/null 2>&1; then
+        echo "TTM NULL-page guard already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$TTM_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$TTM_PATCH"
+        echo "TTM NULL-page guard applied"
+    else
+        die "TTM NULL-page guard neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 fi
 
-step "apply Cyan Skillfish SCLK range patch (350-2230 MHz)"
-SCLK_PATCH=$HERE/bc250-sclk-range.patch
-if patch -p1 -R --dry-run --fuzz=3 -s -f < "$SCLK_PATCH" >/dev/null 2>&1; then
-    echo "SCLK range patch already applied"
-elif patch -p1 --dry-run --fuzz=3 -s -f < "$SCLK_PATCH" >/dev/null 2>&1; then
-    patch -p1 --fuzz=3 -s < "$SCLK_PATCH"
-    echo "SCLK range patch applied"
+if [ "$NO_SCLK" = 1 ]; then
+    step "skipping SCLK range patch (--no-sclk requested)"
+    SCLK_PATCH=$HERE/bc250-sclk-range.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$SCLK_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$SCLK_PATCH"
+        echo "SCLK range patch REVERSED (leftover from a previous build)"
+    fi
 else
-    die "SCLK range patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    step "apply Cyan Skillfish SCLK range patch (350-2230 MHz)"
+    SCLK_PATCH=$HERE/bc250-sclk-range.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$SCLK_PATCH" >/dev/null 2>&1; then
+        echo "SCLK range patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$SCLK_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$SCLK_PATCH"
+        echo "SCLK range patch applied"
+    else
+        die "SCLK range patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 fi
 
-step "apply KFD flush-TLB-by-runlist patch (opt-in ROCm/KFD workaround)"
-KFD_PATCH=$HERE/bc250-kfd-flush-tlb-by-runlist.patch
-if patch -p1 -R --dry-run --fuzz=3 -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
-    echo "KFD flush-TLB-by-runlist patch already applied"
-elif patch -p1 --dry-run --fuzz=3 -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
-    patch -p1 --fuzz=3 -s < "$KFD_PATCH"
-    echo "KFD flush-TLB-by-runlist patch applied"
+if [ "$NO_KFD" = 1 ]; then
+    step "skipping KFD flush-TLB-by-runlist patch (--no-kfd requested)"
+    KFD_PATCH=$HERE/bc250-kfd-flush-tlb-by-runlist.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$KFD_PATCH"
+        echo "KFD flush-TLB-by-runlist patch REVERSED (leftover from a previous build)"
+    fi
 else
-    die "KFD flush-TLB-by-runlist patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    step "apply KFD flush-TLB-by-runlist patch (opt-in ROCm/KFD workaround)"
+    KFD_PATCH=$HERE/bc250-kfd-flush-tlb-by-runlist.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
+        echo "KFD flush-TLB-by-runlist patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$KFD_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$KFD_PATCH"
+        echo "KFD flush-TLB-by-runlist patch applied"
+    else
+        die "KFD flush-TLB-by-runlist patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
 fi
 
-step "apply DP-HDMI YCbCr 4:4:4 deep color patch (PCON color quality)"
-YCBCR444_PATCH=$HERE/bc250-dp-hdmi-ycbcr444-deep-color.patch
-YCBCR444_MAJOR=$(echo "$BASE" | cut -d. -f1)
-if [ "$YCBCR444_MAJOR" -lt 7 ]; then
-    echo "skipping YCbCr 4:4:4 deep color patch (requires kernel 7.x; running $BASE)"
-    # Reverse if leftover from a previous build on a different kernel
+if [ "$NO_YCBCR444" = 1 ]; then
+    step "skipping DP-HDMI YCbCr 4:4:4 deep color patch (--no-ycbcr444 requested)"
+    YCBCR444_PATCH=$HERE/bc250-dp-hdmi-ycbcr444-deep-color.patch
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$YCBCR444_PATCH"
         echo "YCbCr 4:4:4 deep color patch REVERSED (leftover from a previous build)"
     fi
 else
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
-        echo "DP-HDMI YCbCr 4:4:4 deep color patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$YCBCR444_PATCH"
-        echo "DP-HDMI YCbCr 4:4:4 deep color patch applied"
+    step "apply DP-HDMI YCbCr 4:4:4 deep color patch (PCON color quality)"
+    YCBCR444_PATCH=$HERE/bc250-dp-hdmi-ycbcr444-deep-color.patch
+    YCBCR444_MAJOR=$(echo "$BASE" | cut -d. -f1)
+    if [ "$YCBCR444_MAJOR" -lt 7 ]; then
+        echo "skipping YCbCr 4:4:4 deep color patch (requires kernel 7.x; running $BASE)"
+        # Reverse if leftover from a previous build on a different kernel
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
+            patch -p1 -R --fuzz=3 -s < "$YCBCR444_PATCH"
+            echo "YCbCr 4:4:4 deep color patch REVERSED (leftover from a previous build)"
+        fi
     else
-        die "DP-HDMI YCbCr 4:4:4 deep color patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
+            echo "DP-HDMI YCbCr 4:4:4 deep color patch already applied"
+        elif patch -p1 --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
+            patch -p1 --fuzz=3 -s < "$YCBCR444_PATCH"
+            echo "DP-HDMI YCbCr 4:4:4 deep color patch applied"
+        else
+            die "DP-HDMI YCbCr 4:4:4 deep color patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        fi
     fi
 fi
 
