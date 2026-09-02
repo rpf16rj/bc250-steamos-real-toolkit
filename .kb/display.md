@@ -74,13 +74,21 @@ cat /sys/kernel/debug/dri/0/DP-1/vrr_range
   - YCbCr 4:4:4 fallback when RGB validation fails
 - These params are set via modprobe.d, NOT GRUB (steamenv_boot filters them)
 
-## Sync Instability Issue
-Symptoms: display loses sync (black screen/flicker) when switching modes,
-especially for non-1440p120 modes in gamescope.
+## FRL vs VRR Incompatibility (Kernel Limitation)
+FRL and VRR are mutually exclusive in the current upstream kernel:
+- FRL links don't support VRR yet (upstream patch: "FRL links don't yet support VRR")
+- `dcfeaturemask=0x402` enables FRL (bit 0x400) → VRR breaks
+- `dcfeaturemask=0x002` disables FRL → VRR works, 4K60 via TMDS+scrambling
 
-Root cause: Without HF-VSDB in EDID, kernel doesn't know the TV supports HDMI 2.1.
-For modes >300 MHz pixel clock, kernel tries TMDS first (which fails at >300 MHz
-without scrambling), then may or may not fall back to FRL correctly.
+### EDID Override: FRL Removed (2026-09-01)
+The EDID binary `edid/samsung-q80a-hdmi21.bin` was corrected:
+- **Changed**: Max FRL rate from 6 (48 Gbps) to 0 (no FRL) — byte 0xDA, upper nibble
+- **Kept**: TMDS 600 MHz, SCDC, scrambling ≤340 MHz, VRR 48-120, ALLM, FVA, deep color 4:2:0 10/12-bit
+- **Result**: Kernel uses TMDS with scrambling for 4K60 (fits in 18 Gbps), VRR/HDR/ALLM all work
+- **Trade-off**: 4K120 requires FRL and is not available (only 4K60 via TMDS)
 
-Fix: EDID override makes the kernel aware of HDMI 2.1 capabilities from the start,
-so FRL is negotiated properly for all high-bandwidth modes.
+### EDID Override Is Recommended
+- `drm.edid_firmware` is an official kernel feature (since 2012, commit da0df92)
+- Used by Steam Deck users with Samsung TVs + DP-to-HDMI docks (Level1Techs forums)
+- Tools: RobertoNegro/edid-generator, ssupt/drmcru
+- Arch Linux wiki has official guide for EDID override
