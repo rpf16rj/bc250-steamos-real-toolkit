@@ -24,7 +24,7 @@
 +			u8 *db = &edid_ext[i + 1];
 +			unsigned int oui = (db[2] << 16) | (db[1] << 8) | db[0];
 +
-+			if (oui == HDMI_AMD_VENDOR_SPECIFIC_DATA_BLOCK_IEEE_REGISTRATION_ID) {
++			if (oui == 0x00001A) {
 +				u8 version = db[3];
 +
 +				if (version == 1 && db_len >= 7) {
@@ -46,7 +46,7 @@
  static bool parse_edid_cea(struct amdgpu_dm_connector *aconnector,
  		u8 *edid_ext, int len,
  		struct amdgpu_hdmi_vsdb_info *vsdb_info)
-@@ -14043,9 +14082,16 @@
+@@ -14036,9 +14075,16 @@
  	mutex_lock(&adev->dm.dc_lock);
  	if (adev->dm.dmub_srv)
  		ret = parse_edid_cea_dmub(&adev->dm, edid_ext, len, vsdb_info);

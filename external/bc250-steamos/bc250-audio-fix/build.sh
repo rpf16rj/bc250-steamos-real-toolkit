@@ -419,7 +419,10 @@ fi
 if [ "$WITH_VRR" = 1 ]; then
     step "apply VRR PCON FreeSync fallback + range extending patch (amdgpu_dm)"
     VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
+    # Kernel 7.2+ already includes parse_amd_vsdb_cea_direct in upstream Valve kernel
+    if grep -q 'parse_amd_vsdb_cea_direct' drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c 2>/dev/null; then
+        echo "VRR PCON FreeSync patch already in kernel tree (upstream)"
+    elif patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
         echo "VRR PCON FreeSync patch already applied"
     elif patch -p1 --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
         patch -p1 --fuzz=3 -s < "$VRR_PATCH"
