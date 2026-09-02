@@ -80,12 +80,21 @@ FRL and VRR are mutually exclusive in the current upstream kernel:
 - `dcfeaturemask=0x402` enables FRL (bit 0x400) → VRR breaks
 - `dcfeaturemask=0x002` disables FRL → VRR works, 4K60 via TMDS+scrambling
 
-### EDID Override: FRL Removed (2026-09-01)
-The EDID binary `edid/samsung-q80a-hdmi21.bin` was corrected:
-- **Changed**: Max FRL rate from 6 (48 Gbps) to 0 (no FRL) — byte 0xDA, upper nibble
-- **Kept**: TMDS 600 MHz, SCDC, scrambling ≤340 MHz, VRR 48-120, ALLM, FVA, deep color 4:2:0 10/12-bit
-- **Result**: Kernel uses TMDS with scrambling for 4K60 (fits in 18 Gbps), VRR/HDR/ALLM all work
-- **Trade-off**: 4K120 requires FRL and is not available (only 4K60 via TMDS)
+### EDID Override: Dynamic Patching (2026-09-01)
+The EDID is now generated dynamically by `patch_edid_vrr.py`:
+1. Dumps live EDID from `/sys/class/drm/card0-DP-1/edid`
+2. Zeros VRR min/max in HF-VSDB (prevents VTEM flicker via PCON)
+3. Adds AMD VSDB v1 (FreeSync 48-120 Hz) — DMUB firmware only supports v1
+4. Swaps preferred timing to 4K60 for stable boot
+
+**Requires**: `bc250-vrr-pcon-freesync.patch` in amdgpu.ko (adds `parse_amd_vsdb_cea_direct` fallback)
+**Requires**: `amdgpu.freesync_pcon_allow_all=1` in GRUB
+
+### VRR PCON FreeSync Patch (kernel 7.2 adapted)
+- Original patch from v1.6.0 didn't apply on kernel 7.2 (line numbers changed, `extend_range_from_vsdb` already exists)
+- Adapted: only 2 hunks needed — add `parse_amd_vsdb_cea_direct` function and fallback in `parse_edid_cea`
+- Removed hunks for `extend_range_from_vsdb` and `compare_ranges` (already in kernel 7.2)
+- The patch allows the kernel to parse AMD VSDB v1 directly when DMUB firmware fails to find it
 
 ### EDID Override Is Recommended
 - `drm.edid_firmware` is an official kernel feature (since 2012, commit da0df92)

@@ -2655,12 +2655,14 @@ ycbcr444_remove_modprobe() {
 # Vendor Specific Data Block) in the EDID they present to the GPU. Without it,
 # the kernel thinks the TV is HDMI 2.0 (max TMDS 300 MHz) and can't detect VRR,
 # ALLM, or FRL capabilities — causing sync instability and missing features.
-# The EDID override binary adds the HF-VSDB with FRL 48 Gbps, VRR, and ALLM.
+# The dynamic EDID patcher dumps the real EDID, zeros VRR in HF-VSDB (prevents
+# VTEM flicker via PCON), and adds AMD VSDB v1 for FreeSync over PCON.
 
 EDID_OVERRIDE_DIR="/lib/firmware/edid"
 EDID_OVERRIDE_BIN="samsung-q80a-hdmi21.bin"
 EDID_OVERRIDE_SRC="$SCRIPT_DIR/edid/$EDID_OVERRIDE_BIN"
 EDID_GRUB_PARAM="drm.edid_firmware=DP-1:edid/$EDID_OVERRIDE_BIN"
+EDID_PATCH_SCRIPT="$FIXES_REPO_DIR/display-edid-patch/patch_edid_vrr.py"
 
 edid_override_installed() {
     [[ -f "$EDID_OVERRIDE_DIR/$EDID_OVERRIDE_BIN" ]] && \
@@ -2673,19 +2675,34 @@ edid_override_install() {
         print_info "EDID override already installed."
         return 0
     fi
-    if [[ ! -f "$EDID_OVERRIDE_SRC" ]]; then
-        print_info "EDID override binary not found at $EDID_OVERRIDE_SRC. Skipping."
-        return 1
-    fi
-    echo -e "  ${DIM}Installing EDID override: $EDID_OVERRIDE_BIN${RESET}"
-    echo -e "  ${DIM}This adds HF-VSDB (HDMI 2.1) to the EDID the kernel sees.${RESET}"
-    echo -e "  ${DIM}Enables: FRL 48 Gbps, VRR 48-120 Hz, ALLM, 600 MHz TMDS.${RESET}"
+    echo -e "  ${DIM}Installing EDID override: dynamic patch from live EDID${RESET}"
+    echo -e "  ${DIM}Dumps real EDID, zeros VRR in HF-VSDB (prevents VTEM flicker),${RESET}"
+    echo -e "  ${DIM}adds AMD VSDB v1 for FreeSync over PCON.${RESET}"
+    echo -e "  ${DIM}Enables: VRR 48-120 Hz via FreeSync, ALLM, HDR, 600 MHz TMDS.${RESET}"
+    echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 and VRR patch in amdgpu.ko.${RESET}"
     echo -e "  ${DIM}Requires reboot. The TV must be on an HDMI 2.1 port (3/4 on Samsung Q80A).${RESET}"
     echo ""
     if ! confirm "Install EDID override for Samsung Q80A HDMI 2.1?"; then
         print_info "Skipped EDID override."
         return 0
     fi
+
+    local live_edid="/sys/class/drm/card0-DP-1/edid"
+    local tmp_edid="/tmp/bc250-edid-patched.bin"
+    if [[ ! -f "$live_edid" ]]; then
+        print_info "Live EDID not found at $live_edid. Is the display connected?"
+        return 1
+    fi
+    if [[ ! -f "$EDID_PATCH_SCRIPT" ]]; then
+        print_info "EDID patch script not found at $EDID_PATCH_SCRIPT."
+        return 1
+    fi
+    echo -e "  ${DIM}Patching live EDID...${RESET}"
+    if ! python3 "$EDID_PATCH_SCRIPT" "$live_edid" "$tmp_edid"; then
+        print_info "Failed to patch EDID."
+        return 1
+    fi
+    cp "$tmp_edid" "$EDID_OVERRIDE_SRC"
     steamos_writable "
         mkdir -p '$EDID_OVERRIDE_DIR'
         cp '$EDID_OVERRIDE_SRC' '$EDID_OVERRIDE_DIR/$EDID_OVERRIDE_BIN'
@@ -2712,7 +2729,7 @@ edid_override_install() {
     print_info "Rebuilding initramfs to include EDID firmware..."
     steamos_writable "mkinitcpio -P" 2>/dev/null || true
     print_success "EDID override installed! Reboot to apply."
-    print_info "After reboot verify with: edid-decode /sys/class/drm/card0-DP-1/edid | grep 'HDMI Forum'"
+    print_info "After reboot verify with: edid-decode /sys/class/drm/card0-DP-1/edid | grep -E 'HDMI Forum|AMD'"
 }
 
 edid_override_remove() {
@@ -3923,11 +3940,9 @@ install_combined_fix() {
         checklist_items+=("+YCbCr 4:4:4 Deep Color:PCON color quality + CH7218 quirk")
     fi
 
-    # VRR and ALLM only on kernel <7
-    if [[ "$kver_major" -lt 7 ]]; then
-        checklist_items+=("+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC range")
-        checklist_items+=("+ALLM via DP:Auto Low Latency Mode for PCON HDMI Game Mode")
-    fi
+    # VRR and ALLM
+    checklist_items+=("+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC range")
+    checklist_items+=("ALLM via DP:Auto Low Latency Mode for PCON HDMI Game Mode")
 
     pick_items "Select kernel patches to include:" "${checklist_items[@]}"
 
@@ -3963,16 +3978,14 @@ install_combined_fix() {
         patch_flags+=(--gfx1013)
     fi
 
-    # VRR and ALLM (kernel <7)
-    if [[ "$kver_major" -lt 7 ]]; then
-        if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
-            do_vrr=1
-            patch_flags+=(--vrr)
-        fi
-        if [[ " $selected_str " == *" ALLM via DP "* ]]; then
-            do_allm=1
-            patch_flags+=(--allm)
-        fi
+    # VRR and ALLM
+    if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
+        do_vrr=1
+        patch_flags+=(--vrr)
+    fi
+    if [[ " $selected_str " == *" ALLM via DP "* ]]; then
+        do_allm=1
+        patch_flags+=(--allm)
     fi
 
     if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 ]]; then
