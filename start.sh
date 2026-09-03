@@ -3778,6 +3778,7 @@ install_combined_fix() {
         "+GFX1013 Compute+Mesa:Async compute queue + FSR4 + mesh/task shaders"
         "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
         "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
+        "+Boot 1440p120:Set preferred boot mode to 2560x1440@120 via GRUB"
     )
 
     # YCbCr 4:4:4 only on kernel 7.x
@@ -3825,6 +3826,12 @@ install_combined_fix() {
         patch_flags+=(--gfx1013)
     fi
 
+    # Boot 1440p120
+    local do_boot_mode=0
+    if [[ " $selected_str " == *" Boot 1440p120 "* ]]; then
+        do_boot_mode=1
+    fi
+
     # VRR and ALLM (kernel <7)
     if [[ "$kver_major" -lt 7 ]]; then
         if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
@@ -3837,12 +3844,15 @@ install_combined_fix() {
         fi
     fi
 
-    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 ]]; then
+    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 && $do_boot_mode -eq 0 ]]; then
         print_info "No patches selected. Nothing to do."
         return 0
     fi
 
-    validate_combined_fix_prerequisites "$do_gfx" || return 1
+    # Only validate build prerequisites if actual kernel/Mesa patches are selected
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
+        validate_combined_fix_prerequisites "$do_gfx" || return 1
+    fi
 
     local mesh_flag=""
     if [[ $do_gfx -eq 1 ]]; then
@@ -3860,70 +3870,77 @@ install_combined_fix() {
     echo ""
 
     local flags_str="${patch_flags[*]}"
-    if ! confirm "Continue with selected components: ${flags_str:-none}?"; then
+    local confirm_msg="Continue with selected components: ${flags_str:-none}"
+    [[ $do_boot_mode -eq 1 ]] && confirm_msg="$confirm_msg + boot 1440p120"
+    if ! confirm "$confirm_msg?"; then
         print_info "Cancelled."
         return 0
     fi
 
-    fixes_repo_sync || return 1
+    # Apply kernel/Mesa patches if any are selected
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
+        fixes_repo_sync || return 1
 
-    local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
-    if [[ ! -d "$fix_dir" ]]; then
-        fail_with_log "bc250-audio-fix directory not found in the fixes repository." "Combined Fix — missing directory"
-        return 1
-    fi
+        local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
+        if [[ ! -d "$fix_dir" ]]; then
+            fail_with_log "bc250-audio-fix directory not found in the fixes repository." "Combined Fix — missing directory"
+            return 1
+        fi
 
-    print_info "Running patch-driver.sh ${flags_str} (single kernel build with selected patch sets)..."
-    print_info "This clones the matching Valve kernel source tree and can take several minutes."
+        print_info "Running patch-driver.sh ${flags_str} (single kernel build with selected patch sets)..."
+        print_info "This clones the matching Valve kernel source tree and can take several minutes."
 
-    audio_fix_prefetch_headers "$fix_dir"
-    audio_fix_patch_fetch_sources "$fix_dir/fetch-sources.sh" || {
-        fail_with_log "Could not prepare the combined fix dependency fetch script." "Combined Fix — fetch-sources compatibility patch"
-        return 1
-    }
-    audio_fix_ensure_mkinitcpio_preset
+        audio_fix_prefetch_headers "$fix_dir"
+        audio_fix_patch_fetch_sources "$fix_dir/fetch-sources.sh" || {
+            fail_with_log "Could not prepare the combined fix dependency fetch script." "Combined Fix — fetch-sources compatibility patch"
+            return 1
+        }
+        audio_fix_ensure_mkinitcpio_preset
 
-    chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
-    local fullsha patch_env=""
-    fullsha=$(audio_fix_resolve_fullsha || true)
-    if [[ -n "$fullsha" ]]; then
-        print_info "Resolved kernel commit ${fullsha:0:12}; passing full SHA to patch-driver.sh."
-        patch_env="export FULLSHA='$fullsha';"
+        chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
+        local fullsha patch_env=""
+        fullsha=$(audio_fix_resolve_fullsha || true)
+        if [[ -n "$fullsha" ]]; then
+            print_info "Resolved kernel commit ${fullsha:0:12}; passing full SHA to patch-driver.sh."
+            patch_env="export FULLSHA='$fullsha';"
+        else
+            print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
+        fi
+
+        if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${flags_str}"; then
+            fail_with_log "Combined fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Combined Fix — patch-driver.sh"
+            return 1
+        fi
+
+        if [[ $do_gfx -eq 1 ]]; then
+            print_info "Kernel patches installed. Now building patched Mesa/RADV..."
+            local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
+            if [[ ! -d "$mesa_dir" ]]; then
+                fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
+                return 1
+            fi
+
+            print_info "Checking for meson/ninja build tools and dev headers..."
+            if ! gfx1013_ensure_mesa_build_deps; then
+                fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
+                return 1
+            fi
+
+            print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+            if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
+                fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
+                return 1
+            fi
+        fi
+
+        print_success "Combined fix installed! Reboot required."
+        [[ $do_audio -eq 1 ]] && persist_state_add "audio"
+        [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
+        [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+        print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
     else
-        print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
+        print_success "Boot mode configuration applied! Reboot required."
     fi
-
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${flags_str}"; then
-        fail_with_log "Combined fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Combined Fix — patch-driver.sh"
-        return 1
-    fi
-
-    if [[ $do_gfx -eq 1 ]]; then
-        print_info "Kernel patches installed. Now building patched Mesa/RADV..."
-        local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
-        if [[ ! -d "$mesa_dir" ]]; then
-            fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
-            return 1
-        fi
-
-        print_info "Checking for meson/ninja build tools and dev headers..."
-        if ! gfx1013_ensure_mesa_build_deps; then
-            fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
-            return 1
-        fi
-
-        print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
-        if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
-            fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
-            return 1
-        fi
-    fi
-
-    print_success "Combined fix installed! Reboot required."
-    [[ $do_audio -eq 1 ]] && persist_state_add "audio"
-    [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
-    [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
-    print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
 
     if [[ $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
         echo ""
@@ -3994,6 +4011,28 @@ install_combined_fix() {
         ycbcr444_ensure_modprobe
     else
         print_info "Skipped FRL. Enable manually with: echo 'options amdgpu dcfeaturemask=0x402' > $YCBCR444_MODPROBE_FILE"
+    fi
+
+    # Boot 1440p120: set video=DP-1:2560x1440@120 in GRUB
+    if [[ $do_boot_mode -eq 1 ]]; then
+        echo ""
+        echo -e "  ${CYAN}Boot Display Mode${RESET}"
+        echo -e "  ${DIM}Sets video=DP-1:2560x1440@120 in GRUB to use 1440p@120 from boot.${RESET}"
+        echo ""
+        if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*video=DP-1:2560x1440@120' "$GRUB_DEFAULT" >/dev/null 2>&1; then
+            print_info "video=DP-1:2560x1440@120 is already in GRUB — boot mode set."
+        else
+            steamos_writable "
+                cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+                if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'video=DP-1:2560x1440@120'; then
+                    sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 video=DP-1:2560x1440@120\"/' \"$GRUB_DEFAULT\"
+                fi
+                update-grub
+            " || {
+                print_info "Failed to add video=DP-1:2560x1440@120 to GRUB. Add it manually."
+            }
+            print_info "Added video=DP-1:2560x1440@120 to GRUB. Reboot to boot at 1440p@120."
+        fi
     fi
 }
 
