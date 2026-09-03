@@ -2772,7 +2772,7 @@ install_audio_fix() {
         "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
     )
     if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+YCbCr 4:4:4 Deep Color:PCON color quality + CH7218 quirk")
+        checklist_items+=("+YCbCr 444 Deep Color:PCON color quality + CH7218 quirk")
     fi
 
     pick_items "Select kernel patches to include:" "${checklist_items[@]}"
@@ -2788,7 +2788,7 @@ install_audio_fix() {
     [[ " $selected_str " == *" SCLK Range (350-2230) "* ]] || audio_flags="$audio_flags --no-sclk"
     [[ " $selected_str " == *" KFD Flush TLB "* ]] || audio_flags="$audio_flags --no-kfd"
     if [[ "$kver_major" -ge 7 ]]; then
-        [[ " $selected_str " == *" YCbCr 4:4:4 Deep Color "* ]] || audio_flags="$audio_flags --no-ycbcr444"
+        [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]] || audio_flags="$audio_flags --no-ycbcr444"
     fi
 
     fixes_repo_sync || return 1
@@ -3782,7 +3782,7 @@ install_combined_fix() {
 
     # YCbCr 4:4:4 only on kernel 7.x
     if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+YCbCr 4:4:4 Deep Color:PCON color quality + CH7218 quirk")
+        checklist_items+=("+YCbCr 444 Deep Color:PCON color quality + CH7218 quirk")
     fi
 
     # VRR and ALLM only on kernel <7
@@ -3816,7 +3816,7 @@ install_combined_fix() {
     [[ " $selected_str " == *" KFD Flush TLB "* ]] || patch_flags+=(--no-kfd)
 
     if [[ "$kver_major" -ge 7 ]]; then
-        [[ " $selected_str " == *" YCbCr 4:4:4 Deep Color "* ]] || patch_flags+=(--no-ycbcr444)
+        [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]] || patch_flags+=(--no-ycbcr444)
     fi
 
     # GFX1013
