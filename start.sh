@@ -2625,6 +2625,11 @@ ycbcr444_modprobe_installed() {
     grep -q 'dcfeaturemask=0x402' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
 }
 
+ycbcr444_force_installed() {
+    [[ -f "$YCBCR444_MODPROBE_FILE" ]] && \
+    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
+}
+
 ycbcr444_ensure_modprobe() {
     if ycbcr444_modprobe_installed; then
         return 0
@@ -2638,6 +2643,26 @@ ycbcr444_ensure_modprobe() {
     }
     print_info "Created $YCBCR444_MODPROBE_FILE with dcfeaturemask=0x402 (FRL only)."
     print_info "Rebuild initramfs with: sudo mkinitcpio -P"
+    steamos_writable "mkinitcpio -P" 2>/dev/null || true
+}
+
+ycbcr444_ensure_force() {
+    if ycbcr444_force_installed; then
+        return 0
+    fi
+    steamos_writable "
+        if [[ -f \"$YCBCR444_MODPROBE_FILE\" ]]; then
+            if ! grep -q 'force_ycbcr444=1' \"$YCBCR444_MODPROBE_FILE\"; then
+                sed -i 's/\(options amdgpu .*\)/\\1 force_ycbcr444=1 force_min_bpc=10/' \"$YCBCR444_MODPROBE_FILE\"
+            fi
+        else
+            echo 'options amdgpu dcfeaturemask=0x402 force_ycbcr444=1 force_min_bpc=10' > \"$YCBCR444_MODPROBE_FILE\"
+        fi
+    " || {
+        print_info "Failed to update $YCBCR444_MODPROBE_FILE. Update it manually."
+        return 0
+    }
+    print_info "Enabled YCbCr 4:4:4 + min 10-bit in $YCBCR444_MODPROBE_FILE."
     steamos_writable "mkinitcpio -P" 2>/dev/null || true
 }
 
@@ -2850,6 +2875,19 @@ install_audio_fix() {
         audio_fix_ensure_hpd_debounce_grub_param
     else
         print_info "Skipped HPD debounce param. Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 manually if needed."
+    fi
+
+    # Activate YCbCr 4:4:4 force params if patch was selected
+    if [[ "$kver_major" -ge 7 ]] && [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]]; then
+        echo ""
+        echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color${RESET}"
+        echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + minimum 10-bit color depth via modprobe.d.${RESET}"
+        echo ""
+        if ycbcr444_force_installed; then
+            print_info "YCbCr 4:4:4 force params already enabled (modprobe.d config present)."
+        else
+            ycbcr444_ensure_force
+        fi
     fi
 }
 
@@ -4029,6 +4067,19 @@ install_combined_fix() {
         ycbcr444_ensure_modprobe
     else
         print_info "Skipped FRL. Enable manually with: echo 'options amdgpu dcfeaturemask=0x402' > $YCBCR444_MODPROBE_FILE"
+    fi
+
+    # Activate YCbCr 4:4:4 force params if patch was selected
+    if [[ "$kver_major" -ge 7 ]] && [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]]; then
+        echo ""
+        echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color${RESET}"
+        echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + minimum 10-bit color depth via modprobe.d.${RESET}"
+        echo ""
+        if ycbcr444_force_installed; then
+            print_info "YCbCr 4:4:4 force params already enabled (modprobe.d config present)."
+        else
+            ycbcr444_ensure_force
+        fi
     fi
 
     # Boot 1440p120: set video=DP-1:2560x1440@120 in GRUB
