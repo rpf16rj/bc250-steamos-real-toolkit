@@ -3745,8 +3745,26 @@ run_revert_gfx1013_fix() {
         sudo sed -i '/VK_DRIVER_FILES/d' "$env_file"
     fi
 
+    # Remove boot mode GRUB param if present
+    boot_mode_revert
+
     print_success "GFX1013 compute queue fix reverted to stock amdgpu.ko. Reboot to apply."
     persist_state_remove "gfx1013"
+}
+
+boot_mode_revert() {
+    if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*video=DP-1:2560x1440@120' "$GRUB_DEFAULT" >/dev/null 2>&1; then
+        print_info "Removing video=DP-1:2560x1440@120 from GRUB..."
+        steamos_writable "
+            cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+            sed -i 's/ video=DP-1:2560x1440@120//g' \"$GRUB_DEFAULT\"
+            update-grub
+        " || {
+            print_info "Failed to remove video=DP-1:2560x1440@120 from GRUB. Remove it manually."
+            return 0
+        }
+        print_info "Removed video=DP-1:2560x1440@120 from GRUB. Reboot to use EDID preferred timing."
+    fi
 }
 
 install_combined_fix() {
@@ -5844,6 +5862,8 @@ run_revert_all() {
     run_revert_ram_split
     echo ""
     run_revert_gfx1013_fix
+    echo ""
+    boot_mode_revert
     echo ""
     run_revert_aic8800_wifi
 }
