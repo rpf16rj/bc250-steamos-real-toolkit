@@ -3546,6 +3546,10 @@ run_revert_ac3_surround() {
     rm -f "$AC3_UDEV_RULE"
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger /sys/class/sound/card0 2>/dev/null || true
+    # Remove old AC-3 profile set and user config leftovers
+    rm -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/surround-profile.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
     if (( was_steamos )); then
         steamos-readonly enable || true
     fi
@@ -3616,7 +3620,14 @@ install_dual_audio() {
     (( was )) && steamos-readonly enable || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-ac3.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/surround-profile.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/ac3-sink.conf" 2>/dev/null || true
+    # Remove old AC-3 profile set (was in /usr/share, needs RO disable)
+    if [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]]; then
+        local was2=0; is_steamos && { was2=1; steamos-readonly disable || true; }
+        sudo rm -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf
+        (( was2 )) && steamos-readonly enable || true
+    fi
     local uid=$(id -u "$REAL_USER")
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     sleep 3
