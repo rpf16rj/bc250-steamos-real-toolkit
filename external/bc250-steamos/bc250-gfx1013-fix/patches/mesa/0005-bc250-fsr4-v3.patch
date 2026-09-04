@@ -48,11 +48,6 @@ Verified against a positive control: a testing driver built from a
 byte-identical copy of the full patch measured ~4.2 ms and ~89 fps,
 confirming the comparison harness reproduced the known-good result.
 ---
- .../instruction_selection/aco_select_nir_alu.cpp   |   17 +++
- src/amd/vulkan/radv_shader.c                       |  133 +++++++++++++++++++
- src/compiler/nir/nir_opt_algebraic.py              |   53 +++++++-
- 3 files changed, 197 insertions(+), 6 deletions(-)
-
 diff --git a/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp b/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp
 index d509130f4d8..4f5722b0404 100644
 --- a/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp
@@ -240,7 +235,7 @@ index c5f78f54d71..4f0d30ea28b 100644
        NIR_PASS(_, nir, nir_opt_memcpy);
        NIR_PASS(_, nir, nir_opt_deref);
 diff --git a/src/compiler/nir/nir_opt_algebraic.py b/src/compiler/nir/nir_opt_algebraic.py
-index fd5c6bf00a4..d409b7d60aa 100644
+index fd5c6bf00a4..0771b8f28ba 100644
 --- a/src/compiler/nir/nir_opt_algebraic.py
 +++ b/src/compiler/nir/nir_opt_algebraic.py
 @@ -444,10 +444,47 @@ for sz in (16, 32, 64):
@@ -295,7 +290,7 @@ index fd5c6bf00a4..d409b7d60aa 100644
  udot_4x8_a_b = ('iadd', ('iadd', ('umul24_relaxed', ('extract_u8', a, 0), ('extract_u8', b, 0)),
                                   ('umul24_relaxed', ('extract_u8', a, 1), ('extract_u8', b, 1))),
                          ('iadd', ('umul24_relaxed', ('extract_u8', a, 2), ('extract_u8', b, 2)),
-@@ -462,7 +499,21 @@ udot_2x16_a_b = ('iadd', ('umul24_relaxed', ('extract_u16', a, 0), ('extract_u16
+@@ -462,7 +499,14 @@ udot_2x16_a_b = ('iadd', ('umul24_relaxed', ('extract_u16', a, 0), ('extract_u16
                           ('umul24_relaxed', ('extract_u16', a, 1), ('extract_u16', b, 1)))
  
  optimizations.extend([
