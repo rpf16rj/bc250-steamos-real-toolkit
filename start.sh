@@ -3663,9 +3663,9 @@ gfx1013_ensure_mesa_build_deps() {
                 lib32-libx11 lib32-libxcb lib32-libxext lib32-libxrandr
                 lib32-libxshmfence lib32-libxxf86vm lib32-libxrender
                 lib32-libxau lib32-libxdmcp lib32-libxdamage lib32-libxfixes
-                lib32-expat lib32-zlib lib32-zstd lib32-systemd-libs
-                lib32-wayland lib32-wayland-protocols lib32-xorgproto
-                lib32-mesa lib32-glslang
+                lib32-expat lib32-zlib lib32-zstd
+                lib32-wayland
+                lib32-mesa
                 lm_sensors
                 libva)
     local need_install=0
