@@ -131,6 +131,7 @@ persist_detect_and_record_installed() {
         persist_state_add "audio"
     fi
     ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
+    dual_audio_installed 2>/dev/null && persist_state_add "dual_audio"
     ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
     ds5_chord_vdf_patched 2>/dev/null && persist_state_add "ds5_chord_vdf"
     if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
@@ -3562,6 +3563,84 @@ run_revert_ac3_surround() {
     persist_state_remove "ac3"
 }
 
+DUAL_AUDIO_DIR="$SCRIPT_DIR/external/bc250-dual-audio"
+DUAL_AUDIO_WP_VERSION="0.5.17"
+
+dual_audio_wp_version_ok() {
+    local ver
+    ver=$(wireplumber --version 2>/dev/null | grep -Eo '0\.5\.[0-9]+' | head -1 || true)
+    [[ "$ver" == "$DUAL_AUDIO_WP_VERSION" ]]
+}
+
+dual_audio_installed() {
+    [[ -f /etc/alsa/conf.d/61-bc250-a52.conf ]] && \
+    [[ -f /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf ]] && \
+    [[ -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua ]]
+}
+
+dual_audio_ensure_wireplumber() {
+    dual_audio_wp_version_ok && return 0
+    local cur=$(wireplumber --version 2>/dev/null | grep -Eo '0\.5\.[0-9]+' | head -1 || echo unknown)
+    print_info "WirePlumber ${cur} detected; dual-audio requires ${DUAL_AUDIO_WP_VERSION}."
+    local d="$DUAL_AUDIO_DIR/deps"
+    local wp="$d/wireplumber-${DUAL_AUDIO_WP_VERSION}-1-x86_64.pkg.tar.zst"
+    local lwp="$d/libwireplumber-${DUAL_AUDIO_WP_VERSION}-1-x86_64.pkg.tar.zst"
+    [[ -f "$wp" && -f "$lwp" ]] || { print_error "WP ${DUAL_AUDIO_WP_VERSION} packages not found in ${d}."; return 1; }
+    confirm "Install WirePlumber ${DUAL_AUDIO_WP_VERSION}?" || { print_info "Cancelled."; return 1; }
+    local was=0; is_steamos && { was=1; steamos-readonly disable || { print_error "Cannot disable RO."; return 1; }; }
+    LC_ALL=C sudo pacman -U --noconfirm --overwrite '*' "$lwp" "$wp" || {
+        (( was )) && steamos-readonly enable || true
+        print_error "Failed to install WP ${DUAL_AUDIO_WP_VERSION}."; return 1; }
+    (( was )) && steamos-readonly enable || true
+    dual_audio_wp_version_ok || { print_error "WP version check failed post-install."; return 1; }
+    print_success "WirePlumber ${DUAL_AUDIO_WP_VERSION} installed."
+}
+
+install_dual_audio() {
+    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.7)"
+    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 with hotplug guard${RESET}"
+    echo ""
+    dual_audio_installed && { print_info "Already installed."; return 0; }
+    dual_audio_ensure_wireplumber || return 1
+    ac3_surround_installed && { print_info "Old AC-3 detected; reverting..."; run_revert_ac3_surround || true; }
+    confirm "Install dual-output audio?" || { print_info "Cancelled."; return 0; }
+    local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
+    sudo install -d -m 0755 /etc/alsa/conf.d /etc/pipewire/pipewire.conf.d
+    sudo install -d -m 0755 /etc/wireplumber/wireplumber.conf.d
+    sudo install -d -m 0755 /usr/local/share/wireplumber/scripts/monitors
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/alsa/conf.d/61-bc250-a52.conf" /etc/alsa/conf.d/61-bc250-a52.conf
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/monitors/alsa.lua" /usr/local/share/wireplumber/scripts/monitors/alsa.lua
+    (( was )) && steamos-readonly enable || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-ac3.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/ac3-sink.conf" 2>/dev/null || true
+    local uid=$(id -u "$REAL_USER")
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
+    sleep 3
+    print_success "Dual-output audio installed! Reboot before use."
+    persist_state_add "dual_audio"
+}
+
+run_revert_dual_audio() {
+    print_step "R-DUAL" "Revert BC-250 Dual-Output Audio"
+    dual_audio_installed || { print_info "Not installed."; return 0; }
+    confirm "Remove dual-output audio?" || { print_info "Cancelled."; return 0; }
+    local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
+    sudo rm -f /etc/alsa/conf.d/61-bc250-a52.conf
+    sudo rm -f /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
+    sudo rm -f /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
+    sudo rm -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
+    sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
+    (( was )) && steamos-readonly enable || true
+    local uid=$(id -u "$REAL_USER")
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
+    print_success "Dual-output audio reverted. Reboot to apply."
+    persist_state_remove "dual_audio"
+}
+
 gfx1013_ensure_mesa_build_deps() {
     # SteamOS's immutable rootfs strips dev headers and .pc files from many
     # packages to save space, even though pacman's local DB still lists the
@@ -5833,6 +5912,14 @@ run_status() {
     fi
     echo -e "  ${CYAN}AC-3 Surround${RESET}      ${ac3_icon} ${ac3_color}${ac3_label}${RESET}"
 
+    local dual_icon dual_color dual_label
+    if dual_audio_installed; then
+        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.7)"
+    else
+        dual_icon="$DIM"; dual_color="$DIM"; dual_label="not installed"
+    fi
+    echo -e "  ${CYAN}Dual-Output Audio${RESET} ${dual_icon} ${dual_color}${dual_label}${RESET}"
+
     echo ""
     echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
 }
@@ -5911,6 +5998,8 @@ run_revert_all() {
     echo ""
     run_revert_ac3_surround
     echo ""
+    run_revert_dual_audio
+    echo ""
     run_revert_ds5_bridge_fix
     echo ""
     run_revert_ds5_chord_vdf
@@ -5953,6 +6042,8 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
+        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.7) — requires WP 0.5.17"
+        print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -5980,6 +6071,8 @@ run_install_manual() {
             10R) run_revert_gfx1013_fix; press_enter ;;
             11) install_ac3_surround;      press_enter ;;
             11R) run_revert_ac3_surround;  press_enter ;;
+            12) install_dual_audio;        press_enter ;;
+            12R) run_revert_dual_audio;   press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
