@@ -189,7 +189,7 @@ else
         --cross-file "$CROSS_FILE" \
         -Dvulkan-drivers=amd \
         -Dgallium-drivers=radeonsi \
-        -Dvideo-codecs=all \
+        -Dvideo-codecs=none \
         -Dvulkan-layers=device-select,overlay \
         -Dplatforms=x11,wayland \
         -Dglx=disabled \

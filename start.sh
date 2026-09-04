@@ -3666,7 +3666,8 @@ gfx1013_ensure_mesa_build_deps() {
                 lib32-expat lib32-zlib lib32-zstd lib32-systemd-libs
                 lib32-wayland lib32-wayland-protocols lib32-xorgproto
                 lib32-mesa lib32-glslang
-                lm_sensors)
+                lm_sensors
+                libva)
     local need_install=0
     command -v meson >/dev/null 2>&1 || need_install=1
     command -v ninja >/dev/null 2>&1 || need_install=1
@@ -3689,6 +3690,8 @@ gfx1013_ensure_mesa_build_deps() {
     [[ -f /usr/lib/pkgconfig/libzstd.pc ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/expat.pc ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/wayland-scanner.pc ]] || need_install=1
+    [[ -f /usr/include/gnu/stubs-32.h ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/libva.pc ]] || need_install=1
 
     [[ "$need_install" = 1 ]] || return 0
 
