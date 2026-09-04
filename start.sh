@@ -3665,7 +3665,8 @@ gfx1013_ensure_mesa_build_deps() {
                 lib32-libxau lib32-libxdmcp lib32-libxdamage lib32-libxfixes
                 lib32-expat lib32-zlib lib32-zstd lib32-systemd-libs
                 lib32-wayland lib32-wayland-protocols lib32-xorgproto
-                lib32-mesa lib32-glslang)
+                lib32-mesa lib32-glslang
+                lm_sensors)
     local need_install=0
     command -v meson >/dev/null 2>&1 || need_install=1
     command -v ninja >/dev/null 2>&1 || need_install=1
