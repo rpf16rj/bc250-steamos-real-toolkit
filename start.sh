@@ -3579,7 +3579,14 @@ gfx1013_ensure_mesa_build_deps() {
                 libffi systemd-libs libelf zlib zstd expat glslang
                 libxcb libx11 libxext libxdamage libxfixes libxrandr
                 libxshmfence libxxf86vm libxrender libxau libxdmcp xorgproto
-                xcb-util xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image)
+                xcb-util xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image
+                lib32-glibc lib32-gcc-libs lib32-libdrm lib32-libffi
+                lib32-libx11 lib32-libxcb lib32-libxext lib32-libxrandr
+                lib32-libxshmfence lib32-libxxf86vm lib32-libxrender
+                lib32-libxau lib32-libxdmcp lib32-libxdamage lib32-libxfixes
+                lib32-expat lib32-zlib lib32-zstd lib32-systemd-libs
+                lib32-wayland lib32-wayland-protocols lib32-xorgproto
+                lib32-mesa lib32-glslang)
     local need_install=0
     command -v meson >/dev/null 2>&1 || need_install=1
     command -v ninja >/dev/null 2>&1 || need_install=1
