@@ -163,6 +163,7 @@ meson setup build64 \
     -Dglx=disabled \
     -Dllvm=disabled \
     -Dgles1=disabled \
+    -Dlmsensors=disabled \
     -Dbuildtype=release \
     -Dprefix="$MESA_PREFIX" \
     -Dlibdir=lib
@@ -194,6 +195,7 @@ else
         -Dglx=disabled \
         -Dllvm=disabled \
         -Dgles1=disabled \
+        -Dlmsensors=disabled \
         -Dbuildtype=release \
         -Dprefix="$MESA_PREFIX" \
         -Dlibdir=lib32
