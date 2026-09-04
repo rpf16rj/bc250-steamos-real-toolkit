@@ -602,6 +602,17 @@ else
     fi
 fi
 
+step "apply ALLM DP-connector patch (attach allm properties to DP connectors)"
+ALLM_DP_PATCH=$HERE/bc250-allm-dp-connector.patch
+if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_DP_PATCH" >/dev/null 2>&1; then
+    echo "ALLM DP-connector patch already applied"
+elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_DP_PATCH" >/dev/null 2>&1; then
+    patch -p1 --fuzz=3 -s < "$ALLM_DP_PATCH"
+    echo "ALLM DP-connector patch applied"
+else
+    echo "ALLM DP-connector patch does not apply (may already be upstream) — skipping"
+fi
+
 step "modules_prepare + config re-verify (runbook step 7)"
 relax_libbpf_host_tool_werror
 make -j"$(nproc)" modules_prepare
