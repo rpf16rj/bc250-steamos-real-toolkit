@@ -7,6 +7,39 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.8.4 — 2026-09-05
+
+- **Added:** BC-250 Dual-Output Audio (MastaG v0.8) — WirePlumber-native AC3
+  (Dolby Digital 5.1 @ 448 kbps) + HDMI with hotplug guard. Requires
+  WirePlumber 0.5.17 (bundled in the toolkit). Selectable as a manual install
+  option alongside the existing AC-3 Surround Encoding.
+- **Added:** Boot 1440p120 option in the combined install checklist — sets
+  `video=DP-1:2560x1440@120` in GRUB so the display boots at 1440p@120.
+- **Added:** Individual patch selection via `--no-*` flags for the combined
+  kernel build (e.g. skip VRR, ALLM, or YCbCr 444 independently).
+- **Added:** EDID override for HDMI 2.1 PCON (Samsung Q80A) — injects
+  HF-VSDB with FRL 48 Gbps, VRR 48-120, ALLM when the PCON dongle doesn't
+  pass it through.
+- **Added:** Gamescope session profile + `allm_mode` GRUB parameter for
+  BC-250.
+- **Changed:** Mesa build overhauled — 32-bit support fixed, gallium
+  drivers restored, video codecs disabled, Mesa 26.2.2 with MastaG's
+  rebased patch series. FSR4 V3 patch updated to hardware bissection result.
+- **Changed:** YCbCr 4:4:4 checklist item renamed to "YCbCr 444" (colons
+  broke `pick_items`). Force params now activated via modprobe.d when the
+  patch is selected.
+- **Fixed:** AC3 sink now visible in Steam Game Mode audio settings
+  (`node.virtual=false`, `device.class=sound`).
+- **Fixed:** ALLM properties now attached to DP connectors for BC-250 PCON.
+- **Fixed:** Boot mode revert added to revert paths (10R + Revert All).
+- **Fixed:** Old AC-3 surround-profile.conf and hdmi-ac3.conf leftovers
+  cleaned up during dual-audio install.
+- **Fixed:** Dual-audio persistence after reboot — `dual_audio` now included
+  in `reapply_installed_components` so the toolkit re-installs it if the
+  rootfs loses the files.
+- **Removed:** E-AC3 (Dolby Digital Plus) support from dual-audio — only
+  AC3 (Dolby Digital) is retained for stability.
+
 ## v1.8.3 — 2026-09-01
 
 - **Fixed:** Duplicate `DC_NO_DP_LINK_BANDWIDTH` case label in the YCbCr 4:4:4
