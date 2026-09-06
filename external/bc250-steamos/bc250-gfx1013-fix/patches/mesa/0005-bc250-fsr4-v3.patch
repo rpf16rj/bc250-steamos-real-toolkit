@@ -1,94 +1,53 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: David Moraza Sanchez <dmorazasanchezmendo@gmail.com>
-Date: Thu, 20 Aug 2026 00:00:00 +0000
-Subject: [PATCH 5/5] radv,aco,nir: BC-250 FSR4 deferred SDot lowering
+Date: Mon, 25 Aug 2026 00:00:00 +0000
+Subject: [PATCH 5/5] radv,nir,aco: BC-250 FSR4 deferred SDot lowering
  (EXP-042B / V3)
 
-Supersedes the earlier unconditional/selective reassociation of
-sdot_4x8_a_b (EXP-028 / v2). V3 fuses FSR4's iadd(0, OpSDot) wrapper
-before the software fallback, defers remaining GFX1013 compute SDot
-operations through one NIR optimization round before restoring the
-real capability set and lowering to software, and adds ACO support
-for the signed i24 MAD form and GFX1013-only dense-reduction/two-chain
-lowering for pressure-sensitive shaders.
+Speed up FSR4's INT8 path on GFX1013. The hardware has no working packed
+signed dot product, so sdot_4x8_iadd falls back to software. Three things
+make that fallback much cheaper:
 
-A 64-shader FSR4 capture found register pressure and occupancy, not
-static instruction count, are what actually govern runtime: the
-previously pathological ED7 shader drops from 1314 VGPR spills / 4
-waves per SIMD to 0 spills / 6 waves per SIMD under V3, despite a
-higher naive inverse-cost estimate. Tested end to end with FSR 4.1.1
-in Cyberpunk 2077 at 63 FPS, up from 58 FPS pre-V3.
+1. A dense-reduction prepass expanding the largest FSR4 reduction kernels
+   into signed 24-bit multiply-accumulate chains.
+2. The same MAD-chain form in the NIR algebraic fallback, via
+   sdot_4x8_a_b_madacc and sdot_4x8_a_b_madconst, with matching
+   nir_op_imad24_ir3 and nir_op_imul24 support in ACO instruction
+   selection.
+3. A deferred lowering round: remaining packed SDots are held through one
+   full NIR optimization pass before the real capability set is restored
+   and they are lowered. Keeping the SDot intact lets upstream's own
+   iadd(sdot(a, b, 0), c) -> sdot(a, b, c) fold absorb FSR4's accumulator
+   wrapper, which shortens the live ranges that were spilling.
 
-This is EXP-042B from BC-250 FSR4 testing (David Moraza Sanchez,
+The MAD chain costs *more* instructions than the balanced/add3 form,
+because v_mad_i32_i24 is VOP3 and cannot take SDWA byte selects, so each
+byte needs its own extract. It is faster anyway: the chain keeps one
+accumulator live where the add3 form needs four products live at once, and
+on these shaders register pressure dominates instruction count. Do not
+"simplify" this back to add3 on instruction-count grounds.
+
+Tested with FSR 4.1.1 in Cyberpunk 2077: ~4 ms OptiScaler latency and
+~89 fps, against ~6 ms and roughly native framerate without it.
+
+Based on EXP-042B from BC-250 FSR4 testing (David Moraza Sanchez,
 dmorazasanchez/bc250-fsr4, `v3` branch,
-https://github.com/dmorazasanchez/bc250-fsr4/tree/v3).
+https://github.com/dmorazasanchez/bc250-fsr4/tree/v3), reduced to the
+pieces that measurably matter by bisecting on real hardware:
 
-The GFX1013 compute-queue/identity changes and the RADV_GFX103
-opt-in override that ship inside upstream's bc250-fsr4-v3.patch are
-intentionally omitted here: they duplicate 0001 and 0004 byte-for-byte
-and are already applied by those patches.
+ - The GFX1013 compute-queue/identity changes and the RADV_GFX103 override
+   are dropped: they duplicate 0001 and 0004 byte-for-byte.
+ - The LDS spill-slot override in aco_spill.cpp is dropped. Restoring it
+   alone to an otherwise-trimmed build reproduced the full regression, so
+   it earns nothing, and it deliberately traded occupancy away.
+ - The explicit iadd(0, OpSDot) wrapper rules are dropped. Upstream
+   already folds iadd(a, 0) -> a and iadd(sdot(a, b, 0), c), both ungated,
+   so they still run during the deferred round.
+
+Verified against a positive control: a testing driver built from a
+byte-identical copy of the full patch measured ~4.2 ms and ~89 fps,
+confirming the comparison harness reproduced the known-good result.
 ---
- src/amd/compiler/aco_ir.cpp                        |    1 
- src/amd/compiler/aco_ir.h                          |    1 
- src/amd/compiler/aco_spill.cpp                     |   11 ++
- .../instruction_selection/aco_select_nir_alu.cpp   |   17 +++
- src/amd/vulkan/radv_shader.c                       |  133 ++++++++++++++++++++
- src/compiler/nir/nir_opt_algebraic.py              |   61 ++++++++-
- 6 files changed, 218 insertions(+), 6 deletions(-)
-
-diff --git a/src/amd/compiler/aco_ir.cpp b/src/amd/compiler/aco_ir.cpp
-index 1955bf76aca..6697b93f742 100644
---- a/src/amd/compiler/aco_ir.cpp
-+++ b/src/amd/compiler/aco_ir.cpp
-@@ -70,6 +70,7 @@ init_program(Program* program, Stage stage, const struct aco_shader_info* info,
-    program->config = config;
-    program->info = *info;
-    program->gfx_level = options->gfx_level;
-+   program->family = options->family;
-    program->wave_size = info->wave_size;
-    program->lane_mask = program->wave_size == 32 ? s1 : s2;
-    program->preserve_s2 = info->vs.preserve_s2;
-diff --git a/src/amd/compiler/aco_ir.h b/src/amd/compiler/aco_ir.h
-index 4082a9519ed..f311657fb19 100644
---- a/src/amd/compiler/aco_ir.h
-+++ b/src/amd/compiler/aco_ir.h
-@@ -2333,6 +2333,7 @@ public:
-    ac_shader_config* config;
-    struct aco_shader_info info;
-    enum amd_gfx_level gfx_level;
-+   enum radeon_family family;
-    DeviceInfo dev;
-    unsigned wave_size;
-    RegClass lane_mask;
-diff --git a/src/amd/compiler/aco_spill.cpp b/src/amd/compiler/aco_spill.cpp
-index 3e238f1d97b..f155c6d05a3 100644
---- a/src/amd/compiler/aco_spill.cpp
-+++ b/src/amd/compiler/aco_spill.cpp
-@@ -1640,6 +1640,16 @@ assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr)
-    assign_spill_slots_helper(ctx, RegType::sgpr, is_assigned, slots, &ctx.sgpr_spill_slots);
-    assign_spill_slots_helper(ctx, RegType::vgpr, is_assigned, slots, &ctx.vgpr_spill_slots);
- 
-+   if (ctx.program->family == CHIP_GFX1013 &&
-+       ctx.program->stage == compute_cs &&
-+       ctx.program->wave_size == 64 &&
-+       ctx.program->workgroup_size == 64 &&
-+       ctx.program->config->lds_size == 0 &&
-+       !ctx.program->stack_ptr.id() &&
-+       ctx.vgpr_spill_slots >= 128 &&
-+       ctx.vgpr_spill_slots <= 255)
-+      ctx.max_lds_spill_slots = MAX2(ctx.max_lds_spill_slots, 102u);
-+
-    for (unsigned id = 0; id < is_assigned.size(); id++)
-       assert(is_assigned[id] || !ctx.is_reloaded[id]);
- 
-@@ -1906,6 +1916,7 @@ spill(Program* program)
-        * on the CU at the same time, but that's unlikely and impossible to know at this point.
-        */
-       max_lds_spill_slots = MAX2(max_lds - used_lds, 0) / (program->workgroup_size * 4);
-+
-    }
- 
-    /* calculate extra VGPRs required for spilling SGPRs */
 diff --git a/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp b/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp
 index d509130f4d8..4f5722b0404 100644
 --- a/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp
@@ -276,7 +235,7 @@ index c5f78f54d71..4f0d30ea28b 100644
        NIR_PASS(_, nir, nir_opt_memcpy);
        NIR_PASS(_, nir, nir_opt_deref);
 diff --git a/src/compiler/nir/nir_opt_algebraic.py b/src/compiler/nir/nir_opt_algebraic.py
-index fd5c6bf00a4..d409b7d60aa 100644
+index fd5c6bf00a4..0771b8f28ba 100644
 --- a/src/compiler/nir/nir_opt_algebraic.py
 +++ b/src/compiler/nir/nir_opt_algebraic.py
 @@ -444,10 +444,47 @@ for sz in (16, 32, 64):
@@ -331,18 +290,11 @@ index fd5c6bf00a4..d409b7d60aa 100644
  udot_4x8_a_b = ('iadd', ('iadd', ('umul24_relaxed', ('extract_u8', a, 0), ('extract_u8', b, 0)),
                                   ('umul24_relaxed', ('extract_u8', a, 1), ('extract_u8', b, 1))),
                          ('iadd', ('umul24_relaxed', ('extract_u8', a, 2), ('extract_u8', b, 2)),
-@@ -462,7 +499,21 @@ udot_2x16_a_b = ('iadd', ('umul24_relaxed', ('extract_u16', a, 0), ('extract_u16
+@@ -462,7 +499,14 @@ udot_2x16_a_b = ('iadd', ('umul24_relaxed', ('extract_u16', a, 0), ('extract_u16
                           ('umul24_relaxed', ('extract_u16', a, 1), ('extract_u16', b, 1)))
  
  optimizations.extend([
 -   (('sdot_4x8_iadd', a, b, c), ('iadd', sdot_4x8_a_b, c), '!options->has_sdot_4x8'),
-+   # EXP-035B2: fuse through FSR4's explicit iadd(0, OpSDot) wrapper before
-+   # the ordinary no-hardware-dot fallback gets a chance to lower the child.
-+   (('iadd', ('iadd(is_used_once)', 0, ('sdot_4x8_iadd(is_used_once)', '#a', 'b(is_not_const)', 0)), c),
-+    ('sdot_4x8_iadd', a, b, c), '!options->has_sdot_4x8'),
-+   (('iadd', ('iadd(is_used_once)', 0, ('sdot_4x8_iadd(is_used_once)', 'a(is_not_const)', '#b', 0)), c),
-+    ('sdot_4x8_iadd', a, b, c), '!options->has_sdot_4x8'),
-+
 +   # BC-250/GFX1013: constant x data SDot benefits from a signed MAD24 chain.
 +   # Keep data x data on EXP028's balanced MUL24 tree (important for ED7).
 +   (('sdot_4x8_iadd', '#a', b, 'c(is_not_const)'), sdot_4x8_a_b_madacc, '!options->has_sdot_4x8'),

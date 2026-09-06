@@ -1,0 +1,15 @@
+[Unit]
+Description=BC-250 Dolby Digital Plus 5.1 realtime encoder
+Documentation=https://github.com/MastaG/bc250-dual-audio
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/bc250-eac3-backend
+Restart=always
+RestartSec=1
+TimeoutStopSec=5s
+
+[Install]
+WantedBy=default.target

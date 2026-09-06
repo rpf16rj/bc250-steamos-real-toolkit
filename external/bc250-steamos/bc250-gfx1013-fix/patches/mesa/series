@@ -1,8 +1,8 @@
 # Mesa patch series for GFX1013 (BC-250), applied in order against
-# pristine mesa-26.2.0-rc3 with `git apply` / `patch -p1`.
+# pristine mesa-26.2.2 with `git apply` / `patch -p1`.
 #
-# Patches 0001-0004 updated from MastaG/linux-cachyos-bc250 (Aug 2026).
-# 0005 replaced with V3 deferred SDot hybrid from dmorazasanchez/bc250-fsr4.
+# All 5 patches from MastaG/linux-cachyos-bc250 (Sep 2026), rebased
+# for Mesa 26.2.2 stable.
 #
 # 0001: Expose ACE compute queue + async compute threadgroup workaround.
 # 0002: Mesh/task shading on GFX1013 via GFX10.3 software path.
@@ -10,8 +10,8 @@
 # 0004: Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3.
 #       Safe by itself — only activates when user sets the env var.
 #       Do not export globally; enable per-game only.
-# 0005: FSR4 V3 deferred SDot hybrid — iadd(0,SDot) fusion, MAD24 chains,
-#       dense SDot pre-pass. Supersedes V2 selective sdot. Always active.
+# 0005: FSR4 V3 deferred SDot — MAD24 chains, dense SDot pre-pass,
+#       deferred lowering round. Always active.
 #       (stripped: ac_gpu_info.c and radv_physical_device.c changes are
 #       already in 0001 and 0004 respectively)
 #
@@ -21,4 +21,4 @@
 0002-gfx1013-mesh-task-shaders.patch
 0003-gfx1013-taskmesh-queries.patch
 0004-radv-gfx103.patch
-0005-bc250-fsr4-v3-deferred-sdot.patch
+0005-bc250-fsr4-v3.patch

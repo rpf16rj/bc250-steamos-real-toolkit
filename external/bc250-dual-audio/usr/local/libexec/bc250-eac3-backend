@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# BC-250 realtime E-AC-3 / Dolby Digital Plus backend.
+#
+# WirePlumber creates a pipe-tunnel sink only while bc250_eac3_768 is active.
+# This helper blocks on the FIFO at all other times, so it does not own the
+# HDMI PCM device while native or AC-3 mode is selected.
+set -u -o pipefail
+
+RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+FIFO=${BC250_EAC3_FIFO:-$RUNTIME_DIR/bc250-eac3-768.pcm}
+PREBUFFER=$RUNTIME_DIR/bc250-eac3-768.prebuffer.$$
+FRAME_BYTES=$((1536 * 6 * 4))  # one 32 ms E-AC-3 frame: F32LE, 48 kHz, 5.1
+PREBUFFER_FRAMES=${BC250_EAC3_PREBUFFER_FRAMES:-1}
+PREBUFFER_BYTES=$((FRAME_BYTES * PREBUFFER_FRAMES))
+HDMI_DEVICE=${BC250_EAC3_ALSA_DEVICE:-hdmi:CARD=Generic,DEV=0,AES0=0x06,AES1=0x82,AES2=0x00,AES3=0x02}
+
+log() {
+    printf '%s\n' "bc250-eac3-backend: $*" >&2
+}
+
+cleanup() {
+    rm -f "$PREBUFFER"
+    exec 3<&- 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM HUP
+
+for cmd in ffmpeg aplay mkfifo dd cat grep tr stat; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        log "required command not found: $cmd"
+        exit 127
+    fi
+done
+
+umask 077
+if [[ -e "$FIFO" && ! -p "$FIFO" ]]; then
+    log "removing non-FIFO path: $FIFO"
+    rm -f "$FIFO"
+fi
+if [[ ! -p "$FIFO" ]]; then
+  mkfifo -m 0600 "$FIFO"
+fi
+
+
+find_generic_card_dir() {
+    local id
+    for id in /proc/asound/card*/id; do
+        [[ -r "$id" ]] || continue
+        if [[ $(tr -d '\n' < "$id") == "Generic" ]]; then
+            printf '%s\n' "${id%/id}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+eld_supports_eac3() {
+    # Modern Linux maps a 48 kHz E-AC-3 SAD to the required IEC61937 carrier
+    # (2ch / 192 kHz). Do not repeatedly hammer unsupported displays with an
+    # aplay open attempt; consume the selected virtual sink silently instead.
+    # Set BC250_EAC3_IGNORE_ELD=1 in the user service environment to override.
+    [[ ${BC250_EAC3_IGNORE_ELD:-0} == 1 ]] && return 0
+
+    local card_dir eld
+    card_dir=$(find_generic_card_dir) || return 1
+
+    for eld in "$card_dir"/eld#*; do
+        [[ -r "$eld" ]] || continue
+        grep -Eq '^[[:space:]]*monitor_present[[:space:]]+1' "$eld" || continue
+        grep -Eq '^[[:space:]]*eld_valid[[:space:]]+1' "$eld" || continue
+        if grep -Eiq 'coding_type.*(E-AC-3|EAC3|DD\+|Dolby Digital Plus)' "$eld"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+log "ready; waiting for $FIFO"
+
+while true; do
+    rm -f "$PREBUFFER"
+
+    # Keep one reader fd open from the first PCM frame until the PipeWire
+    # pipe-tunnel writer closes. This avoids a reader-less FIFO gap between
+    # prebuffering and the ffmpeg pipeline.
+    exec 3<"$FIFO"
+
+    # Prebuffer several E-AC-3 frames before starting FFmpeg so the encoder
+    # has enough input to produce a stable output stream without underrunning
+    # on the first few frames. This also covers FFmpeg startup latency.
+    dd iflag=fullblock bs="$FRAME_BYTES" count="$PREBUFFER_FRAMES" status=none <&3 >"$PREBUFFER" || true
+    prebuffer_bytes=$(stat -c %s "$PREBUFFER" 2>/dev/null || printf '0')
+    if [[ "$prebuffer_bytes" -lt "$FRAME_BYTES" ]]; then
+        # A writer that disappeared before one complete E-AC-3 frame was fed
+        # means the mode transition was cancelled. Never open HDMI for that
+        # stale/partial request; the WirePlumber release guard can proceed.
+        exec 3<&-
+        rm -f "$PREBUFFER"
+        continue
+    fi
+
+    if ! eld_supports_eac3; then
+        log "connected sink ELD does not advertise E-AC-3/DD+; discarding E-AC-3 mode PCM"
+        cat <&3 >/dev/null || true
+        exec 3<&-
+        continue
+    fi
+
+    log "starting E-AC-3 5.1 @ 768 kbps -> IEC61937 -> $HDMI_DEVICE"
+
+    # PipeWire order is FL FR RL RR FC LFE. FFmpeg's E-AC-3 encoder expects
+    # its 5.1 order with center/LFE before surrounds, therefore map by channel
+    # index before encoding. FFmpeg's spdif muxer emits IEC61937 E-AC-3 bursts;
+    # 48 kHz E-AC-3 is transported as 2ch S16_LE at a 192 kHz HDMI link rate.
+    # --buffer-time/--period-time in microseconds: 60 ms ALSA buffer absorbs
+    # FFmpeg encoding jitter without underruning the HDMI device.
+    {
+        cat "$PREBUFFER"
+        cat <&3
+    } | ffmpeg \
+        -nostdin -hide_banner -loglevel warning \
+        -f f32le -ar 48000 -ac 6 -i pipe:0 \
+        -filter:a 'pan=5.1|FL=c0|FR=c1|FC=c4|LFE=c5|BL=c2|BR=c3' \
+        -c:a eac3 -b:a 768k -ar 48000 -ac 6 \
+        -flush_packets 1 -f spdif - \
+    | aplay -q -D "$HDMI_DEVICE" -t raw -f S16_LE -c 2 -r 192000 - &
+
+    wait $! 2>/dev/null
+    ap_status=$?
+
+    exec 3<&-
+    rm -f "$PREBUFFER"
+
+    if (( ap_status != 0 )); then
+        log "pipeline ended: aplay=$ap_status"
+    else
+        log "pipeline stopped"
+    fi
+
+done

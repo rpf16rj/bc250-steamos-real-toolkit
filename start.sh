@@ -131,6 +131,7 @@ persist_detect_and_record_installed() {
         persist_state_add "audio"
     fi
     ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
+    dual_audio_installed 2>/dev/null && persist_state_add "dual_audio"
     ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
     ds5_chord_vdf_patched 2>/dev/null && persist_state_add "ds5_chord_vdf"
     if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
@@ -271,6 +272,122 @@ confirm() {
     echo -e "\n  ${YELLOW}${prompt}${RESET} ${DIM}[y/N]${RESET} "
     read -rp "  → " ans
     [[ "$ans" =~ ^[Yy]$ ]]
+}
+
+# pick_items: multi-select checklist using whiptail (arrow keys + space).
+# Usage: pick_items "Select components:" "item1:Description one" "item2:Description two" ...
+# Items starting with '+' are pre-selected (e.g. "+item1:Description one").
+# Sets PICK_SELECTED[] with the names of selected items (without + prefix).
+pick_items() {
+    local title="$1"; shift
+    local -a items=() descs=() states=()
+    local i
+
+    while [[ $# -gt 0 ]]; do
+        local entry="$1"; shift
+        local pre="OFF"
+        [[ "$entry" == +* ]] && { pre="ON"; entry="${entry#+}"; }
+        local name="${entry%%:*}"
+        local desc="${entry#*:}"
+        [[ "$name" == "$entry" ]] && desc=""
+        items+=("$name")
+        descs+=("$desc")
+        states+=("$pre")
+    done
+
+    local count=${#items[@]}
+    if [[ $count -eq 0 ]]; then
+        PICK_SELECTED=()
+        return 0
+    fi
+
+    if [[ "$AUTO" == "1" ]]; then
+        PICK_SELECTED=()
+        for ((i=0; i<count; i++)); do
+            [[ "${states[$i]}" == "ON" ]] && PICK_SELECTED+=("${items[$i]}")
+        done
+        return 0
+    fi
+
+    # Fallback to simple read-based toggle if whiptail is not available
+    if ! command -v whiptail >/dev/null 2>&1; then
+        local -a sel=()
+        for ((i=0; i<count; i++)); do
+            [[ "${states[$i]}" == "ON" ]] && sel+=("1") || sel+=("0")
+        done
+        local changed=1
+        while true; do
+            if [[ $changed -eq 1 ]]; then
+                echo ""
+                echo -e "  ${BOLD}${WHITE}${title}${RESET}"
+                echo ""
+                for ((i=0; i<count; i++)); do
+                    if [[ "${sel[$i]}" == "1" ]]; then
+                        printf "  ${BOLD}${WHITE}[${GREEN}x${WHITE}]${RESET} ${CYAN}%d${RESET}  %-28s ${DIM}%s${RESET}\n" \
+                            "$((i+1))" "${items[$i]}" "${descs[$i]}"
+                    else
+                        printf "  ${BOLD}${WHITE}[ ${WHITE}]${RESET} ${DIM}%d${RESET}  %-28s ${DIM}%s${RESET}\n" \
+                            "$((i+1))" "${items[$i]}" "${descs[$i]}"
+                    fi
+                done
+                echo ""
+                echo -e "  ${DIM}Toggle by number, or: all / none / done${RESET}"
+                changed=0
+            fi
+            read -rp "  → " ans
+            ans="${ans,,}"
+            case "$ans" in
+                done|d|"") break ;;
+                all)  for ((i=0; i<count; i++)); do sel[$i]=1; done; changed=1 ;;
+                none) for ((i=0; i<count; i++)); do sel[$i]=0; done; changed=1 ;;
+                *)
+                    local valid=0
+                    for tok in $ans; do
+                        tok="${tok//,/}"
+                        if [[ "$tok" =~ ^[0-9]+$ ]] && (( tok >= 1 && tok <= count )); then
+                            (( sel[tok-1] ^= 1 )); valid=1
+                        fi
+                    done
+                    [[ $valid -eq 1 ]] && changed=1 || echo -e "  ${DIM}Invalid. Use numbers, all, none, or done.${RESET}"
+                    ;;
+            esac
+        done
+        PICK_SELECTED=()
+        for ((i=0; i<count; i++)); do
+            [[ "${sel[$i]}" == "1" ]] && PICK_SELECTED+=("${items[$i]}")
+        done
+        return 0
+    fi
+
+    # whiptail checklist: arrow keys to navigate, space to toggle, Enter to confirm
+    local -a wt_args=()
+    for ((i=0; i<count; i++)); do
+        wt_args+=("${items[$i]}" "${descs[$i]}" "${states[$i]}")
+    done
+
+    local menu_h=$(( count + 7 ))
+    (( menu_h > 20 )) && menu_h=20
+    local box_h=$(( count + 6 ))
+    (( box_h > 18 )) && box_h=18
+
+    local result rc
+    result=$(whiptail --title "$title" --checklist \
+        "Use ↑↓ to navigate, Space to toggle, Enter to confirm" \
+        "$box_h" 76 "$menu_h" "${wt_args[@]}" 3>&1 1>&2 2>&3)
+    rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+        PICK_SELECTED=()
+        for ((i=0; i<count; i++)); do
+            [[ "${states[$i]}" == "ON" ]] && PICK_SELECTED+=("${items[$i]}")
+        done
+        return 0
+    fi
+
+    PICK_SELECTED=()
+    while IFS= read -r item; do
+        [[ -n "$item" ]] && PICK_SELECTED+=("$item")
+    done < <(printf '%s\n' "$result" | tr -d '"' | tr ' ' '\n' | grep -v '^$')
 }
 
 open_url() {
@@ -2509,6 +2626,11 @@ ycbcr444_modprobe_installed() {
     grep -q 'dcfeaturemask=0x402' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
 }
 
+ycbcr444_force_installed() {
+    [[ -f "$YCBCR444_MODPROBE_FILE" ]] && \
+    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
+}
+
 ycbcr444_ensure_modprobe() {
     if ycbcr444_modprobe_installed; then
         return 0
@@ -2522,6 +2644,26 @@ ycbcr444_ensure_modprobe() {
     }
     print_info "Created $YCBCR444_MODPROBE_FILE with dcfeaturemask=0x402 (FRL only)."
     print_info "Rebuild initramfs with: sudo mkinitcpio -P"
+    steamos_writable "mkinitcpio -P" 2>/dev/null || true
+}
+
+ycbcr444_ensure_force() {
+    if ycbcr444_force_installed; then
+        return 0
+    fi
+    steamos_writable "
+        if [[ -f \"$YCBCR444_MODPROBE_FILE\" ]]; then
+            if ! grep -q 'force_ycbcr444=1' \"$YCBCR444_MODPROBE_FILE\"; then
+                sed -i 's/\(options amdgpu .*\)/\\1 force_ycbcr444=1 force_min_bpc=10/' \"$YCBCR444_MODPROBE_FILE\"
+            fi
+        else
+            echo 'options amdgpu dcfeaturemask=0x402 force_ycbcr444=1 force_min_bpc=10' > \"$YCBCR444_MODPROBE_FILE\"
+        fi
+    " || {
+        print_info "Failed to update $YCBCR444_MODPROBE_FILE. Update it manually."
+        return 0
+    }
+    print_info "Enabled YCbCr 4:4:4 + min 10-bit in $YCBCR444_MODPROBE_FILE."
     steamos_writable "mkinitcpio -P" 2>/dev/null || true
 }
 
@@ -2635,17 +2777,44 @@ install_audio_fix() {
 
     echo -e "  ${YELLOW}⚠  This rebuilds and replaces amdgpu.ko with a kernel-specific patched module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can leave the machine with no display at boot.${RESET}"
-    echo -e "  ${DIM}Fixes DisplayPort video/audio played back at ~82% speed (pitched down).${RESET}"
-    echo -e "  ${DIM}Also queries GFX clock directly from the SMU and adds GPU utilization reporting${RESET}"
-    echo -e "  ${DIM}(needed for correct GPU clock/load readings once CPU Core Unlock is active).${RESET}"
-    echo -e "  ${DIM}Disables DP spread spectrum at the display manager layer for cleaner audio output.${RESET}"
-    echo -e "  ${DIM}Adds tunable gfxclk/activity cache (cs_gfxclk_cache_ms, cs_activity_cache_ms module params).${RESET}"
-    echo -e "  ${DIM}VRR over HDMI via PCON: FreeSync fallback + LFC-aware range extending${RESET}"
-    echo -e "  ${DIM}ALLM (Auto Low Latency Mode) via DP for PCON HDMI Game Mode${RESET}"
     echo ""
     if ! confirm "Continue with the DisplayPort audio/video fix?"; then
         print_info "Cancelled."
         return 0
+    fi
+
+    # Detect kernel major version
+    local kver_major
+    kver_major="$(uname -r | cut -d. -f1)"
+
+    # Build checklist — all patches individually selectable
+    local -a checklist_items=(
+        "+DP Audio Clock:Fixes audio/video at ~82% speed via DP/HDMI"
+        "+DP Spread Spectrum:Cleaner audio output via DP/HDMI"
+        "+TTM NULL-page Guard:Prevents crashes from NULL page mappings"
+        "+SCLK Range (350-2230):Widened GPU clock range for userspace governors"
+        "+KFD Flush TLB:Compute memory coherency fix"
+        "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
+        "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
+    )
+    if [[ "$kver_major" -ge 7 ]]; then
+        checklist_items+=("+YCbCr 444 Deep Color:PCON color quality + CH7218 quirk")
+    fi
+
+    pick_items "Select kernel patches to include:" "${checklist_items[@]}"
+
+    local selected_str="${PICK_SELECTED[*]}"
+    local audio_flags="--audio"
+
+    [[ " $selected_str " == *" DP Audio Clock "* ]] || audio_flags="$audio_flags --no-audio-clock"
+    [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || audio_flags="$audio_flags --no-telemetry"
+    [[ " $selected_str " == *" DP Spread Spectrum "* ]] || audio_flags="$audio_flags --no-ss"
+    [[ " $selected_str " == *" PCON FRL Hotplug "* ]] || audio_flags="$audio_flags --no-frl-hp"
+    [[ " $selected_str " == *" TTM NULL-page Guard "* ]] || audio_flags="$audio_flags --no-ttm"
+    [[ " $selected_str " == *" SCLK Range (350-2230) "* ]] || audio_flags="$audio_flags --no-sclk"
+    [[ " $selected_str " == *" KFD Flush TLB "* ]] || audio_flags="$audio_flags --no-kfd"
+    if [[ "$kver_major" -ge 7 ]]; then
+        [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]] || audio_flags="$audio_flags --no-ycbcr444"
     fi
 
     fixes_repo_sync || return 1
@@ -2676,7 +2845,7 @@ install_audio_fix() {
     else
         print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
     fi
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh"; then
+    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${audio_flags}"; then
         fail_with_log "DisplayPort audio/video fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Audio Fix — patch-driver.sh"
         return 1
     fi
@@ -2707,6 +2876,19 @@ install_audio_fix() {
         audio_fix_ensure_hpd_debounce_grub_param
     else
         print_info "Skipped HPD debounce param. Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 manually if needed."
+    fi
+
+    # Activate YCbCr 4:4:4 force params if patch was selected
+    if [[ "$kver_major" -ge 7 ]] && [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]]; then
+        echo ""
+        echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color${RESET}"
+        echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + minimum 10-bit color depth via modprobe.d.${RESET}"
+        echo ""
+        if ycbcr444_force_installed; then
+            print_info "YCbCr 4:4:4 force params already enabled (modprobe.d config present)."
+        else
+            ycbcr444_ensure_force
+        fi
     fi
 }
 
@@ -3364,6 +3546,10 @@ run_revert_ac3_surround() {
     rm -f "$AC3_UDEV_RULE"
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger /sys/class/sound/card0 2>/dev/null || true
+    # Remove old AC-3 profile set and user config leftovers
+    rm -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/surround-profile.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
     if (( was_steamos )); then
         steamos-readonly enable || true
     fi
@@ -3379,6 +3565,95 @@ run_revert_ac3_surround() {
 
     print_success "AC-3 Surround Encoding reverted. HDMI stereo profile restored."
     persist_state_remove "ac3"
+}
+
+DUAL_AUDIO_DIR="$SCRIPT_DIR/external/bc250-dual-audio"
+DUAL_AUDIO_WP_VERSION="0.5.17"
+
+dual_audio_wp_version_ok() {
+    local ver
+    ver=$(wireplumber --version 2>/dev/null | grep -Eo '0\.5\.[0-9]+' | head -1 || true)
+    [[ "$ver" == "$DUAL_AUDIO_WP_VERSION" ]]
+}
+
+dual_audio_installed() {
+    [[ -f /etc/alsa/conf.d/61-bc250-a52.conf ]] && \
+    [[ -f /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf ]] && \
+    [[ -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua ]]
+}
+
+dual_audio_ensure_wireplumber() {
+    dual_audio_wp_version_ok && return 0
+    local cur=$(wireplumber --version 2>/dev/null | grep -Eo '0\.5\.[0-9]+' | head -1 || echo unknown)
+    print_info "WirePlumber ${cur} detected; dual-audio requires ${DUAL_AUDIO_WP_VERSION}."
+    local d="$DUAL_AUDIO_DIR/deps"
+    local wp="$d/wireplumber-${DUAL_AUDIO_WP_VERSION}-1-x86_64.pkg.tar.zst"
+    local lwp="$d/libwireplumber-${DUAL_AUDIO_WP_VERSION}-1-x86_64.pkg.tar.zst"
+    [[ -f "$wp" && -f "$lwp" ]] || { print_error "WP ${DUAL_AUDIO_WP_VERSION} packages not found in ${d}."; return 1; }
+    confirm "Install WirePlumber ${DUAL_AUDIO_WP_VERSION}?" || { print_info "Cancelled."; return 1; }
+    local was=0; is_steamos && { was=1; steamos-readonly disable || { print_error "Cannot disable RO."; return 1; }; }
+    LC_ALL=C sudo pacman -U --noconfirm --overwrite '*' "$lwp" "$wp" || {
+        (( was )) && steamos-readonly enable || true
+        print_error "Failed to install WP ${DUAL_AUDIO_WP_VERSION}."; return 1; }
+    (( was )) && steamos-readonly enable || true
+    dual_audio_wp_version_ok || { print_error "WP version check failed post-install."; return 1; }
+    print_success "WirePlumber ${DUAL_AUDIO_WP_VERSION} installed."
+}
+
+install_dual_audio() {
+    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.8)"
+    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3)${RESET}"
+    echo ""
+    dual_audio_installed && { print_info "Already installed."; return 0; }
+    dual_audio_ensure_wireplumber || return 1
+    ac3_surround_installed && { print_info "Old AC-3 detected; reverting..."; run_revert_ac3_surround || true; }
+    confirm "Install dual-output audio?" || { print_info "Cancelled."; return 0; }
+    local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
+    sudo install -d -m 0755 /etc/alsa/conf.d /etc/pipewire/pipewire.conf.d
+    sudo install -d -m 0755 /etc/wireplumber/wireplumber.conf.d
+    sudo install -d -m 0755 /usr/local/share/wireplumber/scripts/monitors
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/alsa/conf.d/61-bc250-a52.conf" /etc/alsa/conf.d/61-bc250-a52.conf
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/monitors/alsa.lua" /usr/local/share/wireplumber/scripts/monitors/alsa.lua
+    (( was )) && steamos-readonly enable || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-ac3.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/surround-profile.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/ac3-sink.conf" 2>/dev/null || true
+    # Remove old AC-3 profile set (was in /usr/share, needs RO disable)
+    if [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]]; then
+        local was2=0; is_steamos && { was2=1; steamos-readonly disable || true; }
+        sudo rm -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf
+        (( was2 )) && steamos-readonly enable || true
+    fi
+    local uid=$(id -u "$REAL_USER")
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
+    sleep 4
+    print_success "Dual-output audio v0.8 installed! Reboot before use."
+    persist_state_add "dual_audio"
+}
+
+run_revert_dual_audio() {
+    print_step "R-DUAL" "Revert BC-250 Dual-Output Audio"
+    dual_audio_installed || { print_info "Not installed."; return 0; }
+    confirm "Remove dual-output audio?" || { print_info "Cancelled."; return 0; }
+    local uid=$(id -u "$REAL_USER")
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
+    local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
+    sudo rm -f /etc/alsa/conf.d/61-bc250-a52.conf
+    sudo rm -f /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
+    sudo rm -f /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
+    sudo rm -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
+    sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
+    sudo rm -f /usr/local/libexec/bc250-eac3-backend
+    sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
+    (( was )) && steamos-readonly enable || true
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user daemon-reload 2>/dev/null || true
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
+    print_success "Dual-output audio reverted. Reboot to apply."
+    persist_state_remove "dual_audio"
 }
 
 gfx1013_ensure_mesa_build_deps() {
@@ -3398,7 +3673,16 @@ gfx1013_ensure_mesa_build_deps() {
                 libffi systemd-libs libelf zlib zstd expat glslang
                 libxcb libx11 libxext libxdamage libxfixes libxrandr
                 libxshmfence libxxf86vm libxrender libxau libxdmcp xorgproto
-                xcb-util xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image)
+                xcb-util xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image
+                lib32-glibc lib32-gcc-libs lib32-libdrm lib32-libffi
+                lib32-libx11 lib32-libxcb lib32-libxext lib32-libxrandr
+                lib32-libxshmfence lib32-libxxf86vm lib32-libxrender
+                lib32-libxau lib32-libxdmcp lib32-libxdamage lib32-libxfixes
+                lib32-expat lib32-zlib lib32-zstd
+                lib32-wayland
+                lib32-mesa
+                lm_sensors
+                libva)
     local need_install=0
     command -v meson >/dev/null 2>&1 || need_install=1
     command -v ninja >/dev/null 2>&1 || need_install=1
@@ -3421,6 +3705,8 @@ gfx1013_ensure_mesa_build_deps() {
     [[ -f /usr/lib/pkgconfig/libzstd.pc ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/expat.pc ]] || need_install=1
     [[ -f /usr/lib/pkgconfig/wayland-scanner.pc ]] || need_install=1
+    [[ -f /usr/include/gnu/stubs-32.h ]] || need_install=1
+    [[ -f /usr/lib/pkgconfig/libva.pc ]] || need_install=1
 
     [[ "$need_install" = 1 ]] || return 0
 
@@ -3602,8 +3888,26 @@ run_revert_gfx1013_fix() {
         sudo sed -i '/VK_DRIVER_FILES/d' "$env_file"
     fi
 
+    # Remove boot mode GRUB param if present
+    boot_mode_revert
+
     print_success "GFX1013 compute queue fix reverted to stock amdgpu.ko. Reboot to apply."
     persist_state_remove "gfx1013"
+}
+
+boot_mode_revert() {
+    if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*video=DP-1:2560x1440@120' "$GRUB_DEFAULT" >/dev/null 2>&1; then
+        print_info "Removing video=DP-1:2560x1440@120 from GRUB..."
+        steamos_writable "
+            cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+            sed -i 's/ video=DP-1:2560x1440@120//g' \"$GRUB_DEFAULT\"
+            update-grub
+        " || {
+            print_info "Failed to remove video=DP-1:2560x1440@120 from GRUB. Remove it manually."
+            return 0
+        }
+        print_info "Removed video=DP-1:2560x1440@120 from GRUB. Reboot to use EDID preferred timing."
+    fi
 }
 
 install_combined_fix() {
@@ -3625,34 +3929,91 @@ install_combined_fix() {
     kver_rest="$(uname -r | cut -d. -f2-)"
     kver_minor="${kver_rest%%.*}"
 
-    echo -e "  ${CYAN}1) Audio Fix${RESET} — DP audio/video clock + GPU metrics + DP SS disable + tunable cache"
-    if confirm "  Install Audio Fix?"; then do_audio=1; patch_flags+=(--audio); fi
-    echo ""
-    echo -e "  ${CYAN}2) GFX1013 Compute Fix + Mesa/RADV${RESET} — async compute + FSR4 V3 + mesh/task shaders"
-    if confirm "  Install GFX1013 Compute Fix + Mesa?"; then do_gfx=1; patch_flags+=(--gfx1013); fi
-    echo ""
+    # Build the checklist items — all patches individually selectable
+    local -a checklist_items=(
+        "+DP Audio Clock:Fixes audio/video at ~82% speed via DP/HDMI"
+        "+DP Spread Spectrum:Cleaner audio output via DP/HDMI"
+        "+TTM NULL-page Guard:Prevents crashes from NULL page mappings"
+        "+SCLK Range (350-2230):Widened GPU clock range for userspace governors"
+        "+KFD Flush TLB:Compute memory coherency fix"
+        "+GFX1013 Compute+Mesa:Async compute queue + FSR4 + mesh/task shaders"
+        "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
+        "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
+        "+Boot 1440p120:Set preferred boot mode to 2560x1440@120 via GRUB"
+    )
 
+    # YCbCr 4:4:4 only on kernel 7.x
     if [[ "$kver_major" -ge 7 ]]; then
-        print_info "Kernel 7.x detected — VRR and ALLM patches are not needed (already functional upstream). Skipping."
-        echo ""
-    else
-        echo -e "  ${CYAN}3) VRR PCON FreeSync${RESET} — FreeSync fallback + HDMI VRR (VTEM) + LFC-aware range extending"
-        if confirm "  Install VRR PCON FreeSync patch?"; then do_vrr=1; patch_flags+=(--vrr); fi
-        echo ""
-        echo -e "  ${CYAN}4) ALLM via DP${RESET} — Auto Low Latency Mode for PCON HDMI Game Mode"
-        if confirm "  Install ALLM via DP patch?"; then do_allm=1; patch_flags+=(--allm); fi
-        echo ""
+        checklist_items+=("+YCbCr 444 Deep Color:PCON color quality + CH7218 quirk")
     fi
 
-    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 ]]; then
+    # VRR and ALLM only on kernel <7
+    if [[ "$kver_major" -lt 7 ]]; then
+        checklist_items+=("+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC range")
+        checklist_items+=("+ALLM via DP:Auto Low Latency Mode for PCON HDMI Game Mode")
+    fi
+
+    pick_items "Select kernel patches to include:" "${checklist_items[@]}"
+
+    # Map selected items to patch-driver.sh flags
+    local selected_str="${PICK_SELECTED[*]}"
+
+    # Audio sub-patches (require --audio base flag)
+    [[ " $selected_str " == *" DP Audio Clock "* ]] || patch_flags+=(--no-audio-clock)
+    [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || patch_flags+=(--no-telemetry)
+    [[ " $selected_str " == *" DP Spread Spectrum "* ]] || patch_flags+=(--no-ss)
+
+    # If any audio sub-patch is selected, add --audio
+    if [[ " $selected_str " == *" DP Audio Clock "* ]] || \
+       [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || \
+       [[ " $selected_str " == *" DP Spread Spectrum "* ]]; then
+        do_audio=1
+        patch_flags=(--audio "${patch_flags[@]}")
+    fi
+
+    # Always-applied patches (now individually excludable)
+    [[ " $selected_str " == *" PCON FRL Hotplug "* ]] || patch_flags+=(--no-frl-hp)
+    [[ " $selected_str " == *" TTM NULL-page Guard "* ]] || patch_flags+=(--no-ttm)
+    [[ " $selected_str " == *" SCLK Range (350-2230) "* ]] || patch_flags+=(--no-sclk)
+    [[ " $selected_str " == *" KFD Flush TLB "* ]] || patch_flags+=(--no-kfd)
+
+    if [[ "$kver_major" -ge 7 ]]; then
+        [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]] || patch_flags+=(--no-ycbcr444)
+    fi
+
+    # GFX1013
+    if [[ " $selected_str " == *" GFX1013 Compute+Mesa "* ]]; then
+        do_gfx=1
+        patch_flags+=(--gfx1013)
+    fi
+
+    # Boot 1440p120
+    local do_boot_mode=0
+    if [[ " $selected_str " == *" Boot 1440p120 "* ]]; then
+        do_boot_mode=1
+    fi
+
+    # VRR and ALLM (kernel <7)
+    if [[ "$kver_major" -lt 7 ]]; then
+        if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
+            do_vrr=1
+            patch_flags+=(--vrr)
+        fi
+        if [[ " $selected_str " == *" ALLM via DP "* ]]; then
+            do_allm=1
+            patch_flags+=(--allm)
+        fi
+    fi
+
+    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 && $do_boot_mode -eq 0 ]]; then
         print_info "No patches selected. Nothing to do."
         return 0
     fi
 
-    validate_combined_fix_prerequisites "$do_gfx" || return 1
-
-    echo -e "  ${DIM}Always included: TTM NULL-page guard + SCLK range widening (350-2230 MHz)${RESET}"
-    echo ""
+    # Only validate build prerequisites if actual kernel/Mesa patches are selected
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
+        validate_combined_fix_prerequisites "$do_gfx" || return 1
+    fi
 
     local mesh_flag=""
     if [[ $do_gfx -eq 1 ]]; then
@@ -3670,70 +4031,77 @@ install_combined_fix() {
     echo ""
 
     local flags_str="${patch_flags[*]}"
-    if ! confirm "Continue with selected components: ${flags_str:-none}?"; then
+    local confirm_msg="Continue with selected components: ${flags_str:-none}"
+    [[ $do_boot_mode -eq 1 ]] && confirm_msg="$confirm_msg + boot 1440p120"
+    if ! confirm "$confirm_msg?"; then
         print_info "Cancelled."
         return 0
     fi
 
-    fixes_repo_sync || return 1
+    # Apply kernel/Mesa patches if any are selected
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
+        fixes_repo_sync || return 1
 
-    local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
-    if [[ ! -d "$fix_dir" ]]; then
-        fail_with_log "bc250-audio-fix directory not found in the fixes repository." "Combined Fix — missing directory"
-        return 1
-    fi
+        local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
+        if [[ ! -d "$fix_dir" ]]; then
+            fail_with_log "bc250-audio-fix directory not found in the fixes repository." "Combined Fix — missing directory"
+            return 1
+        fi
 
-    print_info "Running patch-driver.sh ${flags_str} (single kernel build with selected patch sets)..."
-    print_info "This clones the matching Valve kernel source tree and can take several minutes."
+        print_info "Running patch-driver.sh ${flags_str} (single kernel build with selected patch sets)..."
+        print_info "This clones the matching Valve kernel source tree and can take several minutes."
 
-    audio_fix_prefetch_headers "$fix_dir"
-    audio_fix_patch_fetch_sources "$fix_dir/fetch-sources.sh" || {
-        fail_with_log "Could not prepare the combined fix dependency fetch script." "Combined Fix — fetch-sources compatibility patch"
-        return 1
-    }
-    audio_fix_ensure_mkinitcpio_preset
+        audio_fix_prefetch_headers "$fix_dir"
+        audio_fix_patch_fetch_sources "$fix_dir/fetch-sources.sh" || {
+            fail_with_log "Could not prepare the combined fix dependency fetch script." "Combined Fix — fetch-sources compatibility patch"
+            return 1
+        }
+        audio_fix_ensure_mkinitcpio_preset
 
-    chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
-    local fullsha patch_env=""
-    fullsha=$(audio_fix_resolve_fullsha || true)
-    if [[ -n "$fullsha" ]]; then
-        print_info "Resolved kernel commit ${fullsha:0:12}; passing full SHA to patch-driver.sh."
-        patch_env="export FULLSHA='$fullsha';"
+        chown -R "$REAL_USER":"$REAL_USER" "$fix_dir"
+        local fullsha patch_env=""
+        fullsha=$(audio_fix_resolve_fullsha || true)
+        if [[ -n "$fullsha" ]]; then
+            print_info "Resolved kernel commit ${fullsha:0:12}; passing full SHA to patch-driver.sh."
+            patch_env="export FULLSHA='$fullsha';"
+        else
+            print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
+        fi
+
+        if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${flags_str}"; then
+            fail_with_log "Combined fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Combined Fix — patch-driver.sh"
+            return 1
+        fi
+
+        if [[ $do_gfx -eq 1 ]]; then
+            print_info "Kernel patches installed. Now building patched Mesa/RADV..."
+            local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
+            if [[ ! -d "$mesa_dir" ]]; then
+                fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
+                return 1
+            fi
+
+            print_info "Checking for meson/ninja build tools and dev headers..."
+            if ! gfx1013_ensure_mesa_build_deps; then
+                fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
+                return 1
+            fi
+
+            print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+            if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
+                fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
+                return 1
+            fi
+        fi
+
+        print_success "Combined fix installed! Reboot required."
+        [[ $do_audio -eq 1 ]] && persist_state_add "audio"
+        [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
+        [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+        print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
     else
-        print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
+        print_success "Boot mode configuration applied! Reboot required."
     fi
-
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${flags_str}"; then
-        fail_with_log "Combined fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Combined Fix — patch-driver.sh"
-        return 1
-    fi
-
-    if [[ $do_gfx -eq 1 ]]; then
-        print_info "Kernel patches installed. Now building patched Mesa/RADV..."
-        local mesa_dir="$FIXES_REPO_DIR/bc250-gfx1013-fix"
-        if [[ ! -d "$mesa_dir" ]]; then
-            fail_with_log "bc250-gfx1013-fix directory not found in the fixes repository." "Combined Fix — missing Mesa directory"
-            return 1
-        fi
-
-        print_info "Checking for meson/ninja build tools and dev headers..."
-        if ! gfx1013_ensure_mesa_build_deps; then
-            fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
-            return 1
-        fi
-
-        print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
-        if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
-            fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
-            return 1
-        fi
-    fi
-
-    print_success "Combined fix installed! Reboot required."
-    [[ $do_audio -eq 1 ]] && persist_state_add "audio"
-    [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
-    [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
-    print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
 
     if [[ $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
         echo ""
@@ -3804,6 +4172,41 @@ install_combined_fix() {
         ycbcr444_ensure_modprobe
     else
         print_info "Skipped FRL. Enable manually with: echo 'options amdgpu dcfeaturemask=0x402' > $YCBCR444_MODPROBE_FILE"
+    fi
+
+    # Activate YCbCr 4:4:4 force params if patch was selected
+    if [[ "$kver_major" -ge 7 ]] && [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]]; then
+        echo ""
+        echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color${RESET}"
+        echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + minimum 10-bit color depth via modprobe.d.${RESET}"
+        echo ""
+        if ycbcr444_force_installed; then
+            print_info "YCbCr 4:4:4 force params already enabled (modprobe.d config present)."
+        else
+            ycbcr444_ensure_force
+        fi
+    fi
+
+    # Boot 1440p120: set video=DP-1:2560x1440@120 in GRUB
+    if [[ $do_boot_mode -eq 1 ]]; then
+        echo ""
+        echo -e "  ${CYAN}Boot Display Mode${RESET}"
+        echo -e "  ${DIM}Sets video=DP-1:2560x1440@120 in GRUB to use 1440p@120 from boot.${RESET}"
+        echo ""
+        if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*video=DP-1:2560x1440@120' "$GRUB_DEFAULT" >/dev/null 2>&1; then
+            print_info "video=DP-1:2560x1440@120 is already in GRUB — boot mode set."
+        else
+            steamos_writable "
+                cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+                if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'video=DP-1:2560x1440@120'; then
+                    sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 video=DP-1:2560x1440@120\"/' \"$GRUB_DEFAULT\"
+                fi
+                update-grub
+            " || {
+                print_info "Failed to add video=DP-1:2560x1440@120 to GRUB. Add it manually."
+            }
+            print_info "Added video=DP-1:2560x1440@120 to GRUB. Reboot to boot at 1440p@120."
+        fi
     fi
 }
 
@@ -5528,6 +5931,14 @@ run_status() {
     fi
     echo -e "  ${CYAN}AC-3 Surround${RESET}      ${ac3_icon} ${ac3_color}${ac3_label}${RESET}"
 
+    local dual_icon dual_color dual_label
+    if dual_audio_installed; then
+        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.8)"
+    else
+        dual_icon="$DIM"; dual_color="$DIM"; dual_label="not installed"
+    fi
+    echo -e "  ${CYAN}Dual-Output Audio${RESET} ${dual_icon} ${dual_color}${dual_label}${RESET}"
+
     echo ""
     echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
 }
@@ -5606,6 +6017,8 @@ run_revert_all() {
     echo ""
     run_revert_ac3_surround
     echo ""
+    run_revert_dual_audio
+    echo ""
     run_revert_ds5_bridge_fix
     echo ""
     run_revert_ds5_chord_vdf
@@ -5615,6 +6028,8 @@ run_revert_all() {
     run_revert_ram_split
     echo ""
     run_revert_gfx1013_fix
+    echo ""
+    boot_mode_revert
     echo ""
     run_revert_aic8800_wifi
 }
@@ -5646,6 +6061,8 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
+        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.8) — requires WP 0.5.17"
+        print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -5673,6 +6090,8 @@ run_install_manual() {
             10R) run_revert_gfx1013_fix; press_enter ;;
             11) install_ac3_surround;      press_enter ;;
             11R) run_revert_ac3_surround;  press_enter ;;
+            12) install_dual_audio;        press_enter ;;
+            12R) run_revert_dual_audio;   press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
@@ -5855,6 +6274,7 @@ reapply_installed_components() {
             acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
             audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
             ac3)        install_ac3_surround || print_error "AC-3 surround reapply failed" ;;
+            dual_audio) install_dual_audio || print_error "Dual-output audio reapply failed" ;;
             ds5_bridge) install_ds5_bridge_fix || print_error "DS5 Bridge fix reapply failed" ;;
             ds5_chord_vdf) run_install_ds5_chord_vdf || print_error "DS5 Chord VDF reapply failed" ;;
             cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;

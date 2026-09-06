@@ -5,9 +5,9 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 VERSION=$(<"${HERE}/VERSION")
-MESA_VERSION=26.2.0-rc3
+MESA_VERSION=26.2.2
 MESA_TARBALL_URL=https://archive.mesa3d.org/mesa-${MESA_VERSION}.tar.xz
-MESA_TARBALL_SHA256=f733c005660d342a51c6727d1ad481f43d05b4c601ac72247fa641e1d73a8ad1
+MESA_TARBALL_SHA256=eeb29ca7e56cfaa8e8a79538dcf834e3b18e501c31bef5145e959ea437cc4216
 BUILD_ROOT="${HERE}/build-mesa"
 MESA_PREFIX="/opt/bc250-gfx1013/${VERSION}"
 
@@ -144,33 +144,85 @@ if ! echo '#include <errno.h>' | cc -dM -E -x c - 2>/dev/null | grep -qw ETIME; 
     fi
 fi
 
-meson setup build \
+# Include package release in version string so Chromium invalidates
+# its GPU cache; otherwise it can cause pages to render incorrectly.
+echo "${MESA_VERSION}-bc250.${VERSION}" >VERSION
+
+step "Configure Mesa 64-bit build"
+if [[ -d build64 ]]; then
+    echo "Removing old 64-bit build directory"
+    rm -rf build64
+fi
+
+meson setup build64 \
     -Dvulkan-drivers=amd \
-    -Dgallium-drivers= \
+    -Dgallium-drivers=radeonsi \
+    -Dvideo-codecs=all \
+    -Dvulkan-layers=device-select,overlay \
     -Dplatforms=x11,wayland \
     -Dglx=disabled \
     -Dllvm=disabled \
+    -Dgles1=disabled \
+    -Dlmsensors=disabled \
     -Dbuildtype=release \
-    -Dprefix="$MESA_PREFIX"
+    -Dprefix="$MESA_PREFIX" \
+    -Dlibdir=lib
 
-step "Build Mesa"
-ninja -C build
+step "Build Mesa 64-bit"
+ninja -C build64
 
-step "Install Mesa to ${MESA_PREFIX}"
-sudo ninja -C build install
+step "Install Mesa 64-bit to ${MESA_PREFIX}"
+sudo ninja -C build64 install
+
+step "Configure Mesa 32-bit build"
+CROSS_FILE="/usr/share/meson/cross/lib32"
+if [[ ! -f "$CROSS_FILE" ]]; then
+    echo "Warning: meson cross file for lib32 not found at $CROSS_FILE; skipping 32-bit build."
+    echo "32-bit Vulkan apps will use the stock unpatched driver."
+else
+    if [[ -d build32 ]]; then
+        echo "Removing old 32-bit build directory"
+        rm -rf build32
+    fi
+
+    meson setup build32 \
+        --cross-file "$CROSS_FILE" \
+        -Dvulkan-drivers=amd \
+        -Dgallium-drivers=radeonsi \
+        -Dvulkan-layers=device-select,overlay \
+        -Dplatforms=x11,wayland \
+        -Dglx=disabled \
+        -Dllvm=disabled \
+        -Dgles1=disabled \
+        -Dlmsensors=disabled \
+        -Dbuildtype=release \
+        -Dprefix="$MESA_PREFIX" \
+        -Dlibdir=lib32
+
+    step "Build Mesa 32-bit"
+    ninja -C build32
+
+    step "Install Mesa 32-bit to ${MESA_PREFIX}"
+    sudo ninja -C build32 install
+fi
 
 step "Set VK_DRIVER_FILES environment variable"
-# Only the 64-bit ICD is patched; list the stock 32-bit ICD alongside it so
-# 32-bit Vulkan processes (some game launchers/anti-cheat components) keep
-# working via the unpatched driver instead of losing Vulkan entirely.
+# Both 64-bit and 32-bit ICDs are patched. If 32-bit build was skipped,
+# fall back to the stock 32-bit ICD so 32-bit Vulkan processes keep working.
+PATCHED_ICD_64="${MESA_PREFIX}/share/vulkan/icd.d/radeon_icd.x86_64.json"
+PATCHED_ICD_32="${MESA_PREFIX}/share/vulkan/icd.d/radeon_icd.i686.json"
 STOCK_32BIT_ICD="/usr/share/vulkan/icd.d/radeon_icd.i686.json"
-PATCHED_ICD="${MESA_PREFIX}/share/vulkan/icd.d/radeon_icd.x86_64.json"
-if [[ -f "$STOCK_32BIT_ICD" ]]; then
-    VK_DRIVER_FILES_VALUE="${PATCHED_ICD}:${STOCK_32BIT_ICD}"
+
+if [[ -f "$PATCHED_ICD_32" ]]; then
+    VK_DRIVER_FILES_VALUE="${PATCHED_ICD_64}:${PATCHED_ICD_32}"
+elif [[ -f "$STOCK_32BIT_ICD" ]]; then
+    echo "Warning: patched 32-bit ICD not found; 32-bit Vulkan apps will use stock unpatched driver."
+    VK_DRIVER_FILES_VALUE="${PATCHED_ICD_64}:${STOCK_32BIT_ICD}"
 else
-    echo "Warning: stock 32-bit ICD not found at $STOCK_32BIT_ICD; 32-bit Vulkan apps may not find a driver."
-    VK_DRIVER_FILES_VALUE="$PATCHED_ICD"
+    echo "Warning: no 32-bit ICD found at all; 32-bit Vulkan apps may not find a driver."
+    VK_DRIVER_FILES_VALUE="$PATCHED_ICD_64"
 fi
+
 ENV_FILE="/etc/environment"
 if grep -q "VK_DRIVER_FILES" "$ENV_FILE" 2>/dev/null; then
     echo "Updating existing VK_DRIVER_FILES entry in $ENV_FILE"
@@ -183,8 +235,14 @@ fi
 echo ""
 echo "==> Mesa build complete!"
 echo "   Mesh shader mode: ${MESH_MODE}"
+echo "   Mesa version: ${MESA_VERSION}"
 echo "   Installed to: ${MESA_PREFIX}"
 echo "   VK_DRIVER_FILES set to: ${VK_DRIVER_FILES_VALUE}"
+if [[ -f "$PATCHED_ICD_32" ]]; then
+    echo "   32-bit: patched (async compute + FSR4 active)"
+else
+    echo "   32-bit: stock (unpatched — async compute + FSR4 NOT active)"
+fi
 echo ""
 if [[ "$MESH_MODE" == "mastag" ]]; then
     echo "   To enable mesh/task shaders per-game, set:"

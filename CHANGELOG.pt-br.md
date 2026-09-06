@@ -7,6 +7,42 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.8.4 — 2026-09-05
+
+- **Adicionado:** Dual-Output Audio BC-250 (MastaG v0.8) — AC3 nativo via
+  WirePlumber (Dolby Digital 5.1 @ 448 kbps) + HDMI com guarda de hotplug.
+  Requer WirePlumber 0.5.17 (incluído no toolkit). Disponível como opção de
+  instalação manual junto ao AC-3 Surround Encoding existente.
+- **Adicionado:** Opção Boot 1440p120 no checklist de instalação combinada —
+  configura `video=DP-1:2560x1440@120` no GRUB para o display iniciar em
+  1440p@120.
+- **Adicionado:** Seleção individual de patches via flags `--no-*` no build
+  combinado de kernel (ex. pular VRR, ALLM ou YCbCr 444 independentemente).
+- **Adicionado:** Override de EDID para PCON HDMI 2.1 (Samsung Q80A) — injeta
+  HF-VSDB com FRL 48 Gbps, VRR 48-120, ALLM quando o dongle PCON não repassa.
+- **Adicionado:** Perfil de sessão gamescope + parâmetro GRUB `allm_mode`
+  para BC-250.
+- **Alterado:** Build do Mesa reformulado — suporte 32-bit corrigido, drivers
+  gallium restaurados, video codecs desativados, Mesa 26.2.2 com a série de
+  patches rebased do MastaG. Patch FSR4 V3 atualizado para o resultado de
+  bissecção de hardware.
+- **Alterado:** Item YCbCr 4:4:4 do checklist renomeado para "YCbCr 444"
+  (dois-pontos quebravam o `pick_items`). Force params agora ativados via
+  modprobe.d quando o patch é selecionado.
+- **Corrigido:** Sink AC3 agora visível nas configurações de áudio do Steam
+  Game Mode (`node.virtual=false`, `device.class=sound`).
+- **Corrigido:** Propriedades ALLM agora anexadas aos conectores DP para o
+  PCON do BC-250.
+- **Corrigido:** Revert do boot mode adicionado aos caminhos de revert
+  (10R + Revert All).
+- **Corrigido:** Limpeza de leftovers antigos de surround-profile.conf e
+  hdmi-ac3.conf durante a instalação do dual-audio.
+- **Corrigido:** Persistência do dual-audio após reboot — `dual_audio` agora
+  incluído no `reapply_installed_components` para o toolkit reinstalar se o
+  rootfs perder os arquivos.
+- **Removido:** Suporte a E-AC3 (Dolby Digital Plus) do dual-audio — apenas
+  AC3 (Dolby Digital) é mantido por estabilidade.
+
 ## v1.8.3 — 2026-09-01
 
 - **Corrigido:** Case label `DC_NO_DP_LINK_BANDWIDTH` duplicado no patch YCbCr 4:4:4
