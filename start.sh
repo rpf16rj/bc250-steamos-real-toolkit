@@ -4011,9 +4011,11 @@ install_combined_fix() {
         checklist_items+=("+YCbCr 4:4:4 Deep Color:PCON color quality + CH7218 quirk")
     fi
 
-    # VRR and ALLM
-    checklist_items+=("+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC range")
-    checklist_items+=("ALLM via DP:Auto Low Latency Mode for PCON HDMI Game Mode")
+    # VRR and ALLM only on kernel <7
+    if [[ "$kver_major" -lt 7 ]]; then
+        checklist_items+=("+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC range")
+        checklist_items+=("+ALLM via DP:Auto Low Latency Mode for PCON HDMI Game Mode")
+    fi
 
     pick_items "Select kernel patches to include:" "${checklist_items[@]}"
 
@@ -4049,14 +4051,16 @@ install_combined_fix() {
         patch_flags+=(--gfx1013)
     fi
 
-    # VRR and ALLM
-    if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
-        do_vrr=1
-        patch_flags+=(--vrr)
-    fi
-    if [[ " $selected_str " == *" ALLM via DP "* ]]; then
-        do_allm=1
-        patch_flags+=(--allm)
+    # VRR and ALLM (kernel <7)
+    if [[ "$kver_major" -lt 7 ]]; then
+        if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
+            do_vrr=1
+            patch_flags+=(--vrr)
+        fi
+        if [[ " $selected_str " == *" ALLM via DP "* ]]; then
+            do_allm=1
+            patch_flags+=(--allm)
+        fi
     fi
 
     if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 ]]; then

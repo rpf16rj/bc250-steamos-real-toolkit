@@ -74,30 +74,13 @@ cat /sys/kernel/debug/dri/0/DP-1/vrr_range
   - YCbCr 4:4:4 fallback when RGB validation fails
 - These params are set via modprobe.d, NOT GRUB (steamenv_boot filters them)
 
-## FRL vs VRR Incompatibility (Kernel Limitation)
-FRL and VRR are mutually exclusive in the current upstream kernel:
-- FRL links don't support VRR yet (upstream patch: "FRL links don't yet support VRR")
-- `dcfeaturemask=0x402` enables FRL (bit 0x400) → VRR breaks
-- `dcfeaturemask=0x002` disables FRL → VRR works, 4K60 via TMDS+scrambling
+## Sync Instability Issue
+Symptoms: display loses sync (black screen/flicker) when switching modes,
+especially for non-1440p120 modes in gamescope.
 
-### EDID Override: Dynamic Patching (2026-09-01)
-The EDID is now generated dynamically by `patch_edid_vrr.py`:
-1. Dumps live EDID from `/sys/class/drm/card0-DP-1/edid`
-2. Zeros VRR min/max in HF-VSDB (prevents VTEM flicker via PCON)
-3. Adds AMD VSDB v1 (FreeSync 48-120 Hz) — DMUB firmware only supports v1
-4. Swaps preferred timing to 4K60 for stable boot
+Root cause: Without HF-VSDB in EDID, kernel doesn't know the TV supports HDMI 2.1.
+For modes >300 MHz pixel clock, kernel tries TMDS first (which fails at >300 MHz
+without scrambling), then may or may not fall back to FRL correctly.
 
-**Requires**: `bc250-vrr-pcon-freesync.patch` in amdgpu.ko (adds `parse_amd_vsdb_cea_direct` fallback)
-**Requires**: `amdgpu.freesync_pcon_allow_all=1` in GRUB
-
-### VRR PCON FreeSync Patch (kernel 7.2 adapted)
-- Original patch from v1.6.0 didn't apply on kernel 7.2 (line numbers changed, `extend_range_from_vsdb` already exists)
-- Adapted: only 2 hunks needed — add `parse_amd_vsdb_cea_direct` function and fallback in `parse_edid_cea`
-- Removed hunks for `extend_range_from_vsdb` and `compare_ranges` (already in kernel 7.2)
-- The patch allows the kernel to parse AMD VSDB v1 directly when DMUB firmware fails to find it
-
-### EDID Override Is Recommended
-- `drm.edid_firmware` is an official kernel feature (since 2012, commit da0df92)
-- Used by Steam Deck users with Samsung TVs + DP-to-HDMI docks (Level1Techs forums)
-- Tools: RobertoNegro/edid-generator, ssupt/drmcru
-- Arch Linux wiki has official guide for EDID override
+Fix: EDID override makes the kernel aware of HDMI 2.1 capabilities from the start,
+so FRL is negotiated properly for all high-bandwidth modes.
