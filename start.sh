@@ -3578,8 +3578,11 @@ dual_audio_wp_version_ok() {
 
 dual_audio_installed() {
     [[ -f /etc/alsa/conf.d/61-bc250-a52.conf ]] && \
-    [[ -f /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf ]] && \
-    [[ -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua ]]
+    [[ -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" ]] && \
+    [[ -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" ]] && \
+    [[ -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua ]] && \
+    [[ -f /usr/local/libexec/bc250-eac3-backend ]] && \
+    [[ -f /etc/systemd/user/bc250-eac3-backend.service ]]
 }
 
 dual_audio_ensure_wireplumber() {
@@ -3601,23 +3604,50 @@ dual_audio_ensure_wireplumber() {
 }
 
 install_dual_audio() {
-    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.8)"
-    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3)${RESET}"
+    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.12)"
+    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3) + Dolby Digital Plus (E-AC3)${RESET}"
     echo ""
     dual_audio_installed && { print_info "Already installed."; return 0; }
     dual_audio_ensure_wireplumber || return 1
     ac3_surround_installed && { print_info "Old AC-3 detected; reverting..."; run_revert_ac3_surround || true; }
+    # Check and install dependencies (ffmpeg, alsa-utils for E-AC3 backend)
+    print_info "Checking dependencies (ffmpeg, alsa-utils)..."
+    local missing=()
+    command -v ffmpeg >/dev/null 2>&1 || missing+=("ffmpeg")
+    command -v aplay >/dev/null 2>&1 || missing+=("alsa-utils")
+    command -v pw-metadata >/dev/null 2>&1 || missing+=("pipewire-tools")
+    command -v setsid >/dev/null 2>&1 || missing+=("util-linux")
+    if (( ${#missing[@]} > 0 )); then
+        print_info "Installing missing dependencies: ${missing[*]}"
+        local was_deps=0; is_steamos && { was_deps=1; steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }; }
+        if ! LC_ALL=C pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+            print_error "Failed to install dependencies: ${missing[*]}"
+            (( was_deps )) && steamos-readonly enable || true
+            return 1
+        fi
+        (( was_deps )) && steamos-readonly enable || true
+    else
+        print_info "All dependencies already installed."
+    fi
     confirm "Install dual-output audio?" || { print_info "Cancelled."; return 0; }
     local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
-    sudo install -d -m 0755 /etc/alsa/conf.d /etc/pipewire/pipewire.conf.d
-    sudo install -d -m 0755 /etc/wireplumber/wireplumber.conf.d
+    sudo install -d -m 0755 /etc/alsa/conf.d
     sudo install -d -m 0755 /usr/local/share/wireplumber/scripts/monitors
+    sudo install -d -m 0755 /usr/local/libexec
+    sudo install -d -m 0755 /etc/systemd/user
     sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/alsa/conf.d/61-bc250-a52.conf" /etc/alsa/conf.d/61-bc250-a52.conf
-    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
-    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
     sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
     sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/monitors/alsa.lua" /usr/local/share/wireplumber/scripts/monitors/alsa.lua
+    sudo install -m 0755 "$DUAL_AUDIO_DIR/usr/local/libexec/bc250-eac3-backend" /usr/local/libexec/bc250-eac3-backend
+    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/systemd/user/bc250-eac3-backend.service" /etc/systemd/user/bc250-eac3-backend.service
     (( was )) && steamos-readonly enable || true
+    # WirePlumber and PipeWire user configs go in ~/.config — /etc/ paths are
+    # volatile on SteamOS (symlinked to /run/ or restored to stock on reboot).
+    install -d -m 0755 "$REAL_HOME/.config/wireplumber/wireplumber.conf.d"
+    install -d -m 0755 "$REAL_HOME/.config/pipewire/pipewire.conf.d"
+    install -m 0644 "$DUAL_AUDIO_DIR/etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf"
+    install -m 0644 "$DUAL_AUDIO_DIR/etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" "$REAL_HOME/.config/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf"
+    chown -R "$REAL_USER":"$REAL_USER" "$REAL_HOME/.config/wireplumber" "$REAL_HOME/.config/pipewire" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-ac3.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/surround-profile.conf" 2>/dev/null || true
@@ -3629,9 +3659,11 @@ install_dual_audio() {
         (( was2 )) && steamos-readonly enable || true
     fi
     local uid=$(id -u "$REAL_USER")
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user daemon-reload 2>/dev/null || true
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user enable --now bc250-eac3-backend.service 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     sleep 4
-    print_success "Dual-output audio v0.8 installed! Reboot before use."
+    print_success "Dual-output audio v0.12 installed! Reboot before use."
     persist_state_add "dual_audio"
 }
 
@@ -3643,13 +3675,13 @@ run_revert_dual_audio() {
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
     local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
     sudo rm -f /etc/alsa/conf.d/61-bc250-a52.conf
-    sudo rm -f /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
-    sudo rm -f /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
     sudo rm -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
     sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
     sudo rm -f /usr/local/libexec/bc250-eac3-backend
     sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
     (( was )) && steamos-readonly enable || true
+    rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" 2>/dev/null || true
+    rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user daemon-reload 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     print_success "Dual-output audio reverted. Reboot to apply."
@@ -6061,7 +6093,7 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
-        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.8) — requires WP 0.5.17"
+        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + E-AC3 + HDMI with hotplug guard (MastaG v0.12) — requires WP 0.5.17"
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "0"  "Back" ""
         echo ""

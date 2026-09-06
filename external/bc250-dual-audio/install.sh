@@ -11,7 +11,7 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$HOME/.local/state/bc250-audio-backup/$STAMP"
 mkdir -p "$BACKUP/user" "$BACKUP/system"
 
-echo "BC-250 Dual Audio v0.8 installer"
+echo "BC-250 Dual Audio v0.12 installer"
 echo "Native HDMI/DP + AC3 448 kbps + E-AC3 768 kbps"
 echo "Backup: $BACKUP"
 
@@ -33,7 +33,7 @@ fi
 if [[ -f "$STOCK_ALSA" && "${BC250_ALLOW_UNTESTED_WP:-0}" != "1" ]]; then
   STOCK_ALSA_SHA256=$(sha256sum "$STOCK_ALSA" | awk '{print $1}')
   if [[ "$STOCK_ALSA_SHA256" != "$EXPECTED_STOCK_ALSA_SHA256" ]]; then
-    echo "ERROR: distro stock alsa.lua does not match the WirePlumber 0.5.17 base used by v0.8." >&2
+    echo "ERROR: distro stock alsa.lua does not match the WirePlumber 0.5.17 base used by v0.12." >&2
     echo "Expected: $EXPECTED_STOCK_ALSA_SHA256" >&2
     echo "Found:    $STOCK_ALSA_SHA256" >&2
     echo "Refusing to install a full monitor shadow override onto an unknown base." >&2
@@ -42,7 +42,7 @@ if [[ -f "$STOCK_ALSA" && "${BC250_ALLOW_UNTESTED_WP:-0}" != "1" ]]; then
   fi
 fi
 
-for cmd in ffmpeg aplay pactl wpctl pw-metadata mkfifo dd sha256sum grep tr stat; do
+for cmd in ffmpeg aplay pactl wpctl pw-metadata mkfifo dd sha256sum grep tr stat setsid; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: required command not found: $cmd" >&2
     exit 4
@@ -96,13 +96,13 @@ backup_system_file() {
 
 # Back up both old prototype files and all host-wide files replaced by v0.8.
 backup_user_file "$HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-ac3.conf" "user-50-bc250-ac3.conf"
+backup_user_file "$HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" "user-50-bc250-audio.conf"
+backup_user_file "$HOME/.config/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" "user-60-bc250-ac3-output.conf"
 backup_user_file "$HOME/.local/share/wireplumber/scripts/monitors/alsa.lua" "user-alsa.lua"
 backup_user_file "$HOME/.config/pipewire/pipewire.conf.d/ac3-sink.conf" "user-ac3-sink.conf"
 
 backup_system_file "/etc/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf" "system-hdmi-ac3.conf"
 backup_system_file "/etc/alsa/conf.d/61-bc250-a52.conf" "system-61-bc250-a52.conf"
-backup_system_file "/etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" "system-60-bc250-ac3-output.conf"
-backup_system_file "/etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" "system-50-bc250-audio.conf"
 backup_system_file "/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" "system-90-bc250-audio-mode.lua"
 backup_system_file "/usr/local/share/wireplumber/scripts/monitors/alsa.lua" "system-alsa.lua"
 backup_system_file "/usr/local/libexec/bc250-eac3-backend" "system-bc250-eac3-backend"
@@ -134,18 +134,18 @@ rm -f "$HOME/.local/share/wireplumber/scripts/monitors/alsa.lua"
 sudo rm -f /etc/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf
 
 sudo install -d -m 0755 /etc/alsa/conf.d
-sudo install -d -m 0755 /etc/pipewire/pipewire.conf.d
-sudo install -d -m 0755 /etc/wireplumber/wireplumber.conf.d
 sudo install -d -m 0755 /usr/local/share/wireplumber/scripts/monitors
 sudo install -d -m 0755 /usr/local/libexec
 sudo install -d -m 0755 /etc/systemd/user
+install -d -m 0755 "$HOME/.config/wireplumber/wireplumber.conf.d"
+install -d -m 0755 "$HOME/.config/pipewire/pipewire.conf.d"
 
 sudo install -m 0644 "$ROOT_DIR/etc/alsa/conf.d/61-bc250-a52.conf" \
   /etc/alsa/conf.d/61-bc250-a52.conf
-sudo install -m 0644 "$ROOT_DIR/etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" \
-  /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
-sudo install -m 0644 "$ROOT_DIR/etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" \
-  /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
+install -m 0644 "$ROOT_DIR/etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" \
+  "$HOME/.config/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf"
+install -m 0644 "$ROOT_DIR/etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" \
+  "$HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf"
 sudo install -m 0644 "$ROOT_DIR/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" \
   /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
 sudo install -m 0644 "$ROOT_DIR/usr/local/share/wireplumber/scripts/monitors/alsa.lua" \
