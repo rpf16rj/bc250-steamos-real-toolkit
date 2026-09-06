@@ -3601,8 +3601,8 @@ dual_audio_ensure_wireplumber() {
 }
 
 install_dual_audio() {
-    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.7)"
-    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 with hotplug guard${RESET}"
+    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.8)"
+    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3)${RESET}"
     echo ""
     dual_audio_installed && { print_info "Already installed."; return 0; }
     dual_audio_ensure_wireplumber || return 1
@@ -3630,8 +3630,8 @@ install_dual_audio() {
     fi
     local uid=$(id -u "$REAL_USER")
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
-    sleep 3
-    print_success "Dual-output audio installed! Reboot before use."
+    sleep 4
+    print_success "Dual-output audio v0.8 installed! Reboot before use."
     persist_state_add "dual_audio"
 }
 
@@ -3639,14 +3639,18 @@ run_revert_dual_audio() {
     print_step "R-DUAL" "Revert BC-250 Dual-Output Audio"
     dual_audio_installed || { print_info "Not installed."; return 0; }
     confirm "Remove dual-output audio?" || { print_info "Cancelled."; return 0; }
+    local uid=$(id -u "$REAL_USER")
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
     local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
     sudo rm -f /etc/alsa/conf.d/61-bc250-a52.conf
     sudo rm -f /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
     sudo rm -f /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
     sudo rm -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
     sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
+    sudo rm -f /usr/local/libexec/bc250-eac3-backend
+    sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
     (( was )) && steamos-readonly enable || true
-    local uid=$(id -u "$REAL_USER")
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user daemon-reload 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     print_success "Dual-output audio reverted. Reboot to apply."
     persist_state_remove "dual_audio"
@@ -5929,7 +5933,7 @@ run_status() {
 
     local dual_icon dual_color dual_label
     if dual_audio_installed; then
-        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.7)"
+        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.8)"
     else
         dual_icon="$DIM"; dual_color="$DIM"; dual_label="not installed"
     fi
@@ -6057,7 +6061,7 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
-        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.7) — requires WP 0.5.17"
+        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.8) — requires WP 0.5.17"
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "0"  "Back" ""
         echo ""
@@ -6270,6 +6274,7 @@ reapply_installed_components() {
             acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
             audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
             ac3)        install_ac3_surround || print_error "AC-3 surround reapply failed" ;;
+            dual_audio) install_dual_audio || print_error "Dual-output audio reapply failed" ;;
             ds5_bridge) install_ds5_bridge_fix || print_error "DS5 Bridge fix reapply failed" ;;
             ds5_chord_vdf) run_install_ds5_chord_vdf || print_error "DS5 Chord VDF reapply failed" ;;
             cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;

@@ -1,0 +1,11 @@
+66116da045ed9e841082d41dca8622d6ab7bc3150e23a1bb2d346fbee84bfd9e  ./README.md
+33706142c0ee58ba5cbadd3b58455e5155aefe4d07a384ac64a59dd5b742ede9  ./check.sh
+8e4c776e9c3b421e7f468aca6d1eb9ae7740a3084eac03207ff3f5eccba25c2e  ./etc/alsa/conf.d/61-bc250-a52.conf
+aa9a58d28c91b69e8b3ab8e835f9f3bf2bd351e7ed0f3b3e9eb69317d2ef5704  ./etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
+7ac4ff853292b0364cc2fae41ae14e42d4fd426560e8801588819a3640c3b3d8  ./etc/systemd/user/bc250-eac3-backend.service
+6d1bc81abac4a112ac893a5ee7da8f5b52f1f39db147b710dbd83e5883caa277  ./etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
+637552501a332f2cec5bb39f305054ab3669ef0d211047f70a15b43038597c69  ./install.sh
+ce389ab8399c15ac3c28d3a2ef62cbf270021eccf4008ebddcbddc743a06f672  ./rollback.sh
+adc08ba2e13611980b937367817535c48c25a0c6e9cb071fa602d5b3fa6a07cc  ./usr/local/libexec/bc250-eac3-backend
+945aaaf87848377748927d4ea5b763a4021a5e5e670599834e46b4ae75ce40ca  ./usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
+853f10f796a643322914bd4111def8d37fcb70931b10dc399bd2134427bc912d  ./usr/local/share/wireplumber/scripts/monitors/alsa.lua

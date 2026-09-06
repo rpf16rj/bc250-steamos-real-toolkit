@@ -5,10 +5,10 @@
 --
 -- SPDX-License-Identifier: MIT
 
--- BC-250 downstream monitor guard v0.7
+-- BC-250 downstream monitor guard v0.8
 -- Rebased on the stock WirePlumber 0.5.17 monitors/alsa.lua.
 -- The original file remains installed under /usr/share; this override adds only
--- BC-250 HDMI teardown/activation serialization and the AC3 hardware lock.
+-- BC-250 HDMI teardown/activation serialization and the encoded-audio hardware lock.
 
 SPLIT_PCM_PARENT_OFFSET = 256
 SPLIT_PCM_OFFSET = 512
@@ -37,10 +37,10 @@ id_name_table = nil
 -- same exclusive PCM at the same time.
 local delayed_node_activations = {}
 
--- v0.5: the AC3 arbiter and this monitor communicate through WirePlumber's
+-- v0.5+: the encoded-audio arbiter and this monitor communicate through WirePlumber's
 -- runtime Settings API. Scripts are sandboxed from one another, so ordinary
 -- Lua globals cannot safely be used as a cross-script lock.
-local BC250_AC3_LOCK_SETTING = "bc250.audio.ac3-hardware-lock"
+local BC250_ENCODED_LOCK_SETTING = "bc250.audio.ac3-hardware-lock"
 local BC250_NATIVE_PROBE_SETTING = "bc250.audio.native-probe-request"
 local BC250_LOCK_POLL_MS = 50
 
@@ -51,7 +51,7 @@ end
 
 local function bc250Ac3HardwareLocked(properties)
   return isBc250NativeHdmiNode(properties) and
-      Settings.get_boolean(BC250_AC3_LOCK_SETTING)
+      Settings.get_boolean(BC250_ENCODED_LOCK_SETTING)
 end
 
 local function requestBc250NativeProbe(properties)
@@ -649,8 +649,8 @@ function createNode(parent, id, obj_type, factory, properties)
     -- Keep a native HDMI re-creation pending while the hidden A52 backend owns
     -- hw:Generic,3. On hotplug, ACP wants to recreate the native node even
     -- though AC3 is still selected; opening it at that moment produces EBUSY.
-    -- Ask the policy to perform a maintenance reprobe (temporarily release A52,
-    -- enumerate/suspend native, then resume AC3), and poll the runtime lock.
+    -- Ask the policy to perform a maintenance reprobe (temporarily release the encoded backend,
+    -- enumerate/suspend native, then resume the selected encoded mode), and poll the runtime lock.
     local scheduleActivationAttempt
     scheduleActivationAttempt = function(wait_ms)
       local source = Core.timeout_add(wait_ms, function()
@@ -667,7 +667,7 @@ function createNode(parent, id, obj_type, factory, properties)
         if bc250Ac3HardwareLocked(properties) then
           if not pending.probe_requested then
             pending.probe_requested = true
-            log:notice("Holding native HDMI activation while AC3 owns hardware: " ..
+            log:notice("Holding native HDMI activation while encoded backend owns hardware: " ..
                 tostring(properties["node.name"]))
             requestBc250NativeProbe(properties)
           end
@@ -684,13 +684,13 @@ function createNode(parent, id, obj_type, factory, properties)
             return
           end
 
-          -- AC3 can become active while the PipeWire barrier is in flight.
+          -- An encoded backend can become active while the PipeWire barrier is in flight.
           -- Never race A52 just because the lock changed between the timer and
           -- Core.sync() callback.
           if bc250Ac3HardwareLocked(properties) then
             if not sync_pending.probe_requested then
               sync_pending.probe_requested = true
-              log:notice("Holding native HDMI activation after sync; AC3 owns hardware: " ..
+              log:notice("Holding native HDMI activation after sync; encoded backend owns hardware: " ..
                   tostring(properties["node.name"]))
               requestBc250NativeProbe(properties)
             end

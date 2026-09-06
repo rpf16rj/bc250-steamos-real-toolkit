@@ -19,12 +19,31 @@ fi
 
 echo "Rolling back from $BACKUP"
 
-# Remove files installed by the dual-output prototype.
+# Stop any leftover EAC3 backend before restoring previous audio policy.
+systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
+
+# SteamOS ships with a read-only root filesystem; disable it so we can
+# write to /etc and /usr/local. Re-enabled in a trap on exit.
+BC250_READONLY_WAS_ON=0
+if command -v steamos-readonly &>/dev/null && ! sudo steamos-readonly status 2>/dev/null | grep -q 'disabled'; then
+  BC250_READONLY_WAS_ON=1
+  sudo steamos-readonly disable
+fi
+restore_readonly() {
+  if [[ $BC250_READONLY_WAS_ON -eq 1 ]]; then
+    sudo steamos-readonly enable 2>/dev/null || true
+  fi
+}
+trap restore_readonly EXIT
+
+# Remove files installed by dual-audio.
 sudo rm -f /etc/alsa/conf.d/61-bc250-a52.conf
 sudo rm -f /etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
 sudo rm -f /etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
 sudo rm -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
 sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
+sudo rm -f /usr/local/libexec/bc250-eac3-backend
+sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
 
 restore_user() {
   local tag=$1
@@ -34,6 +53,7 @@ restore_user() {
     cp -a "$BACKUP/user/$tag" "$dest"
   fi
 }
+
 restore_system() {
   local tag=$1
   local dest=$2
@@ -53,9 +73,12 @@ restore_system "system-60-bc250-ac3-output.conf" "/etc/pipewire/pipewire.conf.d/
 restore_system "system-50-bc250-audio.conf" "/etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf"
 restore_system "system-90-bc250-audio-mode.lua" "/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua"
 restore_system "system-alsa.lua" "/usr/local/share/wireplumber/scripts/monitors/alsa.lua"
-
+systemctl --user daemon-reload
 systemctl --user restart pipewire pipewire-pulse wireplumber
-sleep 2
+sleep 3
 pactl list sinks short || true
+
+restore_readonly
+trap - EXIT
 
 echo "Rollback complete."
