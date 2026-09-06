@@ -7,6 +7,19 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.8.5 — 2026-09-06
+
+- **Added:** E-AC3 (Dolby Digital Plus / DD+) support in dual-output audio,
+  updated to MastaG v0.12 — requires BIOS audio mode set to HDA.
+- **Fixed:** E-AC3 stereo sources playing only from the center channel —
+  channel order now matches FFmpeg native 5.1 layout (FL FR FC LFE RL RR)
+  and the pan filter is removed.
+- **Fixed:** ~1 second audio delay in E-AC3 mode — ALSA playback buffer
+  reduced from default (~300-500 ms) to 60 ms via `--buffer-time=60000`.
+- **Changed:** Dual-audio configs adapted for SteamOS persistent `~/.config/`
+  paths and gamescope-friendly sink names (`dolby_digital_ac3`,
+  `dolby_digital_plus`).
+
 ## v1.8.4 — 2026-09-05
 
 - **Added:** BC-250 Dual-Output Audio (MastaG v0.8) — WirePlumber-native AC3

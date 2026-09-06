@@ -10,6 +10,7 @@ ExecStart=/usr/local/libexec/bc250-eac3-backend
 Restart=always
 RestartSec=1
 TimeoutStopSec=5s
+KillMode=control-group
 
 [Install]
 WantedBy=default.target

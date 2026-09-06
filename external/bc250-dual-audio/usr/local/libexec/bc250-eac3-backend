@@ -1,31 +1,205 @@
 #!/usr/bin/env bash
 # BC-250 realtime E-AC-3 / Dolby Digital Plus backend.
 #
-# WirePlumber creates a pipe-tunnel sink only while bc250_eac3_768 is active.
-# This helper blocks on the FIFO at all other times, so it does not own the
-# HDMI PCM device while native or AC-3 mode is selected.
+# v0.12 deliberately performs NO sink-capability checks. ELD/EDID data is
+# unreliable in this deployment: active and passive DP->HDMI adapters synthesise
+# their own ELD, which frequently does not describe what is actually downstream.
+# The selected mode is therefore always pushed to the hardware, and an
+# unsupported sink is expected to reject or misplay it audibly rather than have
+# this helper silently refuse.
+#
+# v0.11 handshake:
+#   WirePlumber -> bc250.eac3.permit   : EAC3 transition is committed
+#   helper      -> bc250.eac3.session  : helper session is attached / may own HDMI
+#   helper      -> bc250.eac3.hardware : diagnostic; ffmpeg/aplay may own HDMI
+#
+# v0.11 keeps one pw-metadata --monitor client attached for each active EAC3
+# session. Permit withdrawal is therefore event-driven: the helper sees the
+# metadata remove event immediately and terminates the ffmpeg/aplay process
+# group instead of waiting for FIFO EOF/unlink. SESSION is cleared only after
+# aplay has been reaped, which is the release acknowledgement WirePlumber waits
+# for before allowing another owner to claim hw:Generic,3.
 set -u -o pipefail
 
 RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 FIFO=${BC250_EAC3_FIFO:-$RUNTIME_DIR/bc250-eac3-768.pcm}
 PREBUFFER=$RUNTIME_DIR/bc250-eac3-768.prebuffer.$$
 FRAME_BYTES=$((1536 * 6 * 4))  # one 32 ms E-AC-3 frame: F32LE, 48 kHz, 5.1
-PREBUFFER_FRAMES=${BC250_EAC3_PREBUFFER_FRAMES:-1}
-PREBUFFER_BYTES=$((FRAME_BYTES * PREBUFFER_FRAMES))
-HDMI_DEVICE=${BC250_EAC3_ALSA_DEVICE:-hdmi:CARD=Generic,DEV=0,AES0=0x06,AES1=0x82,AES2=0x00,AES3=0x02}
+# IEC61937 channel-status byte 0. 0x06 sets the non-audio bit, which is what
+# tells a receiver to decode the stream as Dolby rather than play it as PCM.
+# Set BC250_ENCODED_AES0=0x04 to reproduce the pre-v0.12 behaviour where the bit
+# was left clear (an unsupported sink then screeches instead of muting).
+ENCODED_AES0=${BC250_ENCODED_AES0:-0x06}
+HDMI_DEVICE=${BC250_EAC3_ALSA_DEVICE:-hdmi:CARD=Generic,DEV=0,AES0=$ENCODED_AES0}
+# FFmpeg's E-AC-3 encoder is the AC-3 encoder emitting E-AC-3 syntax, so quality
+# tracks bitrate rather than codec generation. 768k is a common DD+ 5.1 rate and
+# exceeds AC-3's 640k ceiling, which is the only real gain this path offers.
+EAC3_BITRATE=${BC250_EAC3_BITRATE:-768k}
+METADATA_NAME=${BC250_EAC3_METADATA_NAME:-default}
+PERMIT_KEY=${BC250_EAC3_PERMIT_KEY:-bc250.eac3.permit}
+SESSION_KEY=${BC250_EAC3_SESSION_KEY:-bc250.eac3.session}
+HARDWARE_KEY=${BC250_EAC3_HARDWARE_KEY:-bc250.eac3.hardware}
+PIPELINE_POLL_SEC=${BC250_EAC3_PIPELINE_POLL_SEC:-0.02}
+PIPELINE_TERM_LOOPS=${BC250_EAC3_PIPELINE_TERM_LOOPS:-25} # ~500 ms at default poll
+PERMIT_EVENT_WAIT_SEC=${BC250_EAC3_PERMIT_EVENT_WAIT_SEC:-0.02}
+
+PIPELINE_PID=""
+PERMIT_WATCH_PID=""
+PERMIT_WATCH_FD=""
+PERMIT_WATCH_WRITE_FD=""
 
 log() {
     printf '%s\n' "bc250-eac3-backend: $*" >&2
 }
 
+metadata_set() {
+    local key=$1 value=$2
+    pw-metadata -n "$METADATA_NAME" 0 "$key" "$value" >/dev/null 2>&1
+}
+
+metadata_clear() {
+    local key=$1
+    pw-metadata -n "$METADATA_NAME" --delete 0 "$key" >/dev/null 2>&1 || true
+}
+
+metadata_present() {
+    local key=$1
+    pw-metadata -n "$METADATA_NAME" 0 "$key" 2>/dev/null | grep -Fq "key:'$key'"
+}
+
+pipeline_running() {
+    [[ -n "$PIPELINE_PID" ]] && kill -0 "$PIPELINE_PID" 2>/dev/null
+}
+
+permit_watcher_running() {
+    [[ -n "$PERMIT_WATCH_PID" ]] && kill -0 "$PERMIT_WATCH_PID" 2>/dev/null
+}
+
+stop_permit_watcher() {
+    local pid=${PERMIT_WATCH_PID:-}
+
+    if [[ -n "$pid" ]]; then
+        kill -TERM "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    fi
+
+    if [[ -n "${PERMIT_WATCH_FD:-}" ]]; then
+        exec {PERMIT_WATCH_FD}<&- || true
+    fi
+    if [[ -n "${PERMIT_WATCH_WRITE_FD:-}" ]]; then
+        exec {PERMIT_WATCH_WRITE_FD}>&- || true
+    fi
+
+    PERMIT_WATCH_PID=""
+    PERMIT_WATCH_FD=""
+    PERMIT_WATCH_WRITE_FD=""
+}
+
+start_permit_watcher() {
+    stop_permit_watcher
+
+    # pw-metadata is line-buffered and, with an id+key filter, emits only the
+    # initial/current state and later changes for bc250.eac3.permit. Keeping one
+    # monitor process alive avoids the v0.10 20 ms pw-metadata process polling.
+    coproc BC250_PERMIT_WATCH {
+        exec pw-metadata -m -n "$METADATA_NAME" 0 "$PERMIT_KEY" 2>/dev/null
+    }
+
+    PERMIT_WATCH_FD=${BC250_PERMIT_WATCH[0]}
+    PERMIT_WATCH_WRITE_FD=${BC250_PERMIT_WATCH[1]}
+    PERMIT_WATCH_PID=$BC250_PERMIT_WATCH_PID
+
+    # The monitor never consumes stdin. Close our write side immediately.
+    exec {PERMIT_WATCH_WRITE_FD}>&- || true
+    PERMIT_WATCH_WRITE_FD=""
+
+    if ! permit_watcher_running; then
+        log "failed to start EAC3 permit metadata monitor"
+        stop_permit_watcher
+        return 1
+    fi
+
+    return 0
+}
+
+wait_for_permit_event_or_cancel() {
+    local line
+
+    while true; do
+        # A cancelled transition unloads the pipe backend and normally unlinks
+        # this pathname. Never allow a stale session to reach a hardware open.
+        if [[ ! -p "$FIFO" ]]; then
+            return 1
+        fi
+
+        if ! permit_watcher_running; then
+            log "EAC3 permit metadata monitor exited before hardware permit"
+            return 1
+        fi
+
+        if IFS= read -r -t "$PERMIT_EVENT_WAIT_SEC" -u "$PERMIT_WATCH_FD" line; then
+            case "$line" in
+                update:*"key:'$PERMIT_KEY'"*)
+                    log "EAC3 hardware permit observed; metadata monitor armed"
+                    return 0
+                    ;;
+                remove:*"key:'$PERMIT_KEY'"*)
+                    # This can happen when a transition is cancelled before the
+                    # helper has opened HDMI. Treat it as an explicit cancel.
+                    return 1
+                    ;;
+            esac
+        fi
+    done
+}
+
+stop_pipeline() {
+    local reason=${1:-requested}
+    local i
+
+    if ! pipeline_running; then
+        PIPELINE_PID=""
+        metadata_clear "$HARDWARE_KEY"
+        return 0
+    fi
+
+    log "stopping E-AC-3 pipeline ($reason)"
+
+    # setsid makes the wrapper the process-group leader. Terminating the group
+    # stops the PCM feeder, ffmpeg and aplay as one ownership unit.
+    kill -TERM -- "-$PIPELINE_PID" 2>/dev/null || kill -TERM "$PIPELINE_PID" 2>/dev/null || true
+
+    for ((i = 0; i < PIPELINE_TERM_LOOPS; i++)); do
+        pipeline_running || break
+        sleep "$PIPELINE_POLL_SEC"
+    done
+
+    if pipeline_running; then
+        log "pipeline did not stop after TERM; sending KILL"
+        kill -KILL -- "-$PIPELINE_PID" 2>/dev/null || kill -KILL "$PIPELINE_PID" 2>/dev/null || true
+    fi
+
+    wait "$PIPELINE_PID" 2>/dev/null || true
+    PIPELINE_PID=""
+    metadata_clear "$HARDWARE_KEY"
+}
+
+close_session() {
+    stop_permit_watcher
+    exec 3<&- || true
+    metadata_clear "$HARDWARE_KEY"
+    metadata_clear "$SESSION_KEY"
+    rm -f -- "$PREBUFFER"
+}
+
 cleanup() {
-    rm -f "$PREBUFFER"
-    exec 3<&- 2>/dev/null || true
+    stop_pipeline "service shutdown"
+    close_session
 }
 trap cleanup EXIT
 trap 'exit 0' INT TERM HUP
 
-for cmd in ffmpeg aplay mkfifo dd cat grep tr stat; do
+for cmd in ffmpeg aplay pw-metadata mkfifo dd cat grep tr stat setsid rm sleep; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         log "required command not found: $cmd"
         exit 127
@@ -33,108 +207,171 @@ for cmd in ffmpeg aplay mkfifo dd cat grep tr stat; do
 done
 
 umask 077
-if [[ -e "$FIFO" && ! -p "$FIFO" ]]; then
-    log "removing non-FIFO path: $FIFO"
-    rm -f "$FIFO"
-fi
-if [[ ! -p "$FIFO" ]]; then
-  mkfifo -m 0600 "$FIFO"
-fi
+metadata_clear "$SESSION_KEY"
+metadata_clear "$HARDWARE_KEY"
+rm -f -- "$PREBUFFER"
 
+# pipe-tunnel may unlink the FIFO pathname on every EAC3 backend unload. Rebuild
+# it for the next writer rather than assuming the pathname persists.
+ensure_fifo() {
+    if [[ -e "$FIFO" && ! -p "$FIFO" ]]; then
+        log "removing non-FIFO path: $FIFO"
+        rm -f -- "$FIFO" || return 1
+    fi
 
-find_generic_card_dir() {
-    local id
-    for id in /proc/asound/card*/id; do
-        [[ -r "$id" ]] || continue
-        if [[ $(tr -d '\n' < "$id") == "Generic" ]]; then
-            printf '%s\n' "${id%/id}"
-            return 0
+    if [[ ! -p "$FIFO" ]]; then
+        if ! mkfifo -m 0600 "$FIFO"; then
+            log "failed to create FIFO: $FIFO"
+            return 1
         fi
-    done
-    return 1
+    fi
+
+    return 0
 }
 
-eld_supports_eac3() {
-    # Modern Linux maps a 48 kHz E-AC-3 SAD to the required IEC61937 carrier
-    # (2ch / 192 kHz). Do not repeatedly hammer unsupported displays with an
-    # aplay open attempt; consume the selected virtual sink silently instead.
-    # Set BC250_EAC3_IGNORE_ELD=1 in the user service environment to override.
-    [[ ${BC250_EAC3_IGNORE_ELD:-0} == 1 ]] && return 0
+start_pipeline() {
+    metadata_set "$HARDWARE_KEY" "$$" || {
+        log "failed to publish EAC3 hardware-active metadata"
+        return 1
+    }
 
-    local card_dir eld
-    card_dir=$(find_generic_card_dir) || return 1
+    export BC250_EAC3_CHILD_PREBUFFER="$PREBUFFER"
+    export BC250_EAC3_CHILD_FRAME_BYTES="$FRAME_BYTES"
+    export BC250_EAC3_CHILD_HDMI_DEVICE="$HDMI_DEVICE"
+    export BC250_EAC3_CHILD_BITRATE="$EAC3_BITRATE"
 
-    for eld in "$card_dir"/eld#*; do
-        [[ -r "$eld" ]] || continue
-        grep -Eq '^[[:space:]]*monitor_present[[:space:]]+1' "$eld" || continue
-        grep -Eq '^[[:space:]]*eld_valid[[:space:]]+1' "$eld" || continue
-        if grep -Eiq 'coding_type.*(E-AC-3|EAC3|DD\+|Dolby Digital Plus)' "$eld"; then
-            return 0
-        fi
-    done
-    return 1
+    # Read only complete EAC3-frame-sized PCM blocks after the prebuffer.
+    # conv=sync pads a final short EOF block instead of exposing a partial 5.1
+    # F32LE sample to FFmpeg during teardown.
+    setsid bash -c '
+        {
+            cat "$BC250_EAC3_CHILD_PREBUFFER"
+            dd iflag=fullblock bs="$BC250_EAC3_CHILD_FRAME_BYTES" conv=sync status=none <&3
+        } | ffmpeg \
+            -nostdin -hide_banner -loglevel warning \
+            -f f32le -ar 48000 -ac 6 -i pipe:0 \
+            -c:a eac3 -b:a "$BC250_EAC3_CHILD_BITRATE" -ar 48000 -ac 6 \
+            -flush_packets 1 -f spdif pipe:1 | \
+            aplay -D "$BC250_EAC3_CHILD_HDMI_DEVICE" -t raw -f S16_LE -c 2 -r 192000 \
+                --buffer-time=60000 --period-time=15000
+    ' &
+    PIPELINE_PID=$!
+
+    if ! pipeline_running; then
+        wait "$PIPELINE_PID" 2>/dev/null || true
+        PIPELINE_PID=""
+        metadata_clear "$HARDWARE_KEY"
+        return 1
+    fi
+
+    return 0
 }
 
 log "ready; waiting for $FIFO"
 
 while true; do
-    rm -f "$PREBUFFER"
+    close_session
 
-    # Keep one reader fd open from the first PCM frame until the PipeWire
-    # pipe-tunnel writer closes. This avoids a reader-less FIFO gap between
-    # prebuffering and the ffmpeg pipeline.
-    exec 3<"$FIFO"
+    if ! ensure_fifo; then
+        sleep 1
+        continue
+    fi
 
-    # Prebuffer several E-AC-3 frames before starting FFmpeg so the encoder
-    # has enough input to produce a stable output stream without underrunning
-    # on the first few frames. This also covers FFmpeg startup latency.
-    dd iflag=fullblock bs="$FRAME_BYTES" count="$PREBUFFER_FRAMES" status=none <&3 >"$PREBUFFER" || true
+    # Block until PipeWire's pipe-tunnel writer attaches.
+    if ! exec 3<"$FIFO"; then
+        log "failed to open FIFO for reading: $FIFO"
+        sleep 0.1
+        continue
+    fi
+
+    # SESSION is the helper -> WirePlumber release acknowledgement. Publish it
+    # before any path can reach a hardware open.
+    if ! metadata_set "$SESSION_KEY" "$$"; then
+        log "failed to publish EAC3 session metadata"
+        exec 3<&-
+        sleep 0.1
+        continue
+    fi
+
+    rm -f -- "$PREBUFFER"
+
+    dd iflag=fullblock bs="$FRAME_BYTES" count=1 status=none <&3 >"$PREBUFFER" || true
     prebuffer_bytes=$(stat -c %s "$PREBUFFER" 2>/dev/null || printf '0')
-    if [[ "$prebuffer_bytes" -lt "$FRAME_BYTES" ]]; then
-        # A writer that disappeared before one complete E-AC-3 frame was fed
-        # means the mode transition was cancelled. Never open HDMI for that
-        # stale/partial request; the WirePlumber release guard can proceed.
-        exec 3<&-
-        rm -f "$PREBUFFER"
+    if [[ "$prebuffer_bytes" != "$FRAME_BYTES" ]]; then
+        close_session
         continue
     fi
 
-    if ! eld_supports_eac3; then
-        log "connected sink ELD does not advertise E-AC-3/DD+; discarding E-AC-3 mode PCM"
-        cat <&3 >/dev/null || true
-        exec 3<&-
+    # Start one event monitor for this session before the permit exists. Once
+    # WirePlumber sees SESSION it publishes PERMIT; the monitor's update event
+    # is the commit signal. The same monitor remains attached for the whole
+    # hardware-owning lifetime and its remove event is the teardown signal.
+    if ! start_permit_watcher; then
+        close_session
+        sleep 0.1
         continue
     fi
 
-    log "starting E-AC-3 5.1 @ 768 kbps -> IEC61937 -> $HDMI_DEVICE"
+    if ! wait_for_permit_event_or_cancel; then
+        close_session
+        continue
+    fi
 
-    # PipeWire order is FL FR RL RR FC LFE. FFmpeg's E-AC-3 encoder expects
-    # its 5.1 order with center/LFE before surrounds, therefore map by channel
-    # index before encoding. FFmpeg's spdif muxer emits IEC61937 E-AC-3 bursts;
-    # 48 kHz E-AC-3 is transported as 2ch S16_LE at a 192 kHz HDMI link rate.
-    # --buffer-time/--period-time in microseconds: 60 ms ALSA buffer absorbs
-    # FFmpeg encoding jitter without underruning the HDMI device.
-    {
-        cat "$PREBUFFER"
-        cat <&3
-    } | ffmpeg \
-        -nostdin -hide_banner -loglevel warning \
-        -f f32le -ar 48000 -ac 6 -i pipe:0 \
-        -filter:a 'pan=5.1|FL=c0|FR=c1|FC=c4|LFE=c5|BL=c2|BR=c3' \
-        -c:a eac3 -b:a 768k -ar 48000 -ac 6 \
-        -flush_packets 1 -f spdif - \
-    | aplay -q -D "$HDMI_DEVICE" -t raw -f S16_LE -c 2 -r 192000 - &
+    # One final direct query protects the tiny interval between receiving the
+    # permit event and launching the process group. Once launched, withdrawal
+    # is handled by the already-armed persistent monitor, not by polling.
+    if ! metadata_present "$PERMIT_KEY" || [[ ! -p "$FIFO" ]]; then
+        close_session
+        continue
+    fi
 
-    wait $! 2>/dev/null
-    ap_status=$?
+    log "starting E-AC-3 5.1 @ $EAC3_BITRATE -> IEC61937 -> $HDMI_DEVICE"
 
-    exec 3<&-
-    rm -f "$PREBUFFER"
+    if ! start_pipeline; then
+        log "failed to start E-AC-3 pipeline"
+        close_session
+        sleep 0.1
+        continue
+    fi
 
-    if (( ap_status != 0 )); then
-        log "pipeline ended: aplay=$ap_status"
+    stop_reason="pipeline exited"
+    while pipeline_running; do
+        local_line=""
+
+        # FIFO disappearance is retained as a secondary fail-safe, but v0.11's
+        # primary teardown signal is the PipeWire metadata remove event.
+        if [[ ! -p "$FIFO" ]]; then
+            stop_reason="PipeWire FIFO backend disappeared"
+            break
+        fi
+
+        if ! permit_watcher_running; then
+            stop_reason="EAC3 permit metadata monitor exited"
+            break
+        fi
+
+        if IFS= read -r -t "$PERMIT_EVENT_WAIT_SEC" -u "$PERMIT_WATCH_FD" local_line; then
+            case "$local_line" in
+                remove:*"key:'$PERMIT_KEY'"*)
+                    log "EAC3 hardware permit withdrawal event received"
+                    stop_reason="EAC3 hardware permit withdrawn"
+                    break
+                    ;;
+            esac
+        fi
+    done
+
+    if pipeline_running; then
+        stop_pipeline "$stop_reason"
     else
-        log "pipeline stopped"
+        wait "$PIPELINE_PID" 2>/dev/null || true
+        PIPELINE_PID=""
+        metadata_clear "$HARDWARE_KEY"
+        log "pipeline exited"
     fi
 
+    # SESSION is cleared only after the whole process group, including aplay,
+    # has been reaped. WirePlumber may start its release guard only after this.
+    close_session
+    log "hardware release acknowledged"
 done

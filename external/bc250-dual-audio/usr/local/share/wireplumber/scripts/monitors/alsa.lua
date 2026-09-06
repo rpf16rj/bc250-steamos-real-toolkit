@@ -5,7 +5,7 @@
 --
 -- SPDX-License-Identifier: MIT
 
--- BC-250 downstream monitor guard v0.8
+-- BC-250 downstream monitor guard v0.12
 -- Rebased on the stock WirePlumber 0.5.17 monitors/alsa.lua.
 -- The original file remains installed under /usr/share; this override adds only
 -- BC-250 HDMI teardown/activation serialization and the encoded-audio hardware lock.
@@ -648,7 +648,7 @@ function createNode(parent, id, obj_type, factory, properties)
 
     -- Keep a native HDMI re-creation pending while the hidden A52 backend owns
     -- hw:Generic,3. On hotplug, ACP wants to recreate the native node even
-    -- though AC3 is still selected; opening it at that moment produces EBUSY.
+    -- though AC3/EAC3 is still selected; opening it at that moment produces EBUSY.
     -- Ask the policy to perform a maintenance reprobe (temporarily release the encoded backend,
     -- enumerate/suspend native, then resume the selected encoded mode), and poll the runtime lock.
     local scheduleActivationAttempt
