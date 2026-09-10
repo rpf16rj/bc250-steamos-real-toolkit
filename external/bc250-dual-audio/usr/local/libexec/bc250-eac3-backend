@@ -295,6 +295,7 @@ while true; do
 
     rm -f -- "$PREBUFFER"
 
+    # Read one complete E-AC-3 frame as prebuffer to prime ffmpeg's encoder.
     dd iflag=fullblock bs="$FRAME_BYTES" count=1 status=none <&3 >"$PREBUFFER" || true
     prebuffer_bytes=$(stat -c %s "$PREBUFFER" 2>/dev/null || printf '0')
     if [[ "$prebuffer_bytes" != "$FRAME_BYTES" ]]; then

@@ -2628,7 +2628,8 @@ ycbcr444_modprobe_installed() {
 
 ycbcr444_force_installed() {
     [[ -f "$YCBCR444_MODPROBE_FILE" ]] && \
-    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
+    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null && \
+    grep -q 'force_colorspace=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
 }
 
 ycbcr444_ensure_modprobe() {
@@ -2654,16 +2655,16 @@ ycbcr444_ensure_force() {
     steamos_writable "
         if [[ -f \"$YCBCR444_MODPROBE_FILE\" ]]; then
             if ! grep -q 'force_ycbcr444=1' \"$YCBCR444_MODPROBE_FILE\"; then
-                sed -i 's/\(options amdgpu .*\)/\\1 force_ycbcr444=1 force_min_bpc=10/' \"$YCBCR444_MODPROBE_FILE\"
+                sed -i 's/\(options amdgpu .*\)/\\1 force_ycbcr444=1 force_min_bpc=10 force_colorspace=1/' \"$YCBCR444_MODPROBE_FILE\"
             fi
         else
-            echo 'options amdgpu dcfeaturemask=0x402 force_ycbcr444=1 force_min_bpc=10' > \"$YCBCR444_MODPROBE_FILE\"
+            echo 'options amdgpu dcfeaturemask=0x402 force_ycbcr444=1 force_min_bpc=10 force_colorspace=1' > \"$YCBCR444_MODPROBE_FILE\"
         fi
     " || {
         print_info "Failed to update $YCBCR444_MODPROBE_FILE. Update it manually."
         return 0
     }
-    print_info "Enabled YCbCr 4:4:4 + min 10-bit in $YCBCR444_MODPROBE_FILE."
+    print_info "Enabled YCbCr 4:4:4 + min 10-bit + SDR colorspace fix in $YCBCR444_MODPROBE_FILE."
     steamos_writable "mkinitcpio -P" 2>/dev/null || true
 }
 
@@ -2692,6 +2693,42 @@ audio_fix_remove_pcon_grub_param() {
         return 0
     }
     print_info "Removed amdgpu.freesync_pcon_allow_all=1 from GRUB."
+}
+
+audio_fix_remove_hpd_debounce_grub_param() {
+    if ! audio_fix_hpd_debounce_grub_installed; then
+        return 0
+    fi
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ amdgpu\\.hdmi_hpd_debounce_delay_ms=1500//g; s/amdgpu\\.hdmi_hpd_debounce_delay_ms=1500 //g; s/amdgpu\\.hdmi_hpd_debounce_delay_ms=1500//g' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        print_info "Failed to remove amdgpu.hdmi_hpd_debounce_delay_ms=1500 from GRUB."
+        return 0
+    }
+    print_info "Removed amdgpu.hdmi_hpd_debounce_delay_ms=1500 from GRUB."
+}
+
+audio_fix_remove_cs_legacy_grub_param() {
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        return 0
+    fi
+    if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.cs_legacy_8core_metrics=1' "$GRUB_DEFAULT" >/dev/null 2>&1; then
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ amdgpu\\.cs_legacy_8core_metrics=1//g; s/amdgpu\\.cs_legacy_8core_metrics=1 //g; s/amdgpu\\.cs_legacy_8core_metrics=1//g' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        print_info "Failed to remove amdgpu.cs_legacy_8core_metrics=1 from GRUB."
+        return 0
+    }
+    print_info "Removed amdgpu.cs_legacy_8core_metrics=1 from GRUB."
 }
 
 audio_fix_cleanup_legacy_edid() {
@@ -2789,16 +2826,16 @@ install_audio_fix() {
 
     # Build checklist — all patches individually selectable
     local -a checklist_items=(
-        "+DP Audio Clock:Fixes audio/video at ~82% speed via DP/HDMI"
-        "+DP Spread Spectrum:Cleaner audio output via DP/HDMI"
-        "+TTM NULL-page Guard:Prevents crashes from NULL page mappings"
-        "+SCLK Range (350-2230):Widened GPU clock range for userspace governors"
-        "+KFD Flush TLB:Compute memory coherency fix"
-        "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
-        "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
+        "+DP Audio Clock:Corrige audio/video em ~82% da velocidade via DP/HDMI"
+        "+DP Spread Spectrum:Audio mais limpo via DP/HDMI (desativa spread spectrum)"
+        "+TTM NULL-page Guard:Previne crashes por mapeamentos de pagina NULL"
+        "+SCLK Range (350-2230):Amplia range de clock da GPU para governors userspace"
+        "+KFD Flush TLB:Correcao de coherencia de memoria para compute"
+        "+GPU Telemetry+Cache:Leitura de clock GPU, utilizacao, cache ajustavel"
+        "+PCON FRL Hotplug:Preserva config FRL atraves de eventos de hotplug"
     )
     if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+YCbCr 444 Deep Color:PCON color quality + CH7218 quirk")
+        checklist_items+=("+YCbCr 444 Deep Color:Forca YCbCr 4:4:4 + 10-bit + fix colorspace SDR via PCON CH7218")
     fi
 
     pick_items "Select kernel patches to include:" "${checklist_items[@]}"
@@ -3923,8 +3960,18 @@ run_revert_gfx1013_fix() {
     # Remove boot mode GRUB param if present
     boot_mode_revert
 
-    print_success "GFX1013 compute queue fix reverted to stock amdgpu.ko. Reboot to apply."
+    # Remove all GRUB params and modprobe configs added by install_combined_fix
+    audio_fix_remove_pcon_grub_param
+    audio_fix_remove_hpd_debounce_grub_param
+    audio_fix_remove_cs_legacy_grub_param
+    ycbcr444_remove_modprobe
+    audio_fix_cleanup_legacy_edid
+
+    # Remove persist states
     persist_state_remove "gfx1013"
+    persist_state_remove "audio"
+
+    print_success "Combined fix fully reverted: stock amdgpu.ko + all GRUB/modprobe configs removed. Reboot to apply."
 }
 
 boot_mode_revert() {
@@ -3963,26 +4010,22 @@ install_combined_fix() {
 
     # Build the checklist items — all patches individually selectable
     local -a checklist_items=(
-        "+DP Audio Clock:Fixes audio/video at ~82% speed via DP/HDMI"
-        "+DP Spread Spectrum:Cleaner audio output via DP/HDMI"
-        "+TTM NULL-page Guard:Prevents crashes from NULL page mappings"
-        "+SCLK Range (350-2230):Widened GPU clock range for userspace governors"
-        "+KFD Flush TLB:Compute memory coherency fix"
-        "+GFX1013 Compute+Mesa:Async compute queue + FSR4 + mesh/task shaders"
-        "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
-        "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
-        "+Boot 1440p120:Set preferred boot mode to 2560x1440@120 via GRUB"
+        "+DP Audio Clock:Corrige audio/video em ~82% da velocidade via DP/HDMI"
+        "+DP Spread Spectrum:Audio mais limpo via DP/HDMI (desativa spread spectrum)"
+        "+TTM NULL-page Guard:Previne crashes por mapeamentos de pagina NULL"
+        "+SCLK Range (350-2230):Amplia range de clock da GPU para governors userspace"
+        "+KFD Flush TLB:Correcao de coherencia de memoria para compute"
+        "+GFX1013 Compute+Mesa:Async compute queue + FSR4 + mesh/task shaders (build Mesa incluso)"
+        "+GPU Telemetry+Cache:Leitura de clock GPU, utilizacao, cache ajustavel"
+        "+PCON FRL Hotplug:Preserva config FRL atraves de eventos de hotplug"
+        "+Boot 1440p120:Define modo de boot preferido para 2560x1440@120 via GRUB"
+        "+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC para PCON DP-HDMI"
+        "+ALLM via DP:Auto Low Latency Mode para PCON HDMI em Game Mode"
     )
 
     # YCbCr 4:4:4 only on kernel 7.x
     if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+YCbCr 444 Deep Color:PCON color quality + CH7218 quirk")
-    fi
-
-    # VRR and ALLM only on kernel <7
-    if [[ "$kver_major" -lt 7 ]]; then
-        checklist_items+=("+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC range")
-        checklist_items+=("+ALLM via DP:Auto Low Latency Mode for PCON HDMI Game Mode")
+        checklist_items+=("+YCbCr 444 Deep Color:Forca YCbCr 4:4:4 + 10-bit + fix colorspace SDR via PCON CH7218")
     fi
 
     pick_items "Select kernel patches to include:" "${checklist_items[@]}"
@@ -4025,16 +4068,14 @@ install_combined_fix() {
         do_boot_mode=1
     fi
 
-    # VRR and ALLM (kernel <7)
-    if [[ "$kver_major" -lt 7 ]]; then
-        if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
-            do_vrr=1
-            patch_flags+=(--vrr)
-        fi
-        if [[ " $selected_str " == *" ALLM via DP "* ]]; then
-            do_allm=1
-            patch_flags+=(--allm)
-        fi
+    # VRR and ALLM
+    if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
+        do_vrr=1
+        patch_flags+=(--vrr)
+    fi
+    if [[ " $selected_str " == *" ALLM via DP "* ]]; then
+        do_allm=1
+        patch_flags+=(--allm)
     fi
 
     if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 && $do_boot_mode -eq 0 ]]; then
@@ -4211,6 +4252,7 @@ install_combined_fix() {
         echo ""
         echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color${RESET}"
         echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + minimum 10-bit color depth via modprobe.d.${RESET}"
+        echo -e "  ${DIM}Also forces SRGB (BT.709) colorspace to fix blown-out SDR colors in gamescope HDR mode.${RESET}"
         echo ""
         if ycbcr444_force_installed; then
             print_info "YCbCr 4:4:4 force params already enabled (modprobe.d config present)."
