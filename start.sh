@@ -484,6 +484,21 @@ require_kernel_version() {
     return 1
 }
 
+warn_legacy_kernel() {
+    local kver kmajor
+    kver="$(uname -r)"
+    kmajor="${kver%%.*}"
+    [[ "$kmajor" -ge 7 ]] && return 0
+    echo -e "  ${BOLD}${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "  ${BOLD}${YELLOW}⚠  This toolkit version requires SteamOS 3.9+ / kernel 7.x.${RESET}"
+    echo -e "  ${YELLOW}   Current kernel: $(uname -r)${RESET}"
+    echo -e "  ${YELLOW}   To use this toolkit, update to the Beta Preview channel:${RESET}"
+    echo -e "  ${DIM}   Settings → System → System Update Channel → Beta Preview${RESET}"
+    echo -e "  ${YELLOW}   or use toolkit v1.7.3 which supports kernel 6.x.${RESET}"
+    echo -e "  ${BOLD}${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+}
+
 # ==============================================================================
 # ERROR LOGGING
 # ==============================================================================
@@ -6825,6 +6840,7 @@ run_persistence_menu() {
 
 show_menu() {
     print_banner
+    warn_legacy_kernel
     print_section "Quick Start"
     print_item  "1"  "Install All"           "Install all necessary optimizations: CPU/GPU governor, Mitigations, Swap/ZSWAP, Fixes, CU Unlock"
     print_item  "2"  "Install / Revert Manual" "Same as Install All, one component at a time"
