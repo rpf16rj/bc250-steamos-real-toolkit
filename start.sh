@@ -1014,6 +1014,7 @@ install_core_unlock() {
     echo -e "  ${DIM}Fixed by the DP Audio/Video Fix (Install Manual 7), which queries GFX clock directly from the SMU and${RESET}"
     echo -e "  ${DIM}adds GPU utilization reporting. Not chained automatically here (it rebuilds a kernel module); run it too.${RESET}"
     echo -e "  ${DIM}Volatile: a cold power-off reverts to 6c/12t. A systemd service re-applies the unlock on every boot.${RESET}"
+    echo -e "  ${DIM}Supports non-standard CPU masks (e.g. 0xB7) — the SMU write sets all 8 bits regardless.${RESET}"
     echo ""
 
     if [[ ! -f "$CORE_UNLOCK_SCRIPT" ]]; then
@@ -1055,8 +1056,12 @@ install_core_unlock() {
     fi
 
     if (( unlock_rc != 0 )); then
-        fail_with_log "bc250-unlock-cores.py failed — see output above. This is expected if the core presence mask is not 0x77 (already unlocked, or a different board/harvest)." "CPU Core Unlock — bc250-unlock-cores.py"
-        return 1
+        if [[ "$auto" == "auto" ]]; then
+            print_warning "bc250-unlock-cores.py failed — see output above. Continuing with remaining steps (GPU CU unlock, etc.)."
+        else
+            fail_with_log "bc250-unlock-cores.py failed — see output above. This is expected if the core presence mask is already 0xFF (already unlocked) or on a different board/harvest." "CPU Core Unlock — bc250-unlock-cores.py"
+            return 1
+        fi
     fi
 
     # The community reports 8-core operation needs the updated (6c/8c-compatible)
@@ -6363,10 +6368,10 @@ run_install_all() {
     run_install_all_step 5 14 "Installing RAM/VRAM Split" install_ram_split auto || return 1
     run_install_all_step 6 14 "Ensuring Sensor PWM Driver" ensure_sensors_pwm_installed || return 1
     run_install_all_step 7 14 "Ensuring CoolerControl Installation" ensure_coolercontrol_installed || return 1
-    run_install_all_step 8 14 "Installing Core Unlock" install_core_unlock auto || return 1
-    run_install_all_step 9 14 "Validating Core Unlock" validate_core_unlock || return 1
-    run_install_all_step 10 14 "Installing CPU Governor" run_cpu_governor || return 1
-    run_install_all_step 11 14 "Installing GPU Governor" run_gpu_governor || return 1
+    run_install_all_step 8 14 "Installing Core Unlock" install_core_unlock auto || true
+    run_install_all_step 9 14 "Validating Core Unlock" validate_core_unlock || true
+    run_install_all_step 10 14 "Installing CPU Governor" run_cpu_governor || true
+    run_install_all_step 11 14 "Installing GPU Governor" run_gpu_governor || true
     run_install_all_step 12 14 "Installing CU Live Manager" run_cu_live_manager || return 1
     run_install_all_step 13 14 "Installing Combined Fix" install_combined_fix || return 1
     run_install_all_step 14 14 "Installing AC-3 Surround" install_ac3_surround auto || return 1
