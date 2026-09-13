@@ -122,6 +122,7 @@ persist_detect_and_record_installed() {
     be200_firmware_installed 2>/dev/null && persist_state_add "be200_fw"
     lsmod 2>/dev/null | grep -qE 'nct6687|nct6686' && persist_state_add "sensors"
     coolercontrol_installed 2>/dev/null && persist_state_add "coolercontrol"
+    openlinkhub_installed 2>/dev/null && persist_state_add "openlinkhub"
     xone_installed 2>/dev/null && persist_state_add "xbox"
     cec_control_installed 2>/dev/null && persist_state_add "cec"
     [[ -f /etc/bc250-cu-live-manager.conf ]] && persist_state_add "cu"
@@ -6196,6 +6197,11 @@ run_status() {
     if [[ "$cc_svc_state" == "active" ]]; then cc_icon="$ICON_OK"; cc_color="$GREEN"; else cc_icon="$ICON_WARN"; cc_color="$YELLOW"; fi
     echo -e "  ${CYAN}CoolerControl${RESET}     ${cc_icon} ${cc_color}${cc_svc_state}${RESET}"
 
+    local olh_svc_state olh_icon olh_color
+    olh_svc_state=$(systemctl is-active openlinkhub.service 2>/dev/null || echo "not installed")
+    if [[ "$olh_svc_state" == "active" ]]; then olh_icon="$ICON_OK"; olh_color="$GREEN"; else olh_icon="$ICON_WARN"; olh_color="$YELLOW"; fi
+    echo -e "  ${CYAN}OpenLinkHub${RESET}       ${olh_icon} ${olh_color}${olh_svc_state}${RESET}"
+
     local xbox_icon xbox_color xbox_label
     xbox_label="$(xbox_adapter_status_label)"
     case "$xbox_label" in
@@ -6578,6 +6584,82 @@ run_be200_menu() {
     done
 }
 
+# ==============================================================================
+# OPENLINKHUB (Corsair iCUE LINK Hub control)
+# ==============================================================================
+
+openlinkhub_installed() {
+    systemctl list-unit-files openlinkhub.service &>/dev/null || \
+        pacman -Qq openlinkhub-git &>/dev/null
+}
+
+openlinkhub_status_label() {
+    if systemctl is-active openlinkhub.service &>/dev/null; then
+        echo "running"
+    elif openlinkhub_installed; then
+        echo "installed (not running)"
+    else
+        echo "not installed"
+    fi
+}
+
+install_openlinkhub() {
+    print_step "OLH" "Installing OpenLinkHub (Corsair iCUE LINK Hub control)"
+
+    if openlinkhub_installed; then
+        if ! confirm "OpenLinkHub is already installed. Reinstall it?"; then
+            print_info "Keeping existing installation — ensuring service is enabled..."
+            systemctl enable --now openlinkhub.service || {
+                fail_with_log "Failed to enable openlinkhub service." "OpenLinkHub — enable service"
+                return 1
+            }
+            print_success "OpenLinkHub service is enabled and running!"
+            print_info "Web UI: ${CYAN}http://localhost:27003${RESET}"
+            return 0
+        fi
+        systemctl stop openlinkhub.service 2>/dev/null || true
+        systemctl disable openlinkhub.service 2>/dev/null || true
+    fi
+
+    print_info "Installing openlinkhub-git via AUR helper..."
+    steamos_writable 'aur_install openlinkhub-git' || {
+        fail_with_log "Failed to install openlinkhub-git." "OpenLinkHub Install — aur_install"
+        return 1
+    }
+
+    print_info "Enabling and starting openlinkhub service..."
+    systemctl enable --now openlinkhub.service || {
+        fail_with_log "Failed to enable openlinkhub service." "OpenLinkHub Install — enable service"
+        return 1
+    }
+
+    print_success "OpenLinkHub installed and running!"
+    persist_state_add "openlinkhub"
+    print_info "Web UI: ${CYAN}http://localhost:27003${RESET}"
+    print_info "${YELLOW}Tip:${RESET} For Steam Gaming Mode control, install the Decky plugin 'bc250-commander-control'."
+}
+
+run_revert_openlinkhub() {
+    print_step "R-OLH" "Revert OpenLinkHub"
+
+    if ! openlinkhub_installed; then
+        print_info "OpenLinkHub does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will stop, disable, and remove OpenLinkHub. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    systemctl stop openlinkhub.service 2>/dev/null || true
+    systemctl disable openlinkhub.service 2>/dev/null || true
+    steamos_writable 'aur_remove openlinkhub-git' || true
+
+    print_success "OpenLinkHub removed successfully."
+    persist_state_remove "openlinkhub"
+}
+
 install_toolkit_steamos_control_plugin() {
     print_step "DSC" "Toolkit SteamOS Control Decky Plugin"
 
@@ -6607,6 +6689,7 @@ run_extras_menu() {
         print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
         print_item "D" "DS5 Bridge PS Button Fix"    "Install/revert patched hid-playstation.ko — DualSense PS button chord combos"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
+        print_item "O" "OpenLinkHub"                  "Install/revert Corsair iCUE LINK Hub control — status: $(openlinkhub_status_label)"
         print_item "Z" "Toolkit SteamOS Control"      "Install Decky fan profiles and LED bar controls"
         print_item "0" "Back" ""
         echo ""
@@ -6622,6 +6705,7 @@ run_extras_menu() {
             P) install_persistence;       press_enter ;;
             D) run_ds5_bridge_menu ;;
             X) run_xbox_adapter_menu ;;
+            O) install_openlinkhub;        press_enter ;;
             Z) install_toolkit_steamos_control_plugin; press_enter ;;
             0) return 0 ;;
             *)
@@ -6667,6 +6751,7 @@ reapply_installed_components() {
             aic8800_legacy_mcu1) install_aic8800_legacy_mcu1 || print_error "AIC8800 legacy-MCU1 WiFi reapply failed" ;;
             sensors)    install_sensors_pwm || print_error "Sensors PWM reapply failed" ;;
             coolercontrol) install_coolercontrol || print_error "CoolerControl reapply failed" ;;
+            openlinkhub)   install_openlinkhub || print_error "OpenLinkHub reapply failed" ;;
             xbox)       install_xbox_adapter || print_error "Xbox adapter reapply failed" ;;
             persistence) install_persistence || print_error "Persistence reapply failed" ;;
             *)          print_info "Unknown persisted component: $component" ;;
@@ -6675,7 +6760,7 @@ reapply_installed_components() {
     done < "$PERSIST_STATE_FILE"
     persist_restore_all_configs
     systemctl daemon-reload 2>/dev/null || true
-    systemctl restart bc250-smu-oc.service cyan-skillfish-governor-smu.service coolercontrold.service 2>/dev/null || true
+    systemctl restart bc250-smu-oc.service cyan-skillfish-governor-smu.service coolercontrold.service openlinkhub.service 2>/dev/null || true
     install_all_progress_clear 2>/dev/null || true
     print_success "Toolkit re-apply completed."
 }
