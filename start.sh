@@ -3752,7 +3752,7 @@ run_revert_dual_audio() {
 # ---------------------------------------------------------------------------
 MASTAG_REPO_URL="https://github.com/MastaG/linux-cachyos-bc250/releases/download/repo"
 MASTAG_REPO_NAME="bc250-cachyos"
-MASTAG_PROTON_PACKAGES=("protonge-latest-bc250" "proton-cachyos-native-bc250")
+MASTAG_PROTON_PACKAGES=("protonge-latest-bc250" "proton-cachyos-native-bc250" "proton-cachyos-slr-bc250")
 STEAM_COMPAT_DIR="$REAL_HOME/.local/share/Steam/compatibilitytools.d"
 
 fsr4_proton_installed() {
@@ -3817,12 +3817,15 @@ install_fsr4_proton() {
     echo -e "  ${CYAN}Choose Proton variant:${RESET}"
     echo -e "  ${DIM}  1) protonge-latest-bc250 (GE-Proton 11-6 + FSR4) — recommended${RESET}"
     echo -e "  ${DIM}  2) proton-cachyos-native-bc250 (CachyOS native Proton + FSR4)${RESET}"
+    echo -e "  ${DIM}  3) proton-cachyos-slr-bc250 (CachyOS Proton + Steam Linux Runtime + FSR4)${RESET}"
+    echo -e "  ${DIM}     Use this for games with EasyAntiCheat or BattlEye${RESET}"
     echo ""
     local proton_choice
-    read -rp "  Select [1-2] (default 1): " proton_choice
+    read -rp "  Select [1-3] (default 1): " proton_choice
     local proton_pkg
     case "$proton_choice" in
         2|n|N) proton_pkg="proton-cachyos-native-bc250" ;;
+        3|s|S) proton_pkg="proton-cachyos-slr-bc250" ;;
         *) proton_pkg="protonge-latest-bc250" ;;
     esac
     echo ""
@@ -3959,12 +3962,17 @@ install_fsr4_proton() {
     echo -e "  ${DIM}  3. FSR4 and OptiScaler are ON by default${RESET}"
     echo ""
     echo -e "  ${BOLD}Launch options (optional, per-game):${RESET}"
-    echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%   # disable FSR4 upgrade${RESET}"
-    echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%      # FSR4 watermark + OptiScaler log${RESET}"
-    echo -e "  ${DIM}  RADV_GFX103=1 %command%           # enable mesh/task shaders${RESET}"
+    echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%            # disable FSR4 upgrade${RESET}"
+    echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%               # FSR4 watermark + OptiScaler log${RESET}"
+    echo -e "  ${DIM}  RADV_GFX103=1 %command%                    # enable mesh/task shaders${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411f %command%     # BC-250 FSR4 fork RC9 (default)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411b %command%     # third-party 4.1.1b, RDNA2 ghosting fix${RESET}"
+    echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=... %command%        # per-game OptiScaler overrides${RESET}"
     echo ""
     echo -e "  ${YELLOW}Note:${RESET} Do NOT use PROTON_DLSS_UPGRADE, PROTON_XESS_UPGRADE, etc."
     echo -e "  — the pinned manifest does not ship those, and they will prevent the game from starting."
+    echo -e "  ${YELLOW}Anti-cheat:${RESET} FSR4/OptiScaler auto-disable on EAC/BattlEye detection."
+    echo -e "  For manual override: PROTON_FSR4_UPGRADE=0 %command%"
     echo ""
     persist_state_add "fsr4_proton"
 }
@@ -6414,7 +6422,7 @@ run_install_manual() {
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
         print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.13) — requires WP 0.5.17"
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
-        print_item "13"  "Install FSR4 Proton (MastaG)"     "Pre-built Proton + OptiScaler + FSR4 provider — requires patched Mesa/RADV"
+        print_item "13"  "Install FSR4 Proton (MastaG)"     "Pre-built Proton + OptiScaler + FSR4 + fakenvapi — 3 variants (GE/Native/SLR)"
         print_item "13R" "Revert FSR4 Proton"              "Remove FSR4 Proton compatibility tool"
         print_item "0"  "Back" ""
         echo ""
