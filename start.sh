@@ -3718,6 +3718,26 @@ run_revert_dual_audio() {
     sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
     sudo rm -f /usr/local/libexec/bc250-eac3-backend
     sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
+
+    # Restore stock SteamOS WirePlumber (0.5.15) if dual audio had replaced it
+    local wp_ver
+    wp_ver=$(wireplumber --version 2>/dev/null | grep -Eo '0\.5\.[0-9]+' | head -1 || true)
+    if [[ "$wp_ver" != "0.5.15" ]]; then
+        print_info "Restoring stock SteamOS WirePlumber 0.5.15 (was ${wp_ver:-unknown})..."
+        if ! LC_ALL=C pacman -S --noconfirm --overwrite '*' wireplumber libwireplumber 2>&1 | tail -5; then
+            print_error "Failed to restore stock WirePlumber. Run: sudo pacman -S wireplumber libwireplumber"
+        else
+            print_success "Stock WirePlumber restored."
+        fi
+    fi
+
+    # Restore hdmi-ac3.conf profile set (removed by dual audio install)
+    if [[ ! -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]]; then
+        print_info "Restoring hdmi-ac3.conf profile set..."
+        LC_ALL=C pacman -S --noconfirm --overwrite '*' alsa-card-profiles 2>&1 | tail -3 || \
+            print_error "Failed to restore alsa-card-profiles. Run: sudo pacman -S alsa-card-profiles"
+    fi
+
     (( was )) && steamos-readonly enable || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" 2>/dev/null || true
