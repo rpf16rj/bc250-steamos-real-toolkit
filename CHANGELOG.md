@@ -9,13 +9,27 @@ before the toolkit adopted numbered releases.
 
 ## v1.9.0 — 2026-09-12
 
+- **Added:** FSR4 Proton install/revert (menu 13/13R) — downloads MastaG's
+  pre-built Proton to the home partition (avoids SteamOS root space
+  limits), three variants: GE, Native, and SLR (Steam Linux Runtime for
+  EAC/BattlEye anti-cheat compatibility).
 - **Added:** OpenLinkHub as an optional Extras menu item — Corsair iCUE
   LINK Hub control (RGB, fans, AIO) via web UI, with persistence after
   SteamOS updates.
+- **Added:** VRR VTEM on TMDS kernel patch for HDMI 2.1 VRR support.
+- **Added:** FSR4 V3+ Mesa patches (0006-0009) to both mesa and
+  mesa-native-mesh series.
 - **Added:** SteamOS 3.9 / kernel 7.x minimum version check — warns users
   on older SteamOS builds to update to beta preview or use toolkit v1.7.3.
-- **Added:** `proton-cachyos-slr-bc250` FSR4 Proton variant for anti-cheat
-  compatibility.
+- **Changed:** Dual-audio simplified to AC3-only (MastaG v0.13) — E-AC3
+  (Dolby Digital Plus) removed for stability.
+- **Changed:** AC-3 bitrate bumped from 448 kbps to 640 kbps (ATSC A/52 max).
+- **Changed:** VRR and ALLM now visible in the combined fix checklist on
+  all kernel versions (previously gated to kernel < 7).
+- **Changed:** Combined fix patch menu reorganized with grouped descriptions;
+  PCON FRL Hotplug and YCbCr 444 marked as experimental.
+- **Changed:** DP spread spectrum patch auto-skipped for kernel >= 7.2
+  (upstreamed).
 - **Fixed:** CPU core unlock now accepts non-standard CPU masks (e.g.
   0xB7) instead of aborting — the SMU write sets all 8 bits regardless.
   Core unlock is also non-fatal in Install All, so GPU CU unlock and other
@@ -23,7 +37,15 @@ before the toolkit adopted numbered releases.
 - **Fixed:** YCbCr 4:4:4 patch hunk misapplying inside
   `dm_validate_stream_and_context` — added missing `do {` context line.
 - **Fixed:** Dual-audio revert now restores stock WirePlumber and
-  alsa-card-profiles properly.
+  alsa-card-profiles (was breaking AC-3 Surround option 11 after
+  uninstalling dual audio).
+- **Fixed:** Combined revert now cleans all GRUB params and modprobe
+  configs added by install (freesync_pcon, hpd_debounce,
+  cs_legacy_8core_metrics, ycbcr444, legacy EDID).
+- **Fixed:** ALLM DP-connector patch now guarded with `WITH_ALLM` — was
+  unconditionally applied (bug).
+- **Fixed:** Missing `audio_fix_remove_hpd_debounce_grub_param` function
+  added (was referenced but never defined).
 
 ## v1.8.5 — 2026-09-06
 

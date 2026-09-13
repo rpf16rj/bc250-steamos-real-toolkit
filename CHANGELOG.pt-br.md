@@ -9,14 +9,31 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## v1.9.0 — 2026-09-12
 
+- **Adicionado:** FSR4 Proton instalar/reverter (menu 13/13R) — baixa o
+  Proton pré-compilado do MastaG para a partição home (evita limites de
+  espaço do root do SteamOS), três variantes: GE, Native e SLR (Steam
+  Linux Runtime para compatibilidade com anti-cheat EAC/BattlEye).
 - **Adicionado:** OpenLinkHub como item opcional no menu Extras — controle
   do Corsair iCUE LINK Hub (RGB, fans, AIO) via interface web, com
   persistência após atualizações do SteamOS.
+- **Adicionado:** Patch VRR VTEM em TMDS no kernel para suporte VRR em
+  HDMI 2.1.
+- **Adicionado:** Patches FSR4 V3+ no Mesa (0006-0009) para as séries
+  mesa e mesa-native-mesh.
 - **Adicionado:** Verificação de versão mínima SteamOS 3.9 / kernel 7.x —
   avisa usuários em versões mais antigas para atualizar para beta preview
   ou usar o toolkit v1.7.3.
-- **Adicionado:** Variante `proton-cachyos-slr-bc250` do FSR4 Proton para
-  compatibilidade com anti-cheat.
+- **Alterado:** Dual-audio simplificado para AC3-only (MastaG v0.13) —
+  E-AC3 (Dolby Digital Plus) removido por estabilidade.
+- **Alterado:** Bitrate do AC-3 aumentado de 448 kbps para 640 kbps
+  (máximo ATSC A/52).
+- **Alterado:** VRR e ALLM agora visíveis no checklist do combined fix em
+  todas as versões de kernel (antes restrito a kernel < 7).
+- **Alterado:** Menu de patches do combined fix reorganizado com
+  descrições agrupadas; PCON FRL Hotplug e YCbCr 444 marcados como
+  experimentais.
+- **Alterado:** Patch de DP spread spectrum auto-pulado em kernel >= 7.2
+  (upstream).
 - **Corrigido:** Desbloqueio de cores CPU agora aceita máscaras não-padrão
   (ex. 0xB7) em vez de abortar — o write do SMU define todos os 8 bits
   independente da máscara inicial. O core unlock também é não-fatal no
@@ -26,7 +43,15 @@ como histórico datado de antes da adoção de versões numeradas.
   `dm_validate_stream_and_context` — adicionada linha de contexto `do {`
   que faltava.
 - **Corrigido:** Revert do dual-audio agora restaura WirePlumber stock e
-  alsa-card-profiles corretamente.
+  alsa-card-profiles (estava quebrando o AC-3 Surround opção 11 após
+  desinstalar o dual audio).
+- **Corrigido:** Combined revert agora limpa todos os parâmetros GRUB e
+  configs de modprobe adicionados pela instalação (freesync_pcon,
+  hpd_debounce, cs_legacy_8core_metrics, ycbcr444, EDID legacy).
+- **Corrigido:** Patch ALLM DP-connector agora protegido com `WITH_ALLM`
+  — era aplicado incondicionalmente (bug).
+- **Corrigido:** Função `audio_fix_remove_hpd_debounce_grub_param`
+  adicionada (era referenciada mas nunca definida).
 
 ## v1.8.5 — 2026-09-06
 
