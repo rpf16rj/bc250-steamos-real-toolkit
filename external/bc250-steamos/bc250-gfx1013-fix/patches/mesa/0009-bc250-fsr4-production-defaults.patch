@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: daniel-h-0 <daniel-h-0@bc250-fsr4-fork>
+Date: Mon, 8 Sep 2026 00:00:00 +0000
+Subject: [PATCH 9/9] radv: BC-250 FSR4 production defaults
+
+Upstream's v4 release flips every FSR4 candidate from opt-in to on by
+default. No code changes -- only the default values passed to
+debug_get_*_option():
+
+    BC250_FSR4_IMAGEPREP            0     -> 1
+    BC250_FSR4_TEXTURE              0     -> 1
+    BC250_FSR4_RESOLUTION_VARIANTS  false -> true
+    BC250_FSR4_RESOLUTION_GUARD     false -> true
+
+Each switch can still be turned off explicitly, and BC250_FSR4_DISABLE=1
+disables the profile-specific rewrites and image-preparation replacement.
+The generic lowering and independent masked-store guard remain active.
+
+The pipeline cache key moves from bc250-fsr4-integrated-v2 to -v3, which
+is required rather than cosmetic: the defaults now select different
+shader programs, so cached pipelines built by an older driver must not be
+reused.
+
+Note this ships the image-preparation and texture candidates to every
+user. Upstream's own figures for those are about 1% each at n=2 per arm,
+with the six control runs across those campaigns spanning 0.061 ms --
+the size of the effect being claimed. The resolution-variant coverage and
+the 8K masked-store guard are unmeasured. None of it is verified here.
+
+Origin: https://github.com/daniel-h-0/bc250-fsr4-fork
+        v4/patches/0003-production-defaults.patch
+---
+diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
+index bc771465780..d8956d19ed1 100644
+--- a/src/amd/vulkan/radv_physical_device.c
++++ b/src/amd/vulkan/radv_physical_device.c
+@@ -365,17 +365,17 @@ radv_device_get_cache_uuid(struct radv_physical_device *pdev, void *uuid)
+ 
+    /* Separate production and fallback disk/application pipeline caches. */
+    const char *bc250_fsr4_cache = debug_get_bool_option("BC250_FSR4_DISABLE", false) ?
+-      "bc250-fsr4-integrated-v2-disabled" : "bc250-fsr4-integrated-v2";
++      "bc250-fsr4-integrated-v3-disabled" : "bc250-fsr4-integrated-v3";
+    _mesa_blake3_update(&ctx, bc250_fsr4_cache, strlen(bc250_fsr4_cache));
+    const char *bc250_texture_version = "bc250-texture-timing-v1";
+-   unsigned bc250_texture_mode = debug_get_num_option("BC250_FSR4_TEXTURE", 0);
++   unsigned bc250_texture_mode = debug_get_num_option("BC250_FSR4_TEXTURE", 1);
+    _mesa_blake3_update(&ctx, bc250_texture_version, strlen(bc250_texture_version));
+    _mesa_blake3_update(&ctx, &bc250_texture_mode, sizeof(bc250_texture_mode));
+    const char *bc250_imageprep_version = "bc250-imageprep-integration-v1-f4d5bf2dfd87b185f19e8bf29101d2399b8c673656ea1dfb939cfef222af9654";
+-   unsigned bc250_imageprep_mode = debug_get_num_option("BC250_FSR4_IMAGEPREP", 0);
++   unsigned bc250_imageprep_mode = debug_get_num_option("BC250_FSR4_IMAGEPREP", 1);
+    _mesa_blake3_update(&ctx, bc250_imageprep_version, strlen(bc250_imageprep_version));
+    _mesa_blake3_update(&ctx, &bc250_imageprep_mode, sizeof(bc250_imageprep_mode));
+-   if (debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", false)) {
++   if (debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", true)) {
+       const char *lowres_version = "bc250-fsr4-resolution-families-24-v2-safe-mask";
+       _mesa_blake3_update(&ctx, lowres_version, strlen(lowres_version));
+    }
+@@ -383,8 +383,8 @@ radv_device_get_cache_uuid(struct radv_physical_device *pdev, void *uuid)
+ 
+ 
+ 
+-   if (debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", false) ||
+-       debug_get_bool_option("BC250_FSR4_RESOLUTION_GUARD", false)) {
++   if (debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", true) ||
++       debug_get_bool_option("BC250_FSR4_RESOLUTION_GUARD", true)) {
+       const char *guard_version = "bc250-fsr4-8k-masked-store-guard-v1";
+       _mesa_blake3_update(&ctx, guard_version, strlen(guard_version));
+    }
+diff --git a/src/amd/vulkan/radv_shader.c b/src/amd/vulkan/radv_shader.c
+index 1d25099994f..94211f0a187 100644
+--- a/src/amd/vulkan/radv_shader.c
++++ b/src/amd/vulkan/radv_shader.c
+@@ -8553,11 +8553,11 @@ bc250_fsr4_profile(const void *bytes, size_t size)
+       if (profiles[i].size == size && profiles[i].hash == hash) {
+          unsigned flags = profiles[i].flags;
+          if (flags & 0x40000000u) {
+-            if (!debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", false)) return 0;
++            if (!debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", true)) return 0;
+             flags &= ~0x40000000u;
+          }
+          if (size == 125784 && hash == 0x60169c44f557ae55ull &&
+-             debug_get_num_option("BC250_FSR4_TEXTURE", 0) == 1)
++             debug_get_num_option("BC250_FSR4_TEXTURE", 1) == 1)
+             flags |= 524304; /* Existing pointwise schedule, eight outputs. */
+          return flags;
+       }
+@@ -15025,7 +15025,7 @@ bc250_imageprep_spirv(const struct radv_compiler_info *compiler_info,
+        strcmp(stage->entrypoint, "main") ||
+        (stage->spec_info && stage->spec_info->mapEntryCount) ||
+        debug_get_bool_option("BC250_FSR4_DISABLE", false) ||
+-       debug_get_num_option("BC250_FSR4_IMAGEPREP", 0) != 1 ||
++       debug_get_num_option("BC250_FSR4_IMAGEPREP", 1) != 1 ||
+        *size != sizeof(bc250_imageprep_original) ||
+        memcmp(original, bc250_imageprep_original, sizeof(bc250_imageprep_original)))
+       return original;
+@@ -15051,8 +15051,8 @@ bc250_resolution_guard_spirv(const struct radv_compiler_info *compiler_info,
+        strcmp(stage->entrypoint, "main") ||
+        (stage->spec_info && stage->spec_info->mapEntryCount) ||
+        spirv != (const uint32_t *)stage->spirv.data ||
+-       (!debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", false) &&
+-        !debug_get_bool_option("BC250_FSR4_RESOLUTION_GUARD", false)))
++       (!debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", true) &&
++        !debug_get_bool_option("BC250_FSR4_RESOLUTION_GUARD", true)))
+       return true;
+    static const struct { size_t size; uint64_t hash; unsigned word; } guards[] = {
+       {108840, 0xfdf595207adeaa9bull, 3993u}, /* pass 1 */

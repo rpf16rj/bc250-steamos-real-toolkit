@@ -11,8 +11,8 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$HOME/.local/state/bc250-audio-backup/$STAMP"
 mkdir -p "$BACKUP/user" "$BACKUP/system"
 
-echo "BC-250 Dual Audio v0.12 installer"
-echo "Native HDMI/DP + AC3 448 kbps + E-AC3 768 kbps"
+echo "BC-250 Dual Audio v0.13 installer"
+echo "Native HDMI/DP + AC3 448 kbps"
 echo "Backup: $BACKUP"
 
 # ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@ fi
 if [[ -f "$STOCK_ALSA" && "${BC250_ALLOW_UNTESTED_WP:-0}" != "1" ]]; then
   STOCK_ALSA_SHA256=$(sha256sum "$STOCK_ALSA" | awk '{print $1}')
   if [[ "$STOCK_ALSA_SHA256" != "$EXPECTED_STOCK_ALSA_SHA256" ]]; then
-    echo "ERROR: distro stock alsa.lua does not match the WirePlumber 0.5.17 base used by v0.12." >&2
+    echo "ERROR: distro stock alsa.lua does not match the WirePlumber 0.5.17 base used by v0.13." >&2
     echo "Expected: $EXPECTED_STOCK_ALSA_SHA256" >&2
     echo "Found:    $STOCK_ALSA_SHA256" >&2
     echo "Refusing to install a full monitor shadow override onto an unknown base." >&2
@@ -42,24 +42,16 @@ if [[ -f "$STOCK_ALSA" && "${BC250_ALLOW_UNTESTED_WP:-0}" != "1" ]]; then
   fi
 fi
 
-for cmd in ffmpeg aplay pactl wpctl pw-metadata mkfifo dd sha256sum grep tr stat setsid; do
+for cmd in ffmpeg aplay pactl wpctl pw-metadata dd sha256sum grep tr stat; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: required command not found: $cmd" >&2
     exit 4
   fi
 done
 
-if ! ffmpeg -hide_banner -encoders 2>/dev/null | grep -Eq '[[:space:]]eac3[[:space:]]'; then
-  echo "ERROR: this FFmpeg build has no native eac3 encoder." >&2
-  exit 5
-fi
 if ! ffmpeg -hide_banner -muxers 2>/dev/null | grep -Eq '[[:space:]]spdif[[:space:]]'; then
   echo "ERROR: this FFmpeg build has no IEC61937/SPDIF muxer." >&2
   exit 6
-fi
-if ! find /usr/lib -type f -name 'libpipewire-module-pipe-tunnel.so' -print -quit 2>/dev/null | grep -q .; then
-  echo "ERROR: PipeWire module libpipewire-module-pipe-tunnel is missing." >&2
-  exit 7
 fi
 
 # Remember whether v0.7's old AC3 node was the configured default so we can
@@ -105,8 +97,6 @@ backup_system_file "/etc/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf" "sy
 backup_system_file "/etc/alsa/conf.d/61-bc250-a52.conf" "system-61-bc250-a52.conf"
 backup_system_file "/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" "system-90-bc250-audio-mode.lua"
 backup_system_file "/usr/local/share/wireplumber/scripts/monitors/alsa.lua" "system-alsa.lua"
-backup_system_file "/usr/local/libexec/bc250-eac3-backend" "system-bc250-eac3-backend"
-backup_system_file "/etc/systemd/user/bc250-eac3-backend.service" "system-bc250-eac3-backend.service"
 
 echo "$BACKUP" > "$HOME/.local/state/bc250-audio-last-backup"
 
@@ -135,8 +125,6 @@ sudo rm -f /etc/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf
 
 sudo install -d -m 0755 /etc/alsa/conf.d
 sudo install -d -m 0755 /usr/local/share/wireplumber/scripts/monitors
-sudo install -d -m 0755 /usr/local/libexec
-sudo install -d -m 0755 /etc/systemd/user
 install -d -m 0755 "$HOME/.config/wireplumber/wireplumber.conf.d"
 install -d -m 0755 "$HOME/.config/pipewire/pipewire.conf.d"
 
@@ -150,16 +138,11 @@ sudo install -m 0644 "$ROOT_DIR/usr/local/share/wireplumber/scripts/90-bc250-aud
   /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
 sudo install -m 0644 "$ROOT_DIR/usr/local/share/wireplumber/scripts/monitors/alsa.lua" \
   /usr/local/share/wireplumber/scripts/monitors/alsa.lua
-sudo install -m 0755 "$ROOT_DIR/usr/local/libexec/bc250-eac3-backend" \
-  /usr/local/libexec/bc250-eac3-backend
-sudo install -m 0644 "$ROOT_DIR/etc/systemd/user/bc250-eac3-backend.service" \
-  /etc/systemd/user/bc250-eac3-backend.service
-
-# The EAC3 helper is intentionally always resident but normally blocks on its
-# FIFO. It only opens HDMI when WirePlumber creates the hidden EAC3 FIFO writer.
+# Stop and remove any leftover EAC3 backend from a previous v0.12 install
+systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
+sudo rm -f /usr/local/libexec/bc250-eac3-backend
+sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
 systemctl --user daemon-reload
-systemctl --user enable --now bc250-eac3-backend.service
-systemctl --user restart bc250-eac3-backend.service
 
 echo
 echo "Installed. Restarting the user audio stack..."
@@ -191,10 +174,6 @@ echo "=== WirePlumber ==="
 systemctl --user --no-pager --full status wireplumber | sed -n '1,14p' || true
 
 echo
-echo "=== EAC3 helper ==="
-systemctl --user --no-pager --full status bc250-eac3-backend.service | sed -n '1,12p' || true
-
-echo
 echo "=== sinks ==="
 pactl list sinks short || true
 
@@ -205,7 +184,7 @@ pw-metadata -n default 0 2>/dev/null | grep -E 'default\.(configured\.)?audio\.s
 echo
 echo "=== recent BC-250 policy log ==="
 journalctl --user -u wireplumber --since "1 minute ago" --no-pager | \
-  grep -E 'BC-250|s-bc250-audio|A52|AC3|EAC3|encoded|Failed|error|Error' || true
+  grep -E 'BC-250|s-bc250-audio|A52|AC3|encoded|Failed|error|Error' || true
 
 restore_readonly
 trap - EXIT

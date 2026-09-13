@@ -53,6 +53,7 @@ relax_libbpf_host_tool_werror() {
 WITH_GFX1013=0
 WITH_AUDIO=0
 WITH_VRR=0
+WITH_VRR_VTEM=0
 WITH_ALLM=0
 NO_AUDIO_CLOCK=0
 NO_SS=0
@@ -70,6 +71,7 @@ for a in "$@"; do
         --gfx1013)        WITH_GFX1013=1 ;;
         --audio)          WITH_AUDIO=1 ;;
         --vrr)            WITH_VRR=1 ;;
+        --vrr-vtem)        WITH_VRR_VTEM=1 ;;
         --allm)           WITH_ALLM=1 ;;
         --no-audio-clock) NO_AUDIO_CLOCK=1 ;;
         --no-ss)          NO_SS=1 ;;
@@ -394,6 +396,16 @@ if [ "$WITH_AUDIO" = 1 ]; then
         fi
     fi
 
+    # DP spread spectrum disable is upstream since kernel 7.2
+    if [ "$NO_SS" = 0 ]; then
+        _ss_major=$(echo "$BASE" | cut -d. -f1)
+        _ss_minor=$(echo "$BASE" | cut -d. -f2)
+        if [ "$_ss_major" -gt 7 ] || { [ "$_ss_major" -eq 7 ] && [ "$_ss_minor" -ge 2 ]; }; then
+            step "skipping DP spread spectrum disable patch (upstream since kernel 7.2)"
+            NO_SS=1
+        fi
+    fi
+
     if [ "$NO_SS" = 1 ]; then
         step "skipping DP spread spectrum disable patch (--no-ss requested)"
         DM_SS_PATCH=$HERE/bc250-dp-audio-dm-ignore-ss.patch
@@ -433,6 +445,26 @@ else
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$VRR_PATCH"
         echo "VRR PCON FreeSync patch REVERSED (leftover from a previous build)"
+    fi
+fi
+
+if [ "$WITH_VRR_VTEM" = 1 ]; then
+    step "apply VRR VTEM on TMDS patch (amdgpu_dm_freesync)"
+    VTEM_PATCH=$HERE/bc250-vrr-vtem-on-tmds.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VTEM_PATCH" >/dev/null 2>&1; then
+        echo "VRR VTEM on TMDS patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$VTEM_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$VTEM_PATCH"
+        echo "VRR VTEM on TMDS patch applied"
+    else
+        echo "VRR VTEM on TMDS patch does not apply (may already be upstream) — skipping"
+    fi
+else
+    step "skipping VRR VTEM on TMDS patch (not requested)"
+    VTEM_PATCH=$HERE/bc250-vrr-vtem-on-tmds.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VTEM_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$VTEM_PATCH"
+        echo "VRR VTEM on TMDS patch REVERSED (leftover from a previous build)"
     fi
 fi
 
