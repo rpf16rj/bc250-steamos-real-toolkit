@@ -7,6 +7,27 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.9.0 — 2026-09-12
+
+- **Adicionado:** OpenLinkHub como item opcional no menu Extras — controle
+  do Corsair iCUE LINK Hub (RGB, fans, AIO) via interface web, com
+  persistência após atualizações do SteamOS.
+- **Adicionado:** Verificação de versão mínima SteamOS 3.9 / kernel 7.x —
+  avisa usuários em versões mais antigas para atualizar para beta preview
+  ou usar o toolkit v1.7.3.
+- **Adicionado:** Variante `proton-cachyos-slr-bc250` do FSR4 Proton para
+  compatibilidade com anti-cheat.
+- **Corrigido:** Desbloqueio de cores CPU agora aceita máscaras não-padrão
+  (ex. 0xB7) em vez de abortar — o write do SMU define todos os 8 bits
+  independente da máscara inicial. O core unlock também é não-fatal no
+  Install All, então o GPU CU unlock e outros passos prosseguem mesmo se
+  falhar.
+- **Corrigido:** Hunk do patch YCbCr 4:4:4 aplicando dentro de
+  `dm_validate_stream_and_context` — adicionada linha de contexto `do {`
+  que faltava.
+- **Corrigido:** Revert do dual-audio agora restaura WirePlumber stock e
+  alsa-card-profiles corretamente.
+
 ## v1.8.5 — 2026-09-06
 
 - **Adicionado:** Suporte E-AC3 (Dolby Digital Plus / DD+) no dual-output audio,

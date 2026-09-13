@@ -50,6 +50,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 - **Sensor & fan monitoring** — with optional full PWM fan control
 - **CoolerControl integration** — custom fan curves via a web UI
+- **OpenLinkHub support** — optional Corsair iCUE LINK Hub control (RGB, fans, AIO) via web UI
 - **Prebuilt Decky plugin** — Toolkit SteamOS Control with Pump Fan controls, four-point profiles, and optional LED bar controls
 - **CU/WGP Live Manager** — runtime CU/WGP enable/disable without rebooting
 
