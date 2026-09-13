@@ -122,6 +122,7 @@ persist_detect_and_record_installed() {
     be200_firmware_installed 2>/dev/null && persist_state_add "be200_fw"
     lsmod 2>/dev/null | grep -qE 'nct6687|nct6686' && persist_state_add "sensors"
     coolercontrol_installed 2>/dev/null && persist_state_add "coolercontrol"
+    openlinkhub_installed 2>/dev/null && persist_state_add "openlinkhub"
     xone_installed 2>/dev/null && persist_state_add "xbox"
     cec_control_installed 2>/dev/null && persist_state_add "cec"
     [[ -f /etc/bc250-cu-live-manager.conf ]] && persist_state_add "cu"
@@ -482,6 +483,21 @@ require_kernel_version() {
     echo -e "  ${BOLD}${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
     return 1
+}
+
+warn_legacy_kernel() {
+    local kver kmajor
+    kver="$(uname -r)"
+    kmajor="${kver%%.*}"
+    [[ "$kmajor" -ge 7 ]] && return 0
+    echo -e "  ${BOLD}${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "  ${BOLD}${YELLOW}⚠  This toolkit version requires SteamOS 3.9+ / kernel 7.x.${RESET}"
+    echo -e "  ${YELLOW}   Current kernel: $(uname -r)${RESET}"
+    echo -e "  ${YELLOW}   To use this toolkit, update to the Beta Preview channel:${RESET}"
+    echo -e "  ${DIM}   Settings → System → System Update Channel → Beta Preview${RESET}"
+    echo -e "  ${YELLOW}   or use toolkit v1.7.3 which supports kernel 6.x.${RESET}"
+    echo -e "  ${BOLD}${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
 }
 
 # ==============================================================================
@@ -999,6 +1015,7 @@ install_core_unlock() {
     echo -e "  ${DIM}Fixed by the DP Audio/Video Fix (Install Manual 7), which queries GFX clock directly from the SMU and${RESET}"
     echo -e "  ${DIM}adds GPU utilization reporting. Not chained automatically here (it rebuilds a kernel module); run it too.${RESET}"
     echo -e "  ${DIM}Volatile: a cold power-off reverts to 6c/12t. A systemd service re-applies the unlock on every boot.${RESET}"
+    echo -e "  ${DIM}Supports non-standard CPU masks (e.g. 0xB7) — the SMU write sets all 8 bits regardless.${RESET}"
     echo ""
 
     if [[ ! -f "$CORE_UNLOCK_SCRIPT" ]]; then
@@ -1040,8 +1057,12 @@ install_core_unlock() {
     fi
 
     if (( unlock_rc != 0 )); then
-        fail_with_log "bc250-unlock-cores.py failed — see output above. This is expected if the core presence mask is not 0x77 (already unlocked, or a different board/harvest)." "CPU Core Unlock — bc250-unlock-cores.py"
-        return 1
+        if [[ "$auto" == "auto" ]]; then
+            print_warning "bc250-unlock-cores.py failed — see output above. Continuing with remaining steps (GPU CU unlock, etc.)."
+        else
+            fail_with_log "bc250-unlock-cores.py failed — see output above. This is expected if the core presence mask is already 0xFF (already unlocked) or on a different board/harvest." "CPU Core Unlock — bc250-unlock-cores.py"
+            return 1
+        fi
     fi
 
     # The community reports 8-core operation needs the updated (6c/8c-compatible)
@@ -2628,7 +2649,8 @@ ycbcr444_modprobe_installed() {
 
 ycbcr444_force_installed() {
     [[ -f "$YCBCR444_MODPROBE_FILE" ]] && \
-    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
+    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null && \
+    grep -q 'force_colorspace=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
 }
 
 ycbcr444_ensure_modprobe() {
@@ -2654,16 +2676,16 @@ ycbcr444_ensure_force() {
     steamos_writable "
         if [[ -f \"$YCBCR444_MODPROBE_FILE\" ]]; then
             if ! grep -q 'force_ycbcr444=1' \"$YCBCR444_MODPROBE_FILE\"; then
-                sed -i 's/\(options amdgpu .*\)/\\1 force_ycbcr444=1 force_min_bpc=10/' \"$YCBCR444_MODPROBE_FILE\"
+                sed -i 's/\(options amdgpu .*\)/\\1 force_ycbcr444=1 force_min_bpc=10 force_colorspace=1/' \"$YCBCR444_MODPROBE_FILE\"
             fi
         else
-            echo 'options amdgpu dcfeaturemask=0x402 force_ycbcr444=1 force_min_bpc=10' > \"$YCBCR444_MODPROBE_FILE\"
+            echo 'options amdgpu dcfeaturemask=0x402 force_ycbcr444=1 force_min_bpc=10 force_colorspace=1' > \"$YCBCR444_MODPROBE_FILE\"
         fi
     " || {
         print_info "Failed to update $YCBCR444_MODPROBE_FILE. Update it manually."
         return 0
     }
-    print_info "Enabled YCbCr 4:4:4 + min 10-bit in $YCBCR444_MODPROBE_FILE."
+    print_info "Enabled YCbCr 4:4:4 + min 10-bit + SDR colorspace fix in $YCBCR444_MODPROBE_FILE."
     steamos_writable "mkinitcpio -P" 2>/dev/null || true
 }
 
@@ -2692,6 +2714,42 @@ audio_fix_remove_pcon_grub_param() {
         return 0
     }
     print_info "Removed amdgpu.freesync_pcon_allow_all=1 from GRUB."
+}
+
+audio_fix_remove_hpd_debounce_grub_param() {
+    if ! audio_fix_hpd_debounce_grub_installed; then
+        return 0
+    fi
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ amdgpu\\.hdmi_hpd_debounce_delay_ms=1500//g; s/amdgpu\\.hdmi_hpd_debounce_delay_ms=1500 //g; s/amdgpu\\.hdmi_hpd_debounce_delay_ms=1500//g' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        print_info "Failed to remove amdgpu.hdmi_hpd_debounce_delay_ms=1500 from GRUB."
+        return 0
+    }
+    print_info "Removed amdgpu.hdmi_hpd_debounce_delay_ms=1500 from GRUB."
+}
+
+audio_fix_remove_cs_legacy_grub_param() {
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        return 0
+    fi
+    if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.cs_legacy_8core_metrics=1' "$GRUB_DEFAULT" >/dev/null 2>&1; then
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        sed -i 's/ amdgpu\\.cs_legacy_8core_metrics=1//g; s/amdgpu\\.cs_legacy_8core_metrics=1 //g; s/amdgpu\\.cs_legacy_8core_metrics=1//g' \"$GRUB_DEFAULT\"
+        update-grub
+    " || {
+        print_info "Failed to remove amdgpu.cs_legacy_8core_metrics=1 from GRUB."
+        return 0
+    }
+    print_info "Removed amdgpu.cs_legacy_8core_metrics=1 from GRUB."
 }
 
 audio_fix_cleanup_legacy_edid() {
@@ -2783,22 +2841,28 @@ install_audio_fix() {
         return 0
     fi
 
-    # Detect kernel major version
-    local kver_major
+    # Detect kernel major and minor version
+    local kver_major kver_minor kver_rest
     kver_major="$(uname -r | cut -d. -f1)"
+    kver_rest="$(uname -r | cut -d. -f2-)"
+    kver_minor="${kver_rest%%.*}"
 
     # Build checklist — all patches individually selectable
+    # Groups: Performance/Graphics | Hardware | Experimental (DP/HDMI Port)
     local -a checklist_items=(
-        "+DP Audio Clock:Fixes audio/video at ~82% speed via DP/HDMI"
-        "+DP Spread Spectrum:Cleaner audio output via DP/HDMI"
-        "+TTM NULL-page Guard:Prevents crashes from NULL page mappings"
-        "+SCLK Range (350-2230):Widened GPU clock range for userspace governors"
-        "+KFD Flush TLB:Compute memory coherency fix"
-        "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
-        "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
+        "+GPU Telemetry+Cache:GPU clock readout, utilization, adjustable cache"
+        "+SCLK Range (350-2230):Widen GPU clock range for userspace governors"
+        "+KFD Flush TLB:Memory coherence fix for compute workloads"
+        "+TTM NULL-page Guard:Prevent crashes from NULL page mappings"
+        "+DP Audio Clock:Fix audio/video at ~82% speed via DP/HDMI"
+        "+PCON FRL Hotplug (Exp):Preserve FRL config through hotplug events"
     )
+    # DP Spread Spectrum only needed before kernel 7.2 (upstream since then)
+    if [[ "$kver_major" -lt 7 ]] || { [[ "$kver_major" -eq 7 ]] && [[ "$kver_minor" -lt 2 ]]; }; then
+        checklist_items+=("+DP Spread Spectrum:Cleaner audio via DP/HDMI (disable spread spectrum)")
+    fi
     if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+YCbCr 444 Deep Color:PCON color quality + CH7218 quirk")
+        checklist_items+=("+YCbCr 444 Deep Color (Exp):Force YCbCr 4:4:4 + 10-bit + fix colorspace via PCON CH7218")
     fi
 
     pick_items "Select kernel patches to include:" "${checklist_items[@]}"
@@ -3580,9 +3644,7 @@ dual_audio_installed() {
     [[ -f /etc/alsa/conf.d/61-bc250-a52.conf ]] && \
     [[ -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" ]] && \
     [[ -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" ]] && \
-    [[ -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua ]] && \
-    [[ -f /usr/local/libexec/bc250-eac3-backend ]] && \
-    [[ -f /etc/systemd/user/bc250-eac3-backend.service ]]
+    [[ -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua ]]
 }
 
 dual_audio_ensure_wireplumber() {
@@ -3604,19 +3666,18 @@ dual_audio_ensure_wireplumber() {
 }
 
 install_dual_audio() {
-    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.12)"
-    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3) + Dolby Digital Plus (E-AC3)${RESET}"
+    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.13)"
+    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3 448 kbps)${RESET}"
     echo ""
     dual_audio_installed && { print_info "Already installed."; return 0; }
     dual_audio_ensure_wireplumber || return 1
     ac3_surround_installed && { print_info "Old AC-3 detected; reverting..."; run_revert_ac3_surround || true; }
-    # Check and install dependencies (ffmpeg, alsa-utils for E-AC3 backend)
+    # Check and install dependencies (ffmpeg, alsa-utils for AC3 backend)
     print_info "Checking dependencies (ffmpeg, alsa-utils)..."
     local missing=()
     command -v ffmpeg >/dev/null 2>&1 || missing+=("ffmpeg")
     command -v aplay >/dev/null 2>&1 || missing+=("alsa-utils")
     command -v pw-metadata >/dev/null 2>&1 || missing+=("pipewire-tools")
-    command -v setsid >/dev/null 2>&1 || missing+=("util-linux")
     if (( ${#missing[@]} > 0 )); then
         print_info "Installing missing dependencies: ${missing[*]}"
         local was_deps=0; is_steamos && { was_deps=1; steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }; }
@@ -3633,13 +3694,12 @@ install_dual_audio() {
     local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
     sudo install -d -m 0755 /etc/alsa/conf.d
     sudo install -d -m 0755 /usr/local/share/wireplumber/scripts/monitors
-    sudo install -d -m 0755 /usr/local/libexec
-    sudo install -d -m 0755 /etc/systemd/user
     sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/alsa/conf.d/61-bc250-a52.conf" /etc/alsa/conf.d/61-bc250-a52.conf
     sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
     sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/monitors/alsa.lua" /usr/local/share/wireplumber/scripts/monitors/alsa.lua
-    sudo install -m 0755 "$DUAL_AUDIO_DIR/usr/local/libexec/bc250-eac3-backend" /usr/local/libexec/bc250-eac3-backend
-    sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/systemd/user/bc250-eac3-backend.service" /etc/systemd/user/bc250-eac3-backend.service
+    # Remove leftover EAC3 backend from previous v0.12 install
+    sudo rm -f /usr/local/libexec/bc250-eac3-backend
+    sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
     (( was )) && steamos-readonly enable || true
     # WirePlumber and PipeWire user configs go in ~/.config — /etc/ paths are
     # volatile on SteamOS (symlinked to /run/ or restored to stock on reboot).
@@ -3660,10 +3720,10 @@ install_dual_audio() {
     fi
     local uid=$(id -u "$REAL_USER")
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user daemon-reload 2>/dev/null || true
-    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user enable --now bc250-eac3-backend.service 2>/dev/null || true
+    sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     sleep 4
-    print_success "Dual-output audio v0.12 installed! Reboot before use."
+    print_success "Dual-output audio v0.13 installed! Reboot before use."
     persist_state_add "dual_audio"
 }
 
@@ -3679,6 +3739,26 @@ run_revert_dual_audio() {
     sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
     sudo rm -f /usr/local/libexec/bc250-eac3-backend
     sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
+
+    # Restore stock SteamOS WirePlumber (0.5.15) if dual audio had replaced it
+    local wp_ver
+    wp_ver=$(wireplumber --version 2>/dev/null | grep -Eo '0\.5\.[0-9]+' | head -1 || true)
+    if [[ "$wp_ver" != "0.5.15" ]]; then
+        print_info "Restoring stock SteamOS WirePlumber 0.5.15 (was ${wp_ver:-unknown})..."
+        if ! LC_ALL=C pacman -S --noconfirm --overwrite '*' wireplumber libwireplumber 2>&1 | tail -5; then
+            print_error "Failed to restore stock WirePlumber. Run: sudo pacman -S wireplumber libwireplumber"
+        else
+            print_success "Stock WirePlumber restored."
+        fi
+    fi
+
+    # Restore hdmi-ac3.conf profile set (removed by dual audio install)
+    if [[ ! -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]]; then
+        print_info "Restoring hdmi-ac3.conf profile set..."
+        LC_ALL=C pacman -S --noconfirm --overwrite '*' alsa-card-profiles 2>&1 | tail -3 || \
+            print_error "Failed to restore alsa-card-profiles. Run: sudo pacman -S alsa-card-profiles"
+    fi
+
     (( was )) && steamos-readonly enable || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf" 2>/dev/null || true
@@ -3686,6 +3766,256 @@ run_revert_dual_audio() {
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     print_success "Dual-output audio reverted. Reboot to apply."
     persist_state_remove "dual_audio"
+}
+
+# ---------------------------------------------------------------------------
+# FSR4 Proton (MastaG pre-built packages — extracted to home partition)
+# ---------------------------------------------------------------------------
+MASTAG_REPO_URL="https://github.com/MastaG/linux-cachyos-bc250/releases/download/repo"
+MASTAG_REPO_NAME="bc250-cachyos"
+MASTAG_PROTON_PACKAGES=("protonge-latest-bc250" "proton-cachyos-native-bc250" "proton-cachyos-slr-bc250")
+STEAM_COMPAT_DIR="$REAL_HOME/.local/share/Steam/compatibilitytools.d"
+
+fsr4_proton_installed() {
+    [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]]
+}
+
+fsr4_proton_installed_pkg() {
+    if [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]]; then
+        cut -d: -f1 "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
+        return 0
+    fi
+    return 1
+}
+
+fsr4_proton_installed_toolname() {
+    if [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]]; then
+        cut -d: -f2 "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
+        return 0
+    fi
+    return 1
+}
+
+_MASTAG_REPO_ADDED_BY_US=0
+
+_mastag_repo_add() {
+    if grep -q "^\[${MASTAG_REPO_NAME}\]" /etc/pacman.conf 2>/dev/null; then
+        return 0
+    fi
+    cat >> /etc/pacman.conf <<EOF
+
+[${MASTAG_REPO_NAME}]
+SigLevel = Optional TrustAll
+Server = ${MASTAG_REPO_URL}
+EOF
+    _MASTAG_REPO_ADDED_BY_US=1
+}
+
+_mastag_repo_remove() {
+    (( _MASTAG_REPO_ADDED_BY_US )) || return 0
+    sed -i "/^\[${MASTAG_REPO_NAME}\]$/,/^Server = ${MASTAG_REPO_URL//\//\\/}$/d" /etc/pacman.conf 2>/dev/null || true
+    sed -i '/^$/{ N; /^\n$/d }' /etc/pacman.conf 2>/dev/null || true
+    _MASTAG_REPO_ADDED_BY_US=0
+}
+
+install_fsr4_proton() {
+    print_step "FSR4" "Install FSR4-capable Proton (MastaG pre-built)"
+    echo -e "  ${DIM}  Pre-built Proton with OptiScaler + FSR4 provider + pinned config${RESET}"
+    echo -e "  ${DIM}  Requires patched Mesa/RADV from this toolkit (Combined Fix or GFX1013 Fix)${RESET}"
+    echo -e "  ${DIM}  Installs to home partition (SteamOS root is too small for 1.6 GB Proton)${RESET}"
+    echo ""
+    _MASTAG_REPO_ADDED_BY_US=0
+    fsr4_proton_installed && { print_info "Already installed: $(fsr4_proton_installed_pkg)"; return 0; }
+
+    # Check prerequisites — patched RADV must be installed
+    if ! grep -q "VK_DRIVER_FILES" /etc/environment 2>/dev/null || \
+       ! grep -q "bc250-gfx1013" /etc/environment 2>/dev/null; then
+        print_error "Patched Mesa/RADV not found. Install the Combined Fix or GFX1013 Fix first."
+        print_info "FSR4 requires the patched RADV driver with FSR4 support."
+        return 1
+    fi
+
+    echo -e "  ${CYAN}Choose Proton variant:${RESET}"
+    echo -e "  ${DIM}  1) protonge-latest-bc250 (GE-Proton 11-6 + FSR4) — recommended${RESET}"
+    echo -e "  ${DIM}  2) proton-cachyos-native-bc250 (CachyOS native Proton + FSR4)${RESET}"
+    echo -e "  ${DIM}  3) proton-cachyos-slr-bc250 (CachyOS Proton + Steam Linux Runtime + FSR4)${RESET}"
+    echo -e "  ${DIM}     Use this for games with EasyAntiCheat or BattlEye${RESET}"
+    echo ""
+    local proton_choice
+    read -rp "  Select [1-3] (default 1): " proton_choice
+    local proton_pkg
+    case "$proton_choice" in
+        2|n|N) proton_pkg="proton-cachyos-native-bc250" ;;
+        3|s|S) proton_pkg="proton-cachyos-slr-bc250" ;;
+        *) proton_pkg="protonge-latest-bc250" ;;
+    esac
+    echo ""
+
+    print_info "Selected: ${proton_pkg}"
+    echo ""
+
+    # Check and install dependencies
+    print_info "Checking dependencies..."
+    local missing=()
+    command -v curl >/dev/null 2>&1 || missing+=("curl")
+    command -v tar >/dev/null 2>&1 || missing+=("tar")
+    command -v zstd >/dev/null 2>&1 || missing+=("zstd")
+    if (( ${#missing[@]} > 0 )); then
+        print_info "Installing missing dependencies: ${missing[*]}"
+        local was_deps=0; is_steamos && { was_deps=1; steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }; }
+        if ! LC_ALL=C pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+            print_error "Failed to install dependencies: ${missing[*]}"
+            (( was_deps )) && steamos-readonly enable || true
+            return 1
+        fi
+        (( was_deps )) && steamos-readonly enable || true
+    else
+        print_info "All dependencies already installed."
+    fi
+
+    # Check free space on home (need ~2 GB for download + extract)
+    local home_free_mb
+    home_free_mb=$(df --output=avail -m /home 2>/dev/null | tail -1 | tr -d ' ')
+    if [[ -n "$home_free_mb" ]] && (( home_free_mb < 2500 )); then
+        print_error "Only ${home_free_mb}MB free on /home — need at least 2500 MB for download + extract."
+        return 1
+    fi
+
+    if ! confirm "Install ${proton_pkg} (~615 MB download, ~1.6 GB installed to /home)?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    # Disable read-only if SteamOS (needed to add temp repo to pacman.conf)
+    local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
+
+    # Add MastaG repo temporarily and sync
+    _mastag_repo_add
+    print_info "Syncing MastaG repository..."
+    if ! LC_ALL=C pacman -Sy --noconfirm 2>&1 | tail -5; then
+        _mastag_repo_remove
+        (( was )) && steamos-readonly enable || true
+        print_error "Failed to sync MastaG repository."
+        return 1
+    fi
+
+    # Download the package without installing (to avoid filling root partition)
+    local dl_dir="${REAL_HOME}/.cache/bc250-fsr4-download"
+    mkdir -p "$dl_dir"
+    print_info "Downloading ${proton_pkg} to ${dl_dir}..."
+    if ! LC_ALL=C pacman -Sw --noconfirm --cachedir "$dl_dir" "$proton_pkg" 2>&1 | tail -10; then
+        _mastag_repo_remove
+        (( was )) && steamos-readonly enable || true
+        rm -rf "$dl_dir"
+        print_error "Failed to download ${proton_pkg}."
+        return 1
+    fi
+
+    # Remove the temporary repo immediately (don't need it anymore)
+    _mastag_repo_remove
+    LC_ALL=C pacman -Sy --noconfirm 2>/dev/null || true
+    (( was )) && steamos-readonly enable || true
+
+    # Find the downloaded .pkg.tar.zst
+    local pkg_file
+    pkg_file=$(find "$dl_dir" -name "${proton_pkg}-*.pkg.tar.zst" -type f | head -1)
+    if [[ -z "$pkg_file" ]]; then
+        rm -rf "$dl_dir"
+        print_error "Downloaded package file not found."
+        return 1
+    fi
+
+    # Extract the package to a temp dir on home
+    local extract_dir="${dl_dir}/extracted"
+    mkdir -p "$extract_dir"
+    print_info "Extracting package..."
+    if ! tar -x --use-compress-program=zstd -f "$pkg_file" -C "$extract_dir" 2>&1 | tail -5; then
+        rm -rf "$dl_dir"
+        print_error "Failed to extract package."
+        return 1
+    fi
+
+    # Find the compatibility tool directory inside the extracted package
+    # Packages install to usr/share/steam/compatibilitytools.d/<toolname>/
+    local tool_src
+    tool_src=$(find "$extract_dir" -type d -path "*/compatibilitytools.d/*" -mindepth 4 -maxdepth 4 | head -1)
+    if [[ -z "$tool_src" ]]; then
+        # Fallback: search more broadly
+        tool_src=$(find "$extract_dir" -type d -name "compatibilitytools.d" | head -1)
+        if [[ -n "$tool_src" ]]; then
+            # Get the first subdirectory inside compatibilitytools.d
+            tool_src=$(find "$tool_src" -mindepth 1 -maxdepth 1 -type d | head -1)
+        fi
+    fi
+    if [[ -z "$tool_src" ]]; then
+        rm -rf "$dl_dir"
+        print_error "Could not find compatibility tool directory in package."
+        return 1
+    fi
+
+    local tool_name
+    tool_name=$(basename "$tool_src")
+
+    # Install to Steam's user compatibility tools directory
+    mkdir -p "$STEAM_COMPAT_DIR"
+    print_info "Installing ${tool_name} to ${STEAM_COMPAT_DIR}..."
+    if [[ -d "$STEAM_COMPAT_DIR/$tool_name" ]]; then
+        rm -rf "$STEAM_COMPAT_DIR/$tool_name"
+    fi
+    if ! cp -a "$tool_src" "$STEAM_COMPAT_DIR/"; then
+        rm -rf "$dl_dir"
+        print_error "Failed to copy compatibility tool to ${STEAM_COMPAT_DIR}."
+        return 1
+    fi
+
+    # Write marker file to track installation (package name + tool dir name)
+    echo "${proton_pkg}:${tool_name}" > "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
+
+    # Cleanup download/extract dir
+    rm -rf "$dl_dir"
+
+    print_success "FSR4 Proton installed: ${tool_name}"
+    echo ""
+    echo -e "  ${BOLD}${CYAN}Next steps:${RESET}"
+    echo -e "  ${DIM}  1. Restart Steam${RESET}"
+    echo -e "  ${DIM}  2. In game Properties → Compatibility, select:${RESET}"
+    echo -e "  ${DIM}     ${tool_name}${RESET}"
+    echo -e "  ${DIM}  3. FSR4 and OptiScaler are ON by default${RESET}"
+    echo ""
+    echo -e "  ${BOLD}Launch options (optional, per-game):${RESET}"
+    echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%            # disable FSR4 upgrade${RESET}"
+    echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%               # FSR4 watermark + OptiScaler log${RESET}"
+    echo -e "  ${DIM}  RADV_GFX103=1 %command%                    # enable mesh/task shaders${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411f %command%     # BC-250 FSR4 fork RC9 (default)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411b %command%     # third-party 4.1.1b, RDNA2 ghosting fix${RESET}"
+    echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=... %command%        # per-game OptiScaler overrides${RESET}"
+    echo ""
+    echo -e "  ${YELLOW}Note:${RESET} Do NOT use PROTON_DLSS_UPGRADE, PROTON_XESS_UPGRADE, etc."
+    echo -e "  — the pinned manifest does not ship those, and they will prevent the game from starting."
+    echo -e "  ${YELLOW}Anti-cheat:${RESET} FSR4/OptiScaler auto-disable on EAC/BattlEye detection."
+    echo -e "  For manual override: PROTON_FSR4_UPGRADE=0 %command%"
+    echo ""
+    persist_state_add "fsr4_proton"
+}
+
+revert_fsr4_proton() {
+    print_step "R-FSR4" "Revert FSR4-capable Proton"
+    local installed_pkg installed_tool
+    installed_pkg=$(fsr4_proton_installed_pkg 2>/dev/null) || { print_info "Not installed."; return 0; }
+    installed_tool=$(fsr4_proton_installed_toolname 2>/dev/null)
+    confirm "Remove ${installed_pkg} (${installed_tool})?" || { print_info "Cancelled."; return 0; }
+
+    if [[ -n "$installed_tool" && -d "$STEAM_COMPAT_DIR/$installed_tool" ]]; then
+        print_info "Removing ${installed_tool} from ${STEAM_COMPAT_DIR}..."
+        rm -rf "$STEAM_COMPAT_DIR/$installed_tool"
+    else
+        print_error "Tool directory not found: ${installed_tool}"
+    fi
+    rm -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
+
+    print_success "FSR4 Proton removed: ${installed_tool}"
+    print_info "Restart Steam to apply."
+    persist_state_remove "fsr4_proton"
 }
 
 gfx1013_ensure_mesa_build_deps() {
@@ -3923,8 +4253,18 @@ run_revert_gfx1013_fix() {
     # Remove boot mode GRUB param if present
     boot_mode_revert
 
-    print_success "GFX1013 compute queue fix reverted to stock amdgpu.ko. Reboot to apply."
+    # Remove all GRUB params and modprobe configs added by install_combined_fix
+    audio_fix_remove_pcon_grub_param
+    audio_fix_remove_hpd_debounce_grub_param
+    audio_fix_remove_cs_legacy_grub_param
+    ycbcr444_remove_modprobe
+    audio_fix_cleanup_legacy_edid
+
+    # Remove persist states
     persist_state_remove "gfx1013"
+    persist_state_remove "audio"
+
+    print_success "Combined fix fully reverted: stock amdgpu.ko + all GRUB/modprobe configs removed. Reboot to apply."
 }
 
 boot_mode_revert() {
@@ -3952,40 +4292,45 @@ install_combined_fix() {
     echo -e "  ${DIM}Select which components to include in this build:${RESET}"
     echo ""
 
-    local do_audio=0 do_gfx=0 do_vrr=0 do_allm=0
+    local do_audio=0 do_gfx=0 do_vrr=0 do_vrr_vtem=0 do_allm=0
     local patch_flags=()
 
-    # Detect kernel major version for version-specific skip logic
+    # Detect kernel major and minor version for version-specific skip logic
     local kver_major kver_minor kver_rest
     kver_major="$(uname -r | cut -d. -f1)"
     kver_rest="$(uname -r | cut -d. -f2-)"
     kver_minor="${kver_rest%%.*}"
 
-    # Build the checklist items — all patches individually selectable
+    # --- Kernel Patches: Performance & Graphics ---
     local -a checklist_items=(
-        "+DP Audio Clock:Fixes audio/video at ~82% speed via DP/HDMI"
-        "+DP Spread Spectrum:Cleaner audio output via DP/HDMI"
-        "+TTM NULL-page Guard:Prevents crashes from NULL page mappings"
-        "+SCLK Range (350-2230):Widened GPU clock range for userspace governors"
-        "+KFD Flush TLB:Compute memory coherency fix"
-        "+GFX1013 Compute+Mesa:Async compute queue + FSR4 + mesh/task shaders"
-        "+GPU Telemetry+Cache:GFX clock query, GPU utilization, tunable cache"
-        "+PCON FRL Hotplug:Preserve FRL config across hotplug events"
+        "+GFX1013 Compute+Mesa:Async compute queue + FSR4 + mesh/task shaders (Mesa build included)"
+        "+GPU Telemetry+Cache:GPU clock readout, utilization, adjustable cache"
+        "+SCLK Range (350-2230):Widen GPU clock range for userspace governors"
+        "+KFD Flush TLB:Memory coherence fix for compute workloads"
+        "+TTM NULL-page Guard:Prevent crashes from NULL page mappings"
+        # --- Kernel Patches: Hardware ---
+        "+DP Audio Clock:Fix audio/video at ~82% speed via DP/HDMI"
         "+Boot 1440p120:Set preferred boot mode to 2560x1440@120 via GRUB"
+        # --- Kernel Patches: Experimental (DP/HDMI Port) ---
+        "+PCON FRL Hotplug (Exp):Preserve FRL config through hotplug events"
+        "+VRR PCON FreeSync (Exp):FreeSync fallback + HDMI VRR + LFC for PCON DP-HDMI"
+        "+VRR VTEM on TMDS (Exp):Emit VTEM for HF-VSDB VRR on TMDS links (upstream approach)"
+        "+ALLM via DP (Exp):Auto Low Latency Mode for PCON HDMI in Game Mode"
     )
+
+    # DP Spread Spectrum only needed before kernel 7.2 (upstream since then)
+    if [[ "$kver_major" -lt 7 ]] || { [[ "$kver_major" -eq 7 ]] && [[ "$kver_minor" -lt 2 ]]; }; then
+        # Insert after DP Audio Clock (index 7)
+        checklist_items+=("+DP Spread Spectrum:Cleaner audio via DP/HDMI (disable spread spectrum)")
+    fi
 
     # YCbCr 4:4:4 only on kernel 7.x
     if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+YCbCr 444 Deep Color:PCON color quality + CH7218 quirk")
+        checklist_items+=("+YCbCr 444 Deep Color (Exp):Force YCbCr 4:4:4 + 10-bit + fix colorspace via PCON CH7218")
     fi
 
-    # VRR and ALLM only on kernel <7
-    if [[ "$kver_major" -lt 7 ]]; then
-        checklist_items+=("+VRR PCON FreeSync:FreeSync fallback + HDMI VRR + LFC range")
-        checklist_items+=("+ALLM via DP:Auto Low Latency Mode for PCON HDMI Game Mode")
-    fi
-
-    pick_items "Select kernel patches to include:" "${checklist_items[@]}"
+    echo -e "  ${DIM}Groups: Performance/Graphics | Hardware | Experimental (DP/HDMI Port)${RESET}"
+    pick_items "Select patches to include:" "${checklist_items[@]}"
 
     # Map selected items to patch-driver.sh flags
     local selected_str="${PICK_SELECTED[*]}"
@@ -4025,25 +4370,27 @@ install_combined_fix() {
         do_boot_mode=1
     fi
 
-    # VRR and ALLM (kernel <7)
-    if [[ "$kver_major" -lt 7 ]]; then
-        if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
-            do_vrr=1
-            patch_flags+=(--vrr)
-        fi
-        if [[ " $selected_str " == *" ALLM via DP "* ]]; then
-            do_allm=1
-            patch_flags+=(--allm)
-        fi
+    # VRR, VRR VTEM, and ALLM
+    if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
+        do_vrr=1
+        patch_flags+=(--vrr)
+    fi
+    if [[ " $selected_str " == *" VRR VTEM on TMDS "* ]]; then
+        do_vrr_vtem=1
+        patch_flags+=(--vrr-vtem)
+    fi
+    if [[ " $selected_str " == *" ALLM via DP "* ]]; then
+        do_allm=1
+        patch_flags+=(--allm)
     fi
 
-    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_allm -eq 0 && $do_boot_mode -eq 0 ]]; then
+    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_vrr_vtem -eq 0 && $do_allm -eq 0 && $do_boot_mode -eq 0 ]]; then
         print_info "No patches selected. Nothing to do."
         return 0
     fi
 
     # Only validate build prerequisites if actual kernel/Mesa patches are selected
-    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_vrr -eq 1 || $do_vrr_vtem -eq 1 || $do_allm -eq 1 ]]; then
         validate_combined_fix_prerequisites "$do_gfx" || return 1
     fi
 
@@ -4211,6 +4558,7 @@ install_combined_fix() {
         echo ""
         echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color${RESET}"
         echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + minimum 10-bit color depth via modprobe.d.${RESET}"
+        echo -e "  ${DIM}Also forces SRGB (BT.709) colorspace to fix blown-out SDR colors in gamescope HDR mode.${RESET}"
         echo ""
         if ycbcr444_force_installed; then
             print_info "YCbCr 4:4:4 force params already enabled (modprobe.d config present)."
@@ -5849,6 +6197,11 @@ run_status() {
     if [[ "$cc_svc_state" == "active" ]]; then cc_icon="$ICON_OK"; cc_color="$GREEN"; else cc_icon="$ICON_WARN"; cc_color="$YELLOW"; fi
     echo -e "  ${CYAN}CoolerControl${RESET}     ${cc_icon} ${cc_color}${cc_svc_state}${RESET}"
 
+    local olh_svc_state olh_icon olh_color
+    olh_svc_state=$(systemctl is-active openlinkhub.service 2>/dev/null || echo "not installed")
+    if [[ "$olh_svc_state" == "active" ]]; then olh_icon="$ICON_OK"; olh_color="$GREEN"; else olh_icon="$ICON_WARN"; olh_color="$YELLOW"; fi
+    echo -e "  ${CYAN}OpenLinkHub${RESET}       ${olh_icon} ${olh_color}${olh_svc_state}${RESET}"
+
     local xbox_icon xbox_color xbox_label
     xbox_label="$(xbox_adapter_status_label)"
     case "$xbox_label" in
@@ -6021,10 +6374,10 @@ run_install_all() {
     run_install_all_step 5 14 "Installing RAM/VRAM Split" install_ram_split auto || return 1
     run_install_all_step 6 14 "Ensuring Sensor PWM Driver" ensure_sensors_pwm_installed || return 1
     run_install_all_step 7 14 "Ensuring CoolerControl Installation" ensure_coolercontrol_installed || return 1
-    run_install_all_step 8 14 "Installing Core Unlock" install_core_unlock auto || return 1
-    run_install_all_step 9 14 "Validating Core Unlock" validate_core_unlock || return 1
-    run_install_all_step 10 14 "Installing CPU Governor" run_cpu_governor || return 1
-    run_install_all_step 11 14 "Installing GPU Governor" run_gpu_governor || return 1
+    run_install_all_step 8 14 "Installing Core Unlock" install_core_unlock auto || true
+    run_install_all_step 9 14 "Validating Core Unlock" validate_core_unlock || true
+    run_install_all_step 10 14 "Installing CPU Governor" run_cpu_governor || true
+    run_install_all_step 11 14 "Installing GPU Governor" run_gpu_governor || true
     run_install_all_step 12 14 "Installing CU Live Manager" run_cu_live_manager || return 1
     run_install_all_step 13 14 "Installing Combined Fix" install_combined_fix || return 1
     run_install_all_step 14 14 "Installing AC-3 Surround" install_ac3_surround auto || return 1
@@ -6093,8 +6446,10 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
-        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + E-AC3 + HDMI with hotplug guard (MastaG v0.12) — requires WP 0.5.17"
+        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.13) — requires WP 0.5.17"
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
+        print_item "13"  "Install FSR4 Proton (MastaG)"     "Pre-built Proton + OptiScaler + FSR4 + fakenvapi — 3 variants (GE/Native/SLR)"
+        print_item "13R" "Revert FSR4 Proton"              "Remove FSR4 Proton compatibility tool"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -6124,6 +6479,8 @@ run_install_manual() {
             11R) run_revert_ac3_surround;  press_enter ;;
             12) install_dual_audio;        press_enter ;;
             12R) run_revert_dual_audio;   press_enter ;;
+            13) install_fsr4_proton;      press_enter ;;
+            13R) revert_fsr4_proton;     press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
@@ -6227,6 +6584,82 @@ run_be200_menu() {
     done
 }
 
+# ==============================================================================
+# OPENLINKHUB (Corsair iCUE LINK Hub control)
+# ==============================================================================
+
+openlinkhub_installed() {
+    systemctl list-unit-files openlinkhub.service &>/dev/null || \
+        pacman -Qq openlinkhub-git &>/dev/null
+}
+
+openlinkhub_status_label() {
+    if systemctl is-active openlinkhub.service &>/dev/null; then
+        echo "running"
+    elif openlinkhub_installed; then
+        echo "installed (not running)"
+    else
+        echo "not installed"
+    fi
+}
+
+install_openlinkhub() {
+    print_step "OLH" "Installing OpenLinkHub (Corsair iCUE LINK Hub control)"
+
+    if openlinkhub_installed; then
+        if ! confirm "OpenLinkHub is already installed. Reinstall it?"; then
+            print_info "Keeping existing installation — ensuring service is enabled..."
+            systemctl enable --now openlinkhub.service || {
+                fail_with_log "Failed to enable openlinkhub service." "OpenLinkHub — enable service"
+                return 1
+            }
+            print_success "OpenLinkHub service is enabled and running!"
+            print_info "Web UI: ${CYAN}http://localhost:27003${RESET}"
+            return 0
+        fi
+        systemctl stop openlinkhub.service 2>/dev/null || true
+        systemctl disable openlinkhub.service 2>/dev/null || true
+    fi
+
+    print_info "Installing openlinkhub-git via AUR helper..."
+    steamos_writable 'aur_install openlinkhub-git' || {
+        fail_with_log "Failed to install openlinkhub-git." "OpenLinkHub Install — aur_install"
+        return 1
+    }
+
+    print_info "Enabling and starting openlinkhub service..."
+    systemctl enable --now openlinkhub.service || {
+        fail_with_log "Failed to enable openlinkhub service." "OpenLinkHub Install — enable service"
+        return 1
+    }
+
+    print_success "OpenLinkHub installed and running!"
+    persist_state_add "openlinkhub"
+    print_info "Web UI: ${CYAN}http://localhost:27003${RESET}"
+    print_info "${YELLOW}Tip:${RESET} For Steam Gaming Mode control, install the Decky plugin 'bc250-commander-control'."
+}
+
+run_revert_openlinkhub() {
+    print_step "R-OLH" "Revert OpenLinkHub"
+
+    if ! openlinkhub_installed; then
+        print_info "OpenLinkHub does not appear to be installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "This will stop, disable, and remove OpenLinkHub. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    systemctl stop openlinkhub.service 2>/dev/null || true
+    systemctl disable openlinkhub.service 2>/dev/null || true
+    steamos_writable 'aur_remove openlinkhub-git' || true
+
+    print_success "OpenLinkHub removed successfully."
+    persist_state_remove "openlinkhub"
+}
+
 install_toolkit_steamos_control_plugin() {
     print_step "DSC" "Toolkit SteamOS Control Decky Plugin"
 
@@ -6256,6 +6689,7 @@ run_extras_menu() {
         print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
         print_item "D" "DS5 Bridge PS Button Fix"    "Install/revert patched hid-playstation.ko — DualSense PS button chord combos"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
+        print_item "O" "OpenLinkHub"                  "Install/revert Corsair iCUE LINK Hub control — status: $(openlinkhub_status_label)"
         print_item "Z" "Toolkit SteamOS Control"      "Install Decky fan profiles and LED bar controls"
         print_item "0" "Back" ""
         echo ""
@@ -6271,6 +6705,7 @@ run_extras_menu() {
             P) install_persistence;       press_enter ;;
             D) run_ds5_bridge_menu ;;
             X) run_xbox_adapter_menu ;;
+            O) install_openlinkhub;        press_enter ;;
             Z) install_toolkit_steamos_control_plugin; press_enter ;;
             0) return 0 ;;
             *)
@@ -6316,6 +6751,7 @@ reapply_installed_components() {
             aic8800_legacy_mcu1) install_aic8800_legacy_mcu1 || print_error "AIC8800 legacy-MCU1 WiFi reapply failed" ;;
             sensors)    install_sensors_pwm || print_error "Sensors PWM reapply failed" ;;
             coolercontrol) install_coolercontrol || print_error "CoolerControl reapply failed" ;;
+            openlinkhub)   install_openlinkhub || print_error "OpenLinkHub reapply failed" ;;
             xbox)       install_xbox_adapter || print_error "Xbox adapter reapply failed" ;;
             persistence) install_persistence || print_error "Persistence reapply failed" ;;
             *)          print_info "Unknown persisted component: $component" ;;
@@ -6324,7 +6760,7 @@ reapply_installed_components() {
     done < "$PERSIST_STATE_FILE"
     persist_restore_all_configs
     systemctl daemon-reload 2>/dev/null || true
-    systemctl restart bc250-smu-oc.service cyan-skillfish-governor-smu.service coolercontrold.service 2>/dev/null || true
+    systemctl restart bc250-smu-oc.service cyan-skillfish-governor-smu.service coolercontrold.service openlinkhub.service 2>/dev/null || true
     install_all_progress_clear 2>/dev/null || true
     print_success "Toolkit re-apply completed."
 }
@@ -6494,6 +6930,7 @@ run_persistence_menu() {
 
 show_menu() {
     print_banner
+    warn_legacy_kernel
     print_section "Quick Start"
     print_item  "1"  "Install All"           "Install all necessary optimizations: CPU/GPU governor, Mitigations, Swap/ZSWAP, Fixes, CU Unlock"
     print_item  "2"  "Install / Revert Manual" "Same as Install All, one component at a time"

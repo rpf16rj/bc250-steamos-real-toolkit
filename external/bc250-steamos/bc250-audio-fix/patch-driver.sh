@@ -3,7 +3,7 @@
 # SteamOS update. Run as the normal user; sudo is invoked for missing build
 # prerequisites and installation.
 #
-#   ./patch-driver.sh [--gfx1013] [--audio] [--vrr] [--allm] [--no-audio-clock] [--no-ss] [--no-telemetry] [--no-ttm] [--no-sclk] [--no-kfd] [--no-frl-hp] [--no-ycbcr444] [kernel-tree]  (default: ./valve-kernel)
+#   ./patch-driver.sh [--gfx1013] [--audio] [--vrr] [--vrr-vtem] [--allm] [--no-audio-clock] [--no-ss] [--no-telemetry] [--no-ttm] [--no-sclk] [--no-kfd] [--no-frl-hp] [--no-ycbcr444] [kernel-tree]  (default: ./valve-kernel)
 #   ./patch-driver.sh status
 #   ./patch-driver.sh uninstall
 #
@@ -11,6 +11,7 @@
 # async compute support on BC-250). When --gfx1013 is used alone, audio fix
 # patches are NOT applied. Use --gfx1013 --audio to apply both sets of patches.
 # --vrr applies the VRR PCON FreeSync patch independently.
+# --vrr-vtem applies the VRR VTEM on TMDS patch (HDMI 2.1 VTEM for HF-VSDB VRR).
 # --allm applies the ALLM-via-DP patch independently.
 # --no-audio-clock skips the DP audio clock patch (within --audio).
 # --no-ss skips the DP spread spectrum disable patch (within --audio).
@@ -26,7 +27,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 
 usage() {
     cat <<EOF
-Usage: $0 [--gfx1013] [--audio] [--vrr] [--allm] [--no-audio-clock] [--no-ss] [--no-telemetry] [--no-ttm] [--no-sclk] [--no-kfd] [--no-frl-hp] [--no-ycbcr444] [kernel-tree]
+Usage: $0 [--gfx1013] [--audio] [--vrr] [--vrr-vtem] [--allm] [--no-audio-clock] [--no-ss] [--no-telemetry] [--no-ttm] [--no-sclk] [--no-kfd] [--no-frl-hp] [--no-ycbcr444] [kernel-tree]
        $0 status
        $0 uninstall
 
@@ -157,6 +158,7 @@ flock 9
 WITH_GFX1013=()
 WITH_AUDIO=()
 WITH_VRR=()
+WITH_VRR_VTEM=()
 WITH_ALLM=()
 NO_AUDIO_CLOCK=()
 NO_SS=()
@@ -172,6 +174,7 @@ for a in "$@"; do
         --gfx1013)        WITH_GFX1013=(--gfx1013) ;;
         --audio)          WITH_AUDIO=(--audio) ;;
         --vrr)            WITH_VRR=(--vrr) ;;
+        --vrr-vtem)        WITH_VRR_VTEM=(--vrr-vtem) ;;
         --allm)           WITH_ALLM=(--allm) ;;
         --no-audio-clock) NO_AUDIO_CLOCK=(--no-audio-clock) ;;
         --no-ss)          NO_SS=(--no-ss) ;;
@@ -186,5 +189,5 @@ for a in "$@"; do
 done
 
 "$HERE/fetch-sources.sh" "${ARGS[@]}"
-"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_VRR[@]}" "${WITH_ALLM[@]}" "${NO_AUDIO_CLOCK[@]}" "${NO_SS[@]}" "${NO_TELEMETRY[@]}" "${NO_TTM[@]}" "${NO_SCLK[@]}" "${NO_KFD[@]}" "${NO_FRL_HP[@]}" "${NO_YCBCR444[@]}" "${ARGS[@]}"
+"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_VRR[@]}" "${WITH_VRR_VTEM[@]}" "${WITH_ALLM[@]}" "${NO_AUDIO_CLOCK[@]}" "${NO_SS[@]}" "${NO_TELEMETRY[@]}" "${NO_TTM[@]}" "${NO_SCLK[@]}" "${NO_KFD[@]}" "${NO_FRL_HP[@]}" "${NO_YCBCR444[@]}" "${ARGS[@]}"
 sudo "$HERE/install.sh"

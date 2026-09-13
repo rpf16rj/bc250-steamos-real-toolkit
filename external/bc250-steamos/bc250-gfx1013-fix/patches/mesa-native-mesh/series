@@ -5,7 +5,12 @@
 # 0001: Expose ACE compute queue (compatible with native mesh)
 # 0002: Native mesh V1 — MESH only, no TASK, no GFX10.3 override needed
 # 0005: FSR4 V3 deferred SDot hybrid (compatible, different radv_shader.c hunks)
+# 0006-0009: FSR4 V3+ series (combined-unroll, imageprep, resolution-variants, production defaults)
 
 0001-gfx1013-compute-queue-fix.patch
 0002-native-mesh-v1.patch
 0005-bc250-fsr4-v3-deferred-sdot.patch
+0006-bc250-fsr4-combined-unroll.patch
+0007-bc250-fsr4-imageprep-texture.patch
+0008-bc250-fsr4-resolution-variants.patch
+0009-bc250-fsr4-production-defaults.patch

@@ -1,15 +1,14 @@
--- BC-250 global native-HDMI / realtime Dolby encoder arbiter
+-- BC-250 global native-HDMI / Dolby Digital AC-3 encoder arbiter
 -- Target: WirePlumber 0.5.17
--- BC-250 policy revision: v0.12
+-- BC-250 policy revision: v0.13
 --
 -- User-visible model:
 --   * stock/native HDMI/DP sink (ACP, EDID/ELD driven)
 --   * dolby_digital_ac3: permanent virtual AC-3 5.1 frontend
---   * dolby_digital_plus: permanent virtual E-AC-3 / DD+ 5.1 frontend
 --
 -- Hardware model:
---   * native ACP, hidden A52 and hidden E-AC-3/IEC61937 backends all
---     ultimately need the one physical BC-250 HDMI PCM (hw:Generic,3)
+--   * native ACP, hidden A52 backend both ultimately need the one
+--     physical BC-250 HDMI PCM (hw:Generic,3)
 --   * they must NEVER own / wake that hardware at the same time
 --
 -- Policy model:
@@ -18,10 +17,6 @@
 --   * encoded backend creation waits until native HDMI is SUSPENDED, then
 --     waits a guard interval + PipeWire sync before taking hardware ownership
 --   * AC3 uses ALSA a52 @ 448 kbps
---   * EAC3 uses a PipeWire FIFO -> FFmpeg eac3 @ 768 kbps -> IEC61937 -> HDMI
---   * EAC3 commit/release uses PipeWire metadata permit + helper SESSION ack
---   * v0.11 helper observes permit withdrawal via persistent pw-metadata monitor
---   * rapid native/AC3/EAC3 changes are serialized; newest desired mode wins
 
 local lutils = require ("linking-utils")
 local log = Log.open_topic ("s-bc250-audio")
@@ -50,7 +45,7 @@ local LEGACY_AC3_FRONTEND = "bc250_ac3"
 local SWITCH_DELAY_MS = tonumber (cfg["switch-delay-ms"] or "1000") or 1000
 local POLL_MS = tonumber (cfg["native-poll-ms"] or "50") or 50
 local RETRY_MS = tonumber (cfg["backend-retry-ms"] or "1000") or 1000
-local ALSA_START_DELAY = tonumber (cfg["api-alsa-start-delay"] or "1536") or 1536
+local ALSA_START_DELAY = tonumber (cfg["api-alsa-start-delay"] or "1024") or 1024
 local STARTUP_SETTLE_MS = tonumber (cfg["startup-settle-ms"] or "1500") or 1500
 local NATIVE_PROBE_TIMEOUT_MS = tonumber (cfg["native-probe-timeout-ms"] or "5000") or 5000
 local EAC3_RELEASE_WARN_MS = tonumber (cfg["eac3-release-warn-ms"] or "3000") or 3000

@@ -40,6 +40,7 @@ trap restore_readonly EXIT
 sudo rm -f /etc/alsa/conf.d/61-bc250-a52.conf
 sudo rm -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
 sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
+# Remove EAC3 backend from previous v0.12 installs
 sudo rm -f /usr/local/libexec/bc250-eac3-backend
 sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
 rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/50-bc250-audio.conf" 2>/dev/null || true
@@ -73,15 +74,13 @@ restore_system "system-hdmi-ac3.conf" "/etc/alsa-card-profile/mixer/profile-sets
 restore_system "system-61-bc250-a52.conf" "/etc/alsa/conf.d/61-bc250-a52.conf"
 restore_system "system-90-bc250-audio-mode.lua" "/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua"
 restore_system "system-alsa.lua" "/usr/local/share/wireplumber/scripts/monitors/alsa.lua"
-restore_system "system-bc250-eac3-backend" "/usr/local/libexec/bc250-eac3-backend"
-restore_system "system-bc250-eac3-backend.service" "/etc/systemd/user/bc250-eac3-backend.service"
 systemctl --user daemon-reload
 
-# If the backup already contained an EAC3 service (rollback between two future
-# v0.8+ installs), restore its enable/runtime state sensibly.
-if [[ -f /etc/systemd/user/bc250-eac3-backend.service ]]; then
-  systemctl --user enable --now bc250-eac3-backend.service || true
-fi
+# Remove any leftover EAC3 backend (EAC3 was removed in v0.13)
+systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
+sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
+sudo rm -f /usr/local/libexec/bc250-eac3-backend
+systemctl --user daemon-reload
 
 systemctl --user restart pipewire pipewire-pulse wireplumber
 sleep 3

@@ -1,0 +1,183 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fish <fish@bc250-fsr4-research>
+Date: Sun, 7 Sep 2026 00:00:00 +0000
+Subject: [PATCH 8/8] radv: BC-250 FSR4 resolution-variant coverage and 8K store guard
+
+Opt-in extension of the FSR4 optimization to the shader buckets outside
+the one 0006/0007 already covered, from the 2026-09-07 research bundle.
+Both parts are off unless BC250_FSR4_RESOLUTION_VARIANTS=1.
+
+FSR4 ships separate shaders per output-resolution bucket, so the earlier
+work only ever matched the middle one; 1080p and 4K+ silently got no
+uplift because their shaders never matched an identity. This adds 24
+further shader identities covering those buckets, each tagged with
+flag bit 0x40000000 so they are ignored entirely unless the switch is on.
+
+It also adds bc250_resolution_guard_spirv(), which is a correctness fix
+rather than an optimization. The pinned INT8 8K shaders encode masked
+DWORD stores at byte 0x08000000, an address inside their own 332 MB
+scratch allocation, where a store can overwrite a live input and race a
+neighbouring invocation at clipped edges. For eight exactly identified
+bytecodes -- matched by size and FNV-1a hash, and additionally verified
+to hold an OpConstant of that value at the expected word before anything
+is written -- the constant is rewritten to redirect the store beyond any
+scratch buffer this provider supports. It can be enabled on its own with
+BC250_FSR4_RESOLUTION_GUARD=1.
+
+Both switches extend the pipeline cache key, so shaders built with and
+without them cannot be served to each other.
+
+Upstream notes the 4K+ bucket previously failed to show an uplift and is
+curious whether this multi-bucket logic changes that; that is unverified
+here. Not measured by us on real hardware.
+
+Origin: bc250-fsr4-discord-20260907 bundle,
+upgrade-from-previous/0003-resolution-over-composed.patch
+---
+diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
+index a44040db306..bc771465780 100644
+--- a/src/amd/vulkan/radv_physical_device.c
++++ b/src/amd/vulkan/radv_physical_device.c
+@@ -375,7 +375,19 @@ radv_device_get_cache_uuid(struct radv_physical_device *pdev, void *uuid)
+    unsigned bc250_imageprep_mode = debug_get_num_option("BC250_FSR4_IMAGEPREP", 0);
+    _mesa_blake3_update(&ctx, bc250_imageprep_version, strlen(bc250_imageprep_version));
+    _mesa_blake3_update(&ctx, &bc250_imageprep_mode, sizeof(bc250_imageprep_mode));
++   if (debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", false)) {
++      const char *lowres_version = "bc250-fsr4-resolution-families-24-v2-safe-mask";
++      _mesa_blake3_update(&ctx, lowres_version, strlen(lowres_version));
++   }
++
++
+ 
++
++   if (debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", false) ||
++       debug_get_bool_option("BC250_FSR4_RESOLUTION_GUARD", false)) {
++      const char *guard_version = "bc250-fsr4-8k-masked-store-guard-v1";
++      _mesa_blake3_update(&ctx, guard_version, strlen(guard_version));
++   }
+    _mesa_blake3_final(&ctx, blake3);
+ 
+    memcpy(uuid, blake3, VK_UUID_SIZE);
+diff --git a/src/amd/vulkan/radv_shader.c b/src/amd/vulkan/radv_shader.c
+index 07c1e23d41d..1d25099994f 100644
+--- a/src/amd/vulkan/radv_shader.c
++++ b/src/amd/vulkan/radv_shader.c
+@@ -8519,6 +8519,30 @@ bc250_fsr4_profile(const void *bytes, size_t size)
+       {61308, 0x8debe292dfad97f5ull, 1025}, /* f768eb37222b4fbd */
+       {109064, 0xf89485f5751695fbull, 25}, /* 76367260ae8284e1 */
+       {125784, 0x60169c44f557ae55ull, 1}, /* 88fc1786caa6ae3c */
++      {108840, 0xe08bd79de2f756a0ull, 1073741841u}, /* resolution variant: e0d8ce49e87ed7c3 */
++      {108840, 0xfdf595207adeaa9bull, 1073741841u}, /* resolution variant: 1b5366424fd62c4b */
++      {109048, 0xd81b6ef4185b351aull, 1073741851u}, /* resolution variant: e7c288d8ff89d888 */
++      {109048, 0xc34ca544b0bfa394ull, 1073741851u}, /* resolution variant: cb88eec183418365 */
++      {132572, 0x17366050121266bfull, 1073741953u}, /* resolution variant: 2b94cdfc6f11de60 */
++      {132572, 0x5b586b8e4990f8b2ull, 1073741953u}, /* resolution variant: f2135595b24a4520 */
++      {190032, 0x0eeda02cdfb36240ull, 1073741851u}, /* resolution variant: fdfc534367db7623 */
++      {190032, 0x3d148c8bbfb1675full, 1073741851u}, /* resolution variant: 7b5321a3d5ca0065 */
++      {190032, 0x3d60ed7027853e30ull, 1073741851u}, /* resolution variant: f7ea511744202f66 */
++      {190032, 0xca6a3312a0229b59ull, 1073741851u}, /* resolution variant: dff9e56040c7e96e */
++      {497604, 0x26cbb989aea930afull, 1073741953u}, /* resolution variant: b6a81d50ce41c20f */
++      {497620, 0xd3477037b5e6da33ull, 1073741953u}, /* resolution variant: bfc85615aef8f504 */
++      {79128, 0xcad89aa70bc6e1dcull, 1073807363u}, /* resolution variant: 83fc83db145b9eab */
++      {79128, 0x9fedd3081a01a0e1ull, 1073807363u}, /* resolution variant: cfa3ce97a03a1ee4 */
++      {79128, 0xdba10d5fa7e1ace6ull, 1073872899u}, /* resolution variant: 0cf0c70309ac947e */
++      {79128, 0x615a6513d549ceb4ull, 1073872899u}, /* resolution variant: 8d6a9c38f670428e */
++      {84476, 0xf8f5e0c39882018dull, 1074003971u}, /* resolution variant: fe94e2a85ab8086b */
++      {84476, 0xa1a83a915f310257ull, 1074003971u}, /* resolution variant: c0a1391e903746f4 */
++      {189952, 0xf108205d5153be22ull, 1073741851u}, /* resolution variant: 9c405b28b4266d13 */
++      {189952, 0x774fa9d9112b1629ull, 1073741851u}, /* resolution variant: 65d51e63f9cec64a */
++      {61308, 0xa58611dd60ff0c38ull, 1073742849u}, /* resolution variant: 9f8f2d65fd1e19de */
++      {61308, 0x8a0b34b8c5748a8dull, 1073742849u}, /* resolution variant: 3b1bdd031f5893d4 */
++      {109064, 0x15e3ba372ccc5433ull, 1073741849u}, /* resolution variant: c620021443a811fc */
++      {109064, 0x68c8a5b342ff058full, 1073741849u}, /* resolution variant: b4e989434eb54e49 */
+    };
+    bool candidate = false;
+    for (unsigned i = 0; i < ARRAY_SIZE(profiles); i++) candidate |= profiles[i].size == size;
+@@ -8528,6 +8552,10 @@ bc250_fsr4_profile(const void *bytes, size_t size)
+    for (unsigned i = 0; i < ARRAY_SIZE(profiles); i++)
+       if (profiles[i].size == size && profiles[i].hash == hash) {
+          unsigned flags = profiles[i].flags;
++         if (flags & 0x40000000u) {
++            if (!debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", false)) return 0;
++            flags &= ~0x40000000u;
++         }
+          if (size == 125784 && hash == 0x60169c44f557ae55ull &&
+              debug_get_num_option("BC250_FSR4_TEXTURE", 0) == 1)
+             flags |= 524304; /* Existing pointwise schedule, eight outputs. */
+@@ -15005,6 +15033,57 @@ bc250_imageprep_spirv(const struct radv_compiler_info *compiler_info,
+    return bc250_imageprep_candidate;
+ }
+ 
++/* The pinned INT8 8K shaders encode masked DWORD stores at byte 0x08000000.
++ * That address lies inside their 332352256-byte scratch allocation. It can
++ * overwrite a live input and race a neighboring invocation at clipped edges.
++ * These exact eight bytecodes use the audited constant only in masked-store
++ * addresses. Redirect it beyond every scratch buffer supported by this provider.
++ * Keep the original stage identity for the separately validated arithmetic pass.
++ */
++static bool
++bc250_resolution_guard_spirv(const struct radv_compiler_info *compiler_info,
++                            const struct radv_shader_stage *stage, bool is_internal,
++                            const uint32_t *spirv, size_t size, uint32_t **patched)
++{
++   *patched = NULL;
++   if (is_internal || compiler_info->debug.family != CHIP_GFX1013 ||
++       stage->stage != MESA_SHADER_COMPUTE || !stage->entrypoint ||
++       strcmp(stage->entrypoint, "main") ||
++       (stage->spec_info && stage->spec_info->mapEntryCount) ||
++       spirv != (const uint32_t *)stage->spirv.data ||
++       (!debug_get_bool_option("BC250_FSR4_RESOLUTION_VARIANTS", false) &&
++        !debug_get_bool_option("BC250_FSR4_RESOLUTION_GUARD", false)))
++      return true;
++   static const struct { size_t size; uint64_t hash; unsigned word; } guards[] = {
++      {108840, 0xfdf595207adeaa9bull, 3993u}, /* pass 1 */
++      {109048, 0xc34ca544b0bfa394ull, 4005u}, /* pass 2 */
++      {190032, 0x3d148c8bbfb1675full, 7293u}, /* pass 4 */
++      {190032, 0xca6a3312a0229b59ull, 7293u}, /* pass 5 */
++      {84476, 0xa1a83a915f310257ull, 811u}, /* pass 9 */
++      {189952, 0x774fa9d9112b1629ull, 7289u}, /* pass 10 */
++      {61308, 0x8a0b34b8c5748a8dull, 719u}, /* pass 11 */
++      {109064, 0x68c8a5b342ff058full, 4009u}, /* pass 12 */
++   };
++   bool candidate = false;
++   for (unsigned i = 0; i < ARRAY_SIZE(guards); i++) candidate |= guards[i].size == size;
++   if (!candidate) return true;
++   uint64_t hash = 14695981039346656037ull;
++   for (size_t i = 0; i < size; i++) hash = (hash ^ ((const uint8_t *)spirv)[i]) * 1099511628211ull;
++   for (unsigned i = 0; i < ARRAY_SIZE(guards); i++) {
++      if (guards[i].size != size || guards[i].hash != hash) continue;
++      const unsigned word = guards[i].word;
++      if (word < 3 || word >= size / 4 || spirv[word - 3] != 0x0004002bu ||
++          spirv[word] != 0x08000000u)
++         return true;
++      *patched = malloc(size);
++      if (!*patched) return false;
++      memcpy(*patched, spirv, size);
++      (*patched)[word] = 0xfffffffcu;
++      return true;
++   }
++   return true;
++}
++
+ nir_shader *
+ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct radv_shader_stage *stage,
+                          const struct radv_spirv_to_nir_options *options, bool is_internal)
+@@ -15028,6 +15107,10 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
+    } else {
+       size_t spirv_size;
+       const uint32_t *spirv = bc250_imageprep_spirv(compiler_info, stage, is_internal, &spirv_size);
++      uint32_t *guarded_spirv = NULL;
++      if (!bc250_resolution_guard_spirv(compiler_info, stage, is_internal, spirv, spirv_size, &guarded_spirv))
++         return NULL;
++      if (guarded_spirv) spirv = guarded_spirv;
+       assert(stage->spirv.size % 4 == 0);
+ 
+       const bool dump_spirv = compiler_info->debug.dump_spirv &&
+@@ -15190,6 +15273,7 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
+       NIR_PASS(_, nir, nir_lower_doubles, NULL, nir->options->lower_doubles_options);
+ 
+       NIR_PASS(_, nir, nir_normalize_sin_cos);
++      free(guarded_spirv);
+    }
+ 
+    if (nir->info.uses_abort) {

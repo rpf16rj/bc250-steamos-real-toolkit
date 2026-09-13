@@ -1,7 +1,7 @@
 # Mesa patch series for GFX1013 (BC-250), applied in order against
 # pristine mesa-26.2.2 with `git apply` / `patch -p1`.
 #
-# All 5 patches from MastaG/linux-cachyos-bc250 (Sep 2026), rebased
+# Patches 0001-0005 from MastaG/linux-cachyos-bc250 (Sep 2026), rebased
 # for Mesa 26.2.2 stable.
 #
 # 0001: Expose ACE compute queue + async compute threadgroup workaround.
@@ -14,6 +14,10 @@
 #       deferred lowering round. Always active.
 #       (stripped: ac_gpu_info.c and radv_physical_device.c changes are
 #       already in 0001 and 0004 respectively)
+# 0006: FSR4 combined-unroll selection (2.84) — NIR pattern matching.
+# 0007: FSR4 image-preparation and texture candidates.
+# 0008: FSR4 resolution-variant coverage and 8K store guard.
+# 0009: FSR4 production defaults — enables all FSR4 optimizations.
 #
 # Alternative: patches/mesa-native-mesh/series uses lonewolf0622's native
 # mesh approach (MESH only, no TASK, no GFX10.3 spoof needed).
@@ -22,3 +26,7 @@
 0003-gfx1013-taskmesh-queries.patch
 0004-radv-gfx103.patch
 0005-bc250-fsr4-v3.patch
+0006-bc250-fsr4-combined-unroll.patch
+0007-bc250-fsr4-imageprep-texture.patch
+0008-bc250-fsr4-resolution-variants.patch
+0009-bc250-fsr4-production-defaults.patch

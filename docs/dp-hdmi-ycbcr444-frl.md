@@ -23,6 +23,11 @@ The toolkit patches enable:
    malformed downstream port topology.
 4. **`dp_hdmi21_pcon_support`** on DCN201 — the stock kernel omits this
    capability flag for Van Gogh, preventing FRL capability parsing.
+5. **SDR colorspace fix** — `force_colorspace=1` forces SRGB (BT.709) output
+   regardless of what gamescope sets on the connector. When HDR is enabled in
+   Steam, gamescope sets `BT2020_RGB` on the DRM connector, causing SDR content
+   (Steam UI, game store images, in-game videos) to appear oversaturated because
+   the display interprets BT.709 pixels as BT.2020. This override fixes that.
 
 ## How to Enable
 
@@ -36,7 +41,7 @@ YCbCr 4:4:4 deep color prompt. This creates:
 with contents:
 
 ```
-options amdgpu force_ycbcr444=1 force_min_bpc=10 dcfeaturemask=0x402
+options amdgpu force_ycbcr444=1 force_min_bpc=10 force_colorspace=1 dcfeaturemask=0x402
 ```
 
 The initramfs is rebuilt automatically. Reboot to apply.
@@ -47,6 +52,7 @@ The initramfs is rebuilt automatically. Reboot to apply.
 |-----------|---------|-------------|
 | `force_ycbcr444` | 0 (off) | Force YCbCr 4:4:4 pixel encoding on DP-HDMI PCON outputs |
 | `force_min_bpc` | 0 (auto) | Minimum bits per color (0=auto, 8/10/12=floor). Prevents silent 8-bit fallback. |
+| `force_colorspace` | 0 (off) | Force output colorspace: 0=auto, 1=SRGB/BT.709 (fixes SDR in gamescope HDR), 2=BT2020 (HDR). |
 | `dcfeaturemask` | 0x2 | DC feature mask. 0x402 adds DC_FRL_MASK (bit 10) for HDMI 2.1 FRL. |
 
 ### Requirements

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Enable the BC-250's two disabled CPU cores. 6c/12t -> 8c/16t.
 
-Writes the core presence mask (SMN 0x0115A870) from 0x77 to 0xFF using queue 3 message
+Writes the core presence mask (SMN 0x0115A870) to 0xFF using queue 3 message
 0x98, an ungated SMU-privileged SMN write. Takes effect on the next reboot: AGESA then
 enumerates 8 cores and the PSP releases all of them.
+
+Supports any starting mask (standard 0x77 or non-standard like 0xB7).
+The SMU write sets all 8 bits regardless of the initial mask value.
 
   sudo systemctl stop cyan-skillfish-governor-smu
   sudo ./bc250-unlock-cores.py
@@ -69,7 +72,7 @@ try:
         print("already 0xFF - reboot to pick up all 8 cores")
         raise SystemExit(0)
     if before & 0xFF != 0x77:
-        sys.exit("unexpected mask 0x%02X, expected 0x77 - aborting" % (before & 0xFF))
+        print("WARNING: non-standard mask 0x%02X (expected 0x77) - proceeding anyway" % (before & 0xFF))
 
     st = send(MSG_WRITE_FF, MASK_REG)
     if st != 0x01:

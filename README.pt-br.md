@@ -50,6 +50,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 - **Monitoramento de sensores e fans** — com controle total de PWM opcional
 - **Integração com CoolerControl** — curvas de fan personalizadas via interface web
+- **Suporte OpenLinkHub** — controle opcional do Corsair iCUE LINK Hub (RGB, fans, AIO) via interface web
 - **Plugin Decky pré-compilado** — Toolkit SteamOS Control com controles de Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
 - **CU/WGP Live Manager** — habilitar/desabilitar CU/WGP em tempo real sem reiniciar
 
