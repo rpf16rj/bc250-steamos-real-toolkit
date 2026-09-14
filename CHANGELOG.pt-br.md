@@ -7,6 +7,28 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.9.1 — 2026-09-13
+
+- **Adicionado:** Variante `proton-cachyos-slr-bc250` (CachyOS em Steam Linux
+  Runtime) para jogos com anti-cheat (EAC/BattlEye) — opção 3 no menu FSR4
+  Proton.
+- **Adicionado:** Plugin Decky "BC-250 FSR4 Launch Options" — painel no Quick
+  Access Menu com cópia em um toque das launch options de FSR4/OptiScaler.
+  Opção 4 no menu FSR4 Proton (menu 13).
+- **Adicionado:** `PROTON_OPTISCALER_NAME` e `BC250_OPTISCALER_EXTRA`
+  documentados no prompt pós-instalação (spoof de DLSS/Reflex via
+  `Spoofing.Dxgi=true`).
+- **Corrigido:** Compilação do driver WiFi AIC8800 no kernel 7.2 — atualizadas
+  9 assinaturas de cfg80211_ops (`net_device*` → `wireless_dev*`), corrigido
+  acesso a union anônima do `ieee80211_mgmt` no TDLS, `strncpy` substituído
+  por `memcpy`, corrigidos warnings `-Wrestrict` nos arquivos platform/compat.
+- **Alterado:** Upscaler FSR4 padrão agora é `fsr411f` RC9 (sem necessidade de
+  `PROTON_USE_OPTISCALER` explícito); opção `signed` usa o build FSR4 assinado
+  da AMD.
+- **Alterado:** Patches de audio reorganizados — removidos patches obsoletos de
+  VRR/ALLM/YCbCr, adicionados `bc250-dcn201-dsc-enable` e
+  `bc250-dcn201-pcon-hdmi21`.
+
 ## v1.9.0 — 2026-09-12
 
 - **Adicionado:** FSR4 Proton instalar/reverter (menu 13/13R) — baixa o

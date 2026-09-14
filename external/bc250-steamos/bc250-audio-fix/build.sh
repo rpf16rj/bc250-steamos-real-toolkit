@@ -17,8 +17,6 @@
 # bc250-gfx1013-fix): repairs compute queue lifecycle on BC-250 for async
 # compute support on BC-250. When --gfx1013 is used alone, audio fix
 # patches are NOT applied. Use --gfx1013 --audio to apply both sets of patches.
-# --vrr applies the VRR PCON FreeSync fallback + range extending patch.
-# --allm applies the ALLM-via-DP patch (HF-VSIF for DP-to-HDMI PCON).
 #
 # Run on the BC-250 itself, as the normal user: the running kernel's
 # /proc/config.gz and `uname -r` are the ground truth everything is checked
@@ -52,17 +50,13 @@ relax_libbpf_host_tool_werror() {
 
 WITH_GFX1013=0
 WITH_AUDIO=0
-WITH_VRR=0
-WITH_VRR_VTEM=0
-WITH_ALLM=0
-NO_AUDIO_CLOCK=0
+WITH_DSC=0
+WITH_DSC_PCON=0
 NO_SS=0
 NO_TELEMETRY=0
 NO_TTM=0
 NO_SCLK=0
 NO_KFD=0
-NO_FRL_HP=0
-NO_YCBCR444=0
 PREPARE_ONLY=0
 ALLOW_MISSING_SYMVERS=0
 ARGS=()
@@ -70,17 +64,13 @@ for a in "$@"; do
     case "$a" in
         --gfx1013)        WITH_GFX1013=1 ;;
         --audio)          WITH_AUDIO=1 ;;
-        --vrr)            WITH_VRR=1 ;;
-        --vrr-vtem)        WITH_VRR_VTEM=1 ;;
-        --allm)           WITH_ALLM=1 ;;
-        --no-audio-clock) NO_AUDIO_CLOCK=1 ;;
+        --dsc)            WITH_DSC=1 ;;
+        --dsc-pcon)       WITH_DSC_PCON=1 ;;
         --no-ss)          NO_SS=1 ;;
         --no-telemetry)   NO_TELEMETRY=1 ;;
         --no-ttm)         NO_TTM=1 ;;
         --no-sclk)        NO_SCLK=1 ;;
         --no-kfd)         NO_KFD=1 ;;
-        --no-frl-hp)      NO_FRL_HP=1 ;;
-        --no-ycbcr444)    NO_YCBCR444=1 ;;
         --prepare-only)   PREPARE_ONLY=1 ;;
         --allow-missing-symvers) ALLOW_MISSING_SYMVERS=1 ;;
         *)                ARGS+=("$a") ;;
@@ -333,42 +323,6 @@ git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/display/dc/link/link_validation.c
 
 if [ "$WITH_AUDIO" = 1 ]; then
-    if [ "$NO_AUDIO_CLOCK" = 1 ]; then
-        step "skipping DP-audio clock patch (--no-audio-clock requested)"
-        # Reverse if leftover from a previous build
-        case "$BASE" in
-            6.16.*) PATCH=$HERE/bc250-dp-audio-clock-6.16.patch ;;
-            6.18.*) PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
-            7.2.*)  PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
-            *)      PATCH= ;;
-        esac
-        if [ -n "$PATCH" ] && patch -p1 -R --dry-run --fuzz=3 -s -f < "$PATCH" >/dev/null 2>&1; then
-            patch -p1 -R --fuzz=3 -s < "$PATCH"
-            echo "DP-audio clock patch REVERSED (leftover from a previous build)"
-        fi
-    else
-        step "apply DP-audio patch (runbook step 7)"
-        # SteamOS 3.8.x (6.16) needs both hunks; 3.9.x (6.18) already carries the
-        # clk_mgr DCN 2.01 reorder upstream, leaving only the dcn201
-        # spread-spectrum-state hunk. New kernel major: check which hunks are upstream
-        # before adding a variant here.
-        case "$BASE" in
-            6.16.*) PATCH=$HERE/bc250-dp-audio-clock-6.16.patch ;;
-            6.18.*) PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;
-            7.2.*)  PATCH=$HERE/bc250-dp-audio-clock-6.18.patch ;;  # same hunk applies to 7.2
-            *)      die "no DP-audio patch variant for kernel $BASE — check which hunks are already upstream, then add a case above" ;;
-        esac
-        echo "kernel $BASE -> $(basename "$PATCH")"
-        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PATCH" >/dev/null 2>&1; then
-            echo "patch already applied"
-        elif patch -p1 --dry-run --fuzz=3 -s -f < "$PATCH" >/dev/null 2>&1; then
-            patch -p1 --fuzz=3 -s < "$PATCH"
-            echo "patch applied"
-        else
-            die "patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-        fi
-    fi
-
     if [ "$NO_TELEMETRY" = 1 ]; then
         step "skipping Cyan Skillfish telemetry+cache patch (--no-telemetry requested)"
         case "$BASE" in
@@ -428,46 +382,6 @@ if [ "$WITH_AUDIO" = 1 ]; then
 
 fi
 
-if [ "$WITH_VRR" = 1 ]; then
-    step "apply VRR PCON FreeSync fallback + range extending patch (amdgpu_dm)"
-    VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
-        echo "VRR PCON FreeSync patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$VRR_PATCH"
-        echo "VRR PCON FreeSync patch applied"
-    else
-        die "VRR PCON FreeSync patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-    fi
-else
-    step "skipping VRR PCON FreeSync patch (not requested)"
-    VRR_PATCH=$HERE/bc250-vrr-pcon-freesync.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VRR_PATCH" >/dev/null 2>&1; then
-        patch -p1 -R --fuzz=3 -s < "$VRR_PATCH"
-        echo "VRR PCON FreeSync patch REVERSED (leftover from a previous build)"
-    fi
-fi
-
-if [ "$WITH_VRR_VTEM" = 1 ]; then
-    step "apply VRR VTEM on TMDS patch (amdgpu_dm_freesync)"
-    VTEM_PATCH=$HERE/bc250-vrr-vtem-on-tmds.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VTEM_PATCH" >/dev/null 2>&1; then
-        echo "VRR VTEM on TMDS patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$VTEM_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$VTEM_PATCH"
-        echo "VRR VTEM on TMDS patch applied"
-    else
-        echo "VRR VTEM on TMDS patch does not apply (may already be upstream) — skipping"
-    fi
-else
-    step "skipping VRR VTEM on TMDS patch (not requested)"
-    VTEM_PATCH=$HERE/bc250-vrr-vtem-on-tmds.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VTEM_PATCH" >/dev/null 2>&1; then
-        patch -p1 -R --fuzz=3 -s < "$VTEM_PATCH"
-        echo "VRR VTEM on TMDS patch REVERSED (leftover from a previous build)"
-    fi
-fi
-
 if [ "$WITH_AUDIO" = 0 ]; then
     step "skipping audio fix patches (--audio not requested)"
 fi
@@ -502,46 +416,6 @@ else
             echo "$(basename "$p") REVERSED (leftover from a previous --gfx1013 build)"
         fi
     done
-fi
-
-if [ "$WITH_ALLM" = 1 ]; then
-    step "apply ALLM-via-DP patch (HF-VSIF for DP-to-HDMI PCON)"
-    ALLM_PATCH=$HERE/bc250-allm-via-dp.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
-        echo "ALLM-via-DP patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$ALLM_PATCH"
-        echo "ALLM-via-DP patch applied"
-    else
-        die "ALLM-via-DP patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-    fi
-else
-    step "skipping ALLM-via-DP patch (not requested)"
-    ALLM_PATCH=$HERE/bc250-allm-via-dp.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_PATCH" >/dev/null 2>&1; then
-        patch -p1 -R --fuzz=3 -s < "$ALLM_PATCH"
-        echo "ALLM-via-DP patch REVERSED (leftover from a previous build)"
-    fi
-fi
-
-if [ "$NO_FRL_HP" = 1 ]; then
-    step "skipping PCON FRL hotplug preserve patch (--no-frl-hp requested)"
-    FRL_HP_PATCH=$HERE/bc250-pcon-frl-hotplug-preserve.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
-        patch -p1 -R --fuzz=3 -s < "$FRL_HP_PATCH"
-        echo "PCON FRL hotplug preserve patch REVERSED (leftover from a previous build)"
-    fi
-else
-    step "apply PCON FRL hotplug preserve patch (link_detection)"
-    FRL_HP_PATCH=$HERE/bc250-pcon-frl-hotplug-preserve.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
-        echo "PCON FRL hotplug preserve patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$FRL_HP_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$FRL_HP_PATCH"
-        echo "PCON FRL hotplug preserve patch applied"
-    else
-        die "PCON FRL hotplug preserve patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-    fi
 fi
 
 if [ "$NO_TTM" = 1 ]; then
@@ -604,53 +478,44 @@ else
     fi
 fi
 
-if [ "$NO_YCBCR444" = 1 ]; then
-    step "skipping DP-HDMI YCbCr 4:4:4 deep color patch (--no-ycbcr444 requested)"
-    YCBCR444_PATCH=$HERE/bc250-dp-hdmi-ycbcr444-deep-color.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
-        patch -p1 -R --fuzz=3 -s < "$YCBCR444_PATCH"
-        echo "YCbCr 4:4:4 deep color patch REVERSED (leftover from a previous build)"
+# DSC PCON HDMI 2.1 must be applied BEFORE DSC enable (order matters for clean apply)
+if [ "$WITH_DSC_PCON" = 1 ]; then
+    step "apply DCN201 PCON HDMI 2.1 patch (dp_hdmi21_pcon_support)"
+    PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
+        echo "DCN201 PCON HDMI 2.1 patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$PCON_PATCH"
+        echo "DCN201 PCON HDMI 2.1 patch applied"
+    else
+        die "DCN201 PCON HDMI 2.1 patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 else
-    step "apply DP-HDMI YCbCr 4:4:4 deep color patch (PCON color quality)"
-    YCBCR444_PATCH=$HERE/bc250-dp-hdmi-ycbcr444-deep-color.patch
-    YCBCR444_MAJOR=$(echo "$BASE" | cut -d. -f1)
-    if [ "$YCBCR444_MAJOR" -lt 7 ]; then
-        echo "skipping YCbCr 4:4:4 deep color patch (requires kernel 7.x; running $BASE)"
-        # Reverse if leftover from a previous build on a different kernel
-        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
-            patch -p1 -R --fuzz=3 -s < "$YCBCR444_PATCH"
-            echo "YCbCr 4:4:4 deep color patch REVERSED (leftover from a previous build)"
-        fi
-    else
-        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
-            echo "DP-HDMI YCbCr 4:4:4 deep color patch already applied"
-        elif patch -p1 --dry-run --fuzz=3 -s -f < "$YCBCR444_PATCH" >/dev/null 2>&1; then
-            patch -p1 --fuzz=3 -s < "$YCBCR444_PATCH"
-            echo "DP-HDMI YCbCr 4:4:4 deep color patch applied"
-        else
-            die "DP-HDMI YCbCr 4:4:4 deep color patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
-        fi
+    step "skipping DCN201 PCON HDMI 2.1 patch (not requested)"
+    PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$PCON_PATCH"
+        echo "DCN201 PCON HDMI 2.1 patch REVERSED (leftover from a previous build)"
     fi
 fi
 
-if [ "$WITH_ALLM" = 1 ]; then
-    step "apply ALLM DP-connector patch (attach allm properties to DP connectors)"
-    ALLM_DP_PATCH=$HERE/bc250-allm-dp-connector.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_DP_PATCH" >/dev/null 2>&1; then
-        echo "ALLM DP-connector patch already applied"
-    elif patch -p1 --dry-run --fuzz=3 -s -f < "$ALLM_DP_PATCH" >/dev/null 2>&1; then
-        patch -p1 --fuzz=3 -s < "$ALLM_DP_PATCH"
-        echo "ALLM DP-connector patch applied"
+if [ "$WITH_DSC" = 1 ]; then
+    step "apply DCN201 DSC enable patch (DCN200-compatible DSC engines)"
+    DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
+        echo "DCN201 DSC enable patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$DSC_PATCH"
+        echo "DCN201 DSC enable patch applied"
     else
-        echo "ALLM DP-connector patch does not apply (may already be upstream) — skipping"
+        die "DCN201 DSC enable patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 else
-    step "skipping ALLM DP-connector patch (not requested)"
-    ALLM_DP_PATCH=$HERE/bc250-allm-dp-connector.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$ALLM_DP_PATCH" >/dev/null 2>&1; then
-        patch -p1 -R --fuzz=3 -s < "$ALLM_DP_PATCH"
-        echo "ALLM DP-connector patch REVERSED (leftover from a previous build)"
+    step "skipping DCN201 DSC enable patch (not requested)"
+    DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$DSC_PATCH"
+        echo "DCN201 DSC enable patch REVERSED (leftover from a previous build)"
     fi
 fi
 

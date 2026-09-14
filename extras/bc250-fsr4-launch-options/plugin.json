@@ -1,0 +1,10 @@
+{
+  "name": "BC-250 FSR4 Launch Options",
+  "author": "rpf16rj",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "fsr4", "proton", "bc250"],
+    "description": "Copy FSR4 and OptiScaler launch options for BC-250 Proton variants."
+  }
+}
