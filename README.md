@@ -31,7 +31,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 ### Display & Audio
 
-- **DP-HDMI YCbCr 4:4:4 Deep Color + HDMI 2.1 FRL** — forces YCbCr 4:4:4 with 10/12-bit deep color on DP-to-HDMI PCON dongles (e.g. Ugreen CH7218). Enables HDMI 2.1 FRL at 48 Gbps for **1440p@120 12-bit** and **4K@60 12-bit**. See [docs/dp-hdmi-ycbcr444-frl.md](./docs/dp-hdmi-ycbcr444-frl.md) for bandwidth tables.
+- **DCN201 DSC + HDMI 2.1 PCON** — enables Display Stream Compression (DSC) on the BC-250's DCN 2.0.1 display core by wiring DCN200-compatible DSC engines, and advertises HDMI 2.1 FRL PCON support for DP-to-HDMI bridges (e.g. Ugreen CH7218). Replaces the previous YCbCr 4:4:4 / VRR / ALLM / FRL hot-plug patches, which are no longer needed. Based on the DCN/DSC register investigation by [alex-reid](https://gist.github.com/alex-reid/b55328c246ade7baef8566fb2cadea9b).
 - **DisplayPort audio/video clock fix** — corrects DP audio/video timing and disables DP spread spectrum
 - **HDMI AC-3 Surround Encoding** — Dolby Digital 5.1 over HDMI/DP via eARC, zero-latency native a52 encoding
 - **HDMI-CEC / TV control** — control your TV or receiver via HDMI-CEC

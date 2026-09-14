@@ -25,9 +25,11 @@ before the toolkit adopted numbered releases.
 - **Changed:** Default FSR4 upscaler is now `fsr411f` RC9 (no explicit
   `PROTON_USE_OPTISCALER` needed); `signed` option uses AMD's signed FSR4
   build.
-- **Changed:** Audio-fix patches reorganized — removed obsolete VRR/ALLM/
-  YCbCr patches, added `bc250-dcn201-dsc-enable` and
-  `bc250-dcn201-pcon-hdmi21` patches.
+- **Changed:** Audio-fix patches reorganized — removed obsolete YCbCr 4:4:4,
+  VRR, ALLM, FRL hot-plug, and DP audio clock patches (no longer needed
+  since DSC + PCON HDMI 2.1 patches supersede them). Added
+  `bc250-dcn201-dsc-enable` and `bc250-dcn201-pcon-hdmi21` patches based on
+  the DCN/DSC register investigation by [alex-reid](https://gist.github.com/alex-reid/b55328c246ade7baef8566fb2cadea9b).
 
 ## v1.9.0 — 2026-09-12
 
