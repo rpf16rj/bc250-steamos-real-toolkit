@@ -21,6 +21,7 @@
 #include "rwnx_main.h"
 #include "aicwf_txrxif.h"
 #include "rwnx_strs.h"
+#include <linux/string.h>
 
 #ifdef RF_WRITE_FILE
 #include <linux/fs.h>
@@ -4849,7 +4850,7 @@ int rwnx_send_dbg_trigger_req(struct rwnx_hw *rwnx_hw, char *msg)
         return -ENOMEM;
 
     /* Set parameters for the MM_DBG_TRIGGER_REQ message */
-    strncpy(req->error, msg, sizeof(req->error));
+    memcpy(req->error, msg, min_t(size_t, strlen(msg), sizeof(req->error) - 1));
 
     /* Send the MM_DBG_TRIGGER_REQ message to LMAC FW */
     return rwnx_send_msg(rwnx_hw, req, 0, -1, NULL);

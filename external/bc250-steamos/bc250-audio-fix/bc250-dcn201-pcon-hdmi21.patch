@@ -1,0 +1,25 @@
+From: BC-250 SteamOS Real Toolkit
+Subject: [PATCH] dcn201: enable DP-HDMI 2.1 PCON support
+
+Set dc->caps.dp_hdmi21_pcon_support = true to allow DCN201 to negotiate
+HDMI 2.1 FRL through a DP-to-HDMI PCON bridge chip (e.g. CH7218).
+
+This is separate from DSC enable — it only advertises the PCON HDMI 2.1
+capability to the display core. DSC must be enabled separately for
+modes that require compression (e.g. 4K120).
+
+Based on investigation by alex-reid:
+https://gist.github.com/alex-reid/b55328c246ade7baef8566fb2cadea9b
+
+--- a/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c
++++ b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c
+@@ -1326,6 +1326,8 @@
+ 	dc->caps.max_odm_combine_factor = 2;
+ 
+ 	dc->cap_funcs = cap_funcs;
+ 
++	dc->caps.dp_hdmi21_pcon_support = true;
++
+ 	return true;
+ 
+ create_fail:

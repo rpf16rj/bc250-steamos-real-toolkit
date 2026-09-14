@@ -2584,34 +2584,8 @@ audio_fix_ensure_mkinitcpio_preset() {
     fi
 }
 
-audio_fix_pcon_grub_installed() {
-    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.freesync_pcon_allow_all=1' "$GRUB_DEFAULT" >/dev/null 2>&1
-}
-
 audio_fix_hpd_debounce_grub_installed() {
     [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.hdmi_hpd_debounce_delay_ms=1500' "$GRUB_DEFAULT" >/dev/null 2>&1
-}
-
-audio_fix_ensure_pcon_grub_param() {
-    if audio_fix_pcon_grub_installed; then
-        return 0
-    fi
-    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
-        print_info "Could not add amdgpu.freesync_pcon_allow_all=1 to GRUB (missing $GRUB_DEFAULT or update-grub)."
-        print_info "Add it manually for VRR over PCON: edit $GRUB_DEFAULT and run sudo update-grub."
-        return 0
-    fi
-    steamos_writable "
-        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
-        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.freesync_pcon_allow_all=1'; then
-            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.freesync_pcon_allow_all=1\"/' \"$GRUB_DEFAULT\"
-        fi
-        update-grub
-    " || {
-        print_info "Failed to add amdgpu.freesync_pcon_allow_all=1 to GRUB. Add it manually for VRR over PCON."
-        return 0
-    }
-    print_info "Added amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON."
 }
 
 audio_fix_ensure_hpd_debounce_grub_param() {
@@ -2620,6 +2594,7 @@ audio_fix_ensure_hpd_debounce_grub_param() {
     fi
     if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
         print_info "Could not add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB (missing $GRUB_DEFAULT or update-grub)."
+        print_info "Add it manually for HDMI HPD debounce: edit $GRUB_DEFAULT and run sudo update-grub."
         return 0
     fi
     steamos_writable "
@@ -2629,91 +2604,10 @@ audio_fix_ensure_hpd_debounce_grub_param() {
         fi
         update-grub
     " || {
-        print_info "Failed to add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB."
+        print_info "Failed to add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB. Add it manually for HDMI HPD debounce."
         return 0
     }
     print_info "Added amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB for HDMI HPD debounce."
-}
-
-# --- YCbCr 4:4:4 deep color for DP-HDMI PCON dongles -------------------------
-# The patched amdgpu.ko includes module params amdgpu.force_ycbcr444 and
-# amdgpu.force_min_bpc. These are set via modprobe.d since SteamOS's
-# steamenv_boot filters unknown params from the GRUB command line.
-
-YCBCR444_MODPROBE_FILE="/etc/modprobe.d/amdgpu-ycbcr444.conf"
-
-ycbcr444_modprobe_installed() {
-    [[ -f "$YCBCR444_MODPROBE_FILE" ]] && \
-    grep -q 'dcfeaturemask=0x402' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
-}
-
-ycbcr444_force_installed() {
-    [[ -f "$YCBCR444_MODPROBE_FILE" ]] && \
-    grep -q 'force_ycbcr444=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null && \
-    grep -q 'force_colorspace=1' "$YCBCR444_MODPROBE_FILE" 2>/dev/null
-}
-
-ycbcr444_ensure_modprobe() {
-    if ycbcr444_modprobe_installed; then
-        return 0
-    fi
-    steamos_writable "
-        mkdir -p /etc/modprobe.d
-        echo 'options amdgpu dcfeaturemask=0x402' > \"$YCBCR444_MODPROBE_FILE\"
-    " || {
-        print_info "Failed to create $YCBCR444_MODPROBE_FILE. Create it manually."
-        return 0
-    }
-    print_info "Created $YCBCR444_MODPROBE_FILE with dcfeaturemask=0x402 (FRL only)."
-    print_info "Rebuild initramfs with: sudo mkinitcpio -P"
-    steamos_writable "mkinitcpio -P" 2>/dev/null || true
-}
-
-ycbcr444_ensure_force() {
-    if ycbcr444_force_installed; then
-        return 0
-    fi
-    steamos_writable "
-        if [[ -f \"$YCBCR444_MODPROBE_FILE\" ]]; then
-            if ! grep -q 'force_ycbcr444=1' \"$YCBCR444_MODPROBE_FILE\"; then
-                sed -i 's/\(options amdgpu .*\)/\\1 force_ycbcr444=1 force_min_bpc=10 force_colorspace=1/' \"$YCBCR444_MODPROBE_FILE\"
-            fi
-        else
-            echo 'options amdgpu dcfeaturemask=0x402 force_ycbcr444=1 force_min_bpc=10 force_colorspace=1' > \"$YCBCR444_MODPROBE_FILE\"
-        fi
-    " || {
-        print_info "Failed to update $YCBCR444_MODPROBE_FILE. Update it manually."
-        return 0
-    }
-    print_info "Enabled YCbCr 4:4:4 + min 10-bit + SDR colorspace fix in $YCBCR444_MODPROBE_FILE."
-    steamos_writable "mkinitcpio -P" 2>/dev/null || true
-}
-
-ycbcr444_remove_modprobe() {
-    if ! ycbcr444_modprobe_installed; then
-        return 0
-    fi
-    steamos_writable "rm -f \"$YCBCR444_MODPROBE_FILE\"" 2>/dev/null || true
-    print_info "Removed $YCBCR444_MODPROBE_FILE. Rebuild initramfs and reboot to apply."
-    steamos_writable "mkinitcpio -P" 2>/dev/null || true
-}
-
-audio_fix_remove_pcon_grub_param() {
-    if ! audio_fix_pcon_grub_installed; then
-        return 0
-    fi
-    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
-        return 0
-    fi
-    steamos_writable "
-        cp "$GRUB_DEFAULT" "$GRUB_DEFAULT.bak"
-        sed -i 's/ amdgpu\\.freesync_pcon_allow_all=1//g; s/amdgpu\\.freesync_pcon_allow_all=1 //g; s/amdgpu\\.freesync_pcon_allow_all=1//g' "$GRUB_DEFAULT"
-        update-grub
-    " || {
-        print_info "Failed to remove amdgpu.freesync_pcon_allow_all=1 from GRUB."
-        return 0
-    }
-    print_info "Removed amdgpu.freesync_pcon_allow_all=1 from GRUB."
 }
 
 audio_fix_remove_hpd_debounce_grub_param() {
@@ -2854,15 +2748,10 @@ install_audio_fix() {
         "+SCLK Range (350-2230):Widen GPU clock range for userspace governors"
         "+KFD Flush TLB:Memory coherence fix for compute workloads"
         "+TTM NULL-page Guard:Prevent crashes from NULL page mappings"
-        "+DP Audio Clock:Fix audio/video at ~82% speed via DP/HDMI"
-        "+PCON FRL Hotplug (Exp):Preserve FRL config through hotplug events"
     )
     # DP Spread Spectrum only needed before kernel 7.2 (upstream since then)
     if [[ "$kver_major" -lt 7 ]] || { [[ "$kver_major" -eq 7 ]] && [[ "$kver_minor" -lt 2 ]]; }; then
         checklist_items+=("+DP Spread Spectrum:Cleaner audio via DP/HDMI (disable spread spectrum)")
-    fi
-    if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+YCbCr 444 Deep Color (Exp):Force YCbCr 4:4:4 + 10-bit + fix colorspace via PCON CH7218")
     fi
 
     pick_items "Select kernel patches to include:" "${checklist_items[@]}"
@@ -2870,16 +2759,11 @@ install_audio_fix() {
     local selected_str="${PICK_SELECTED[*]}"
     local audio_flags="--audio"
 
-    [[ " $selected_str " == *" DP Audio Clock "* ]] || audio_flags="$audio_flags --no-audio-clock"
     [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || audio_flags="$audio_flags --no-telemetry"
     [[ " $selected_str " == *" DP Spread Spectrum "* ]] || audio_flags="$audio_flags --no-ss"
-    [[ " $selected_str " == *" PCON FRL Hotplug "* ]] || audio_flags="$audio_flags --no-frl-hp"
     [[ " $selected_str " == *" TTM NULL-page Guard "* ]] || audio_flags="$audio_flags --no-ttm"
     [[ " $selected_str " == *" SCLK Range (350-2230) "* ]] || audio_flags="$audio_flags --no-sclk"
     [[ " $selected_str " == *" KFD Flush TLB "* ]] || audio_flags="$audio_flags --no-kfd"
-    if [[ "$kver_major" -ge 7 ]]; then
-        [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]] || audio_flags="$audio_flags --no-ycbcr444"
-    fi
 
     fixes_repo_sync || return 1
 
@@ -2920,20 +2804,6 @@ install_audio_fix() {
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
 
     echo ""
-    echo -e "  ${CYAN}The patched amdgpu.ko also includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
-    echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
-    echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
-    echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
-    echo ""
-    if audio_fix_pcon_grub_installed; then
-        print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
-    elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
-        audio_fix_ensure_pcon_grub_param
-    else
-        print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
-    fi
-
-    echo ""
     if audio_fix_hpd_debounce_grub_installed; then
         print_info "amdgpu.hdmi_hpd_debounce_delay_ms=1500 is already in GRUB — HPD debounce active."
     elif confirm "Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB for HDMI HPD debounce (prevents spurious HPD on TV power cycling)?"; then
@@ -2942,18 +2812,6 @@ install_audio_fix() {
         print_info "Skipped HPD debounce param. Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 manually if needed."
     fi
 
-    # Activate YCbCr 4:4:4 force params if patch was selected
-    if [[ "$kver_major" -ge 7 ]] && [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]]; then
-        echo ""
-        echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color${RESET}"
-        echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + minimum 10-bit color depth via modprobe.d.${RESET}"
-        echo ""
-        if ycbcr444_force_installed; then
-            print_info "YCbCr 4:4:4 force params already enabled (modprobe.d config present)."
-        else
-            ycbcr444_ensure_force
-        fi
-    fi
 }
 
 run_revert_audio_fix() {
@@ -2980,29 +2838,11 @@ run_revert_audio_fix() {
     print_success "DisplayPort audio/video fix reverted to stock amdgpu.ko. Reboot to apply."
     persist_state_remove "audio"
 
-    if audio_fix_pcon_grub_installed; then
-        echo ""
-        if confirm "Also remove amdgpu.freesync_pcon_allow_all=1 from GRUB (was added for VRR over PCON)?"; then
-            audio_fix_remove_pcon_grub_param
-        else
-            print_info "GRUB param kept. Remove manually if no longer needed."
-        fi
-    fi
-
     if audio_fix_hpd_debounce_grub_installed; then
         if confirm "Also remove amdgpu.hdmi_hpd_debounce_delay_ms=1500 from GRUB?"; then
             audio_fix_remove_hpd_debounce_grub_param
         else
             print_info "HPD debounce param kept. Remove manually if no longer needed."
-        fi
-    fi
-
-    if ycbcr444_modprobe_installed; then
-        echo ""
-        if confirm "Also remove YCbCr 4:4:4 deep color modprobe.d config?"; then
-            ycbcr444_remove_modprobe
-        else
-            print_info "YCbCr 4:4:4 config kept. Remove $YCBCR444_MODPROBE_FILE manually if no longer needed."
         fi
     fi
 }
@@ -3777,10 +3617,11 @@ MASTAG_PROTON_PACKAGES=("protonge-latest-bc250" "proton-cachyos-native-bc250" "p
 STEAM_COMPAT_DIR="$REAL_HOME/.local/share/Steam/compatibilitytools.d"
 
 fsr4_proton_installed() {
-    [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]]
+    [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]] && \
+        [[ -s "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]]
 }
 
-fsr4_proton_installed_pkg() {
+fsr4_proton_installed_pkgs() {
     if [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]]; then
         cut -d: -f1 "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
         return 0
@@ -3788,12 +3629,33 @@ fsr4_proton_installed_pkg() {
     return 1
 }
 
-fsr4_proton_installed_toolname() {
+fsr4_proton_installed_toolnames() {
     if [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]]; then
         cut -d: -f2 "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
         return 0
     fi
     return 1
+}
+
+fsr4_proton_is_pkg_installed() {
+    local pkg="$1"
+    [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]] && \
+        grep -q "^${pkg}:" "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
+}
+
+fsr4_proton_marker_add() {
+    local pkg="$1" tool="$2"
+    local marker="$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
+    fsr4_proton_is_pkg_installed "$pkg" && \
+        sed -i "/^${pkg}:/d" "$marker" 2>/dev/null
+    echo "${pkg}:${tool}" >> "$marker"
+}
+
+fsr4_proton_marker_remove() {
+    local pkg="$1"
+    local marker="$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
+    sed -i "/^${pkg}:/d" "$marker" 2>/dev/null
+    [[ -s "$marker" ]] || rm -f "$marker"
 }
 
 _MASTAG_REPO_ADDED_BY_US=0
@@ -3818,14 +3680,75 @@ _mastag_repo_remove() {
     _MASTAG_REPO_ADDED_BY_US=0
 }
 
+_fsr4_download_and_install() {
+    local proton_pkg="$1"
+    local dl_dir="${REAL_HOME}/.cache/bc250-fsr4-download"
+    mkdir -p "$dl_dir"
+
+    print_info "Downloading ${proton_pkg} to ${dl_dir}..."
+    if ! LC_ALL=C pacman -Sw --noconfirm --cachedir "$dl_dir" "$proton_pkg" 2>&1 | tail -10; then
+        print_error "Failed to download ${proton_pkg}."
+        rm -rf "$dl_dir"
+        return 1
+    fi
+
+    local pkg_file
+    pkg_file=$(find "$dl_dir" -name "${proton_pkg}-*.pkg.tar.zst" -type f | head -1)
+    if [[ -z "$pkg_file" ]]; then
+        rm -rf "$dl_dir"
+        print_error "Downloaded package file not found."
+        return 1
+    fi
+
+    local extract_dir="${dl_dir}/extracted"
+    mkdir -p "$extract_dir"
+    print_info "Extracting package..."
+    if ! tar -x --use-compress-program=zstd -f "$pkg_file" -C "$extract_dir" 2>&1 | tail -5; then
+        rm -rf "$dl_dir"
+        print_error "Failed to extract package."
+        return 1
+    fi
+
+    local tool_src
+    tool_src=$(find "$extract_dir" -mindepth 4 -maxdepth 4 -type d -path "*/compatibilitytools.d/*" | head -1)
+    if [[ -z "$tool_src" ]]; then
+        tool_src=$(find "$extract_dir" -type d -name "compatibilitytools.d" | head -1)
+        if [[ -n "$tool_src" ]]; then
+            tool_src=$(find "$tool_src" -mindepth 1 -maxdepth 1 -type d | head -1)
+        fi
+    fi
+    if [[ -z "$tool_src" ]]; then
+        rm -rf "$dl_dir"
+        print_error "Could not find compatibility tool directory in package."
+        return 1
+    fi
+
+    local tool_name
+    tool_name=$(basename "$tool_src")
+
+    mkdir -p "$STEAM_COMPAT_DIR"
+    print_info "Installing ${tool_name} to ${STEAM_COMPAT_DIR}..."
+    if [[ -d "$STEAM_COMPAT_DIR/$tool_name" ]]; then
+        rm -rf "$STEAM_COMPAT_DIR/$tool_name"
+    fi
+    if ! cp -a "$tool_src" "$STEAM_COMPAT_DIR/"; then
+        rm -rf "$dl_dir"
+        print_error "Failed to copy compatibility tool to ${STEAM_COMPAT_DIR}."
+        return 1
+    fi
+
+    fsr4_proton_marker_add "$proton_pkg" "$tool_name"
+    rm -rf "$dl_dir"
+    print_success "Installed: ${tool_name}"
+    return 0
+}
+
 install_fsr4_proton() {
     print_step "FSR4" "Install FSR4-capable Proton (MastaG pre-built)"
     echo -e "  ${DIM}  Pre-built Proton with OptiScaler + FSR4 provider + pinned config${RESET}"
     echo -e "  ${DIM}  Requires patched Mesa/RADV from this toolkit (Combined Fix or GFX1013 Fix)${RESET}"
     echo -e "  ${DIM}  Installs to home partition (SteamOS root is too small for 1.6 GB Proton)${RESET}"
     echo ""
-    _MASTAG_REPO_ADDED_BY_US=0
-    fsr4_proton_installed && { print_info "Already installed: $(fsr4_proton_installed_pkg)"; return 0; }
 
     # Check prerequisites — patched RADV must be installed
     if ! grep -q "VK_DRIVER_FILES" /etc/environment 2>/dev/null || \
@@ -3835,23 +3758,29 @@ install_fsr4_proton() {
         return 1
     fi
 
+    # Show installed variants
+    if fsr4_proton_installed; then
+        print_info "Already installed: $(fsr4_proton_installed_pkgs | tr '\n' ' ')"
+        echo ""
+    fi
+
     echo -e "  ${CYAN}Choose Proton variant:${RESET}"
-    echo -e "  ${DIM}  1) protonge-latest-bc250 (GE-Proton 11-6 + FSR4) — recommended${RESET}"
-    echo -e "  ${DIM}  2) proton-cachyos-native-bc250 (CachyOS native Proton + FSR4)${RESET}"
-    echo -e "  ${DIM}  3) proton-cachyos-slr-bc250 (CachyOS Proton + Steam Linux Runtime + FSR4)${RESET}"
-    echo -e "  ${DIM}     Use this for games with EasyAntiCheat or BattlEye${RESET}"
+    echo -e "  ${DIM}  1) protonge-latest-bc250 (GE-Proton + FSR4) — tracks new GE releases${RESET}"
+    echo -e "  ${DIM}  2) proton-cachyos-native-bc250 (CachyOS native Proton + FSR4) — fastest, no runtime${RESET}"
+    echo -e "  ${DIM}  3) proton-cachyos-slr-bc250 (CachyOS Proton in SLR + FSR4) — for anti-cheat games${RESET}"
+    echo -e "  ${DIM}  4) Install Decky plugin only (copy FSR4 launch options to Quick Access Menu)${RESET}"
+    echo -e "  ${DIM}  A) Install ALL Proton variants${RESET}"
     echo ""
     local proton_choice
-    read -rp "  Select [1-3] (default 1): " proton_choice
-    local proton_pkg
-    case "$proton_choice" in
-        2|n|N) proton_pkg="proton-cachyos-native-bc250" ;;
-        3|s|S) proton_pkg="proton-cachyos-slr-bc250" ;;
-        *) proton_pkg="protonge-latest-bc250" ;;
+    read -rp "  Select [1-4, A] (default A): " proton_choice
+    local -a pkg_list=()
+    case "${proton_choice^^}" in
+        1) pkg_list=("protonge-latest-bc250") ;;
+        2) pkg_list=("proton-cachyos-native-bc250") ;;
+        3) pkg_list=("proton-cachyos-slr-bc250") ;;
+        4) install_fsr4_launch_options_plugin; return 0 ;;
+        *) pkg_list=("${MASTAG_PROTON_PACKAGES[@]}") ;;
     esac
-    echo ""
-
-    print_info "Selected: ${proton_pkg}"
     echo ""
 
     # Check and install dependencies
@@ -3873,15 +3802,18 @@ install_fsr4_proton() {
         print_info "All dependencies already installed."
     fi
 
-    # Check free space on home (need ~2 GB for download + extract)
-    local home_free_mb
+    # Check free space on home (need ~2 GB per variant, ~5 GB for all)
+    local home_free_mb needed_mb
     home_free_mb=$(df --output=avail -m /home 2>/dev/null | tail -1 | tr -d ' ')
-    if [[ -n "$home_free_mb" ]] && (( home_free_mb < 2500 )); then
-        print_error "Only ${home_free_mb}MB free on /home — need at least 2500 MB for download + extract."
+    needed_mb=$(( 2500 * ${#pkg_list[@]} ))
+    if [[ -n "$home_free_mb" ]] && (( home_free_mb < needed_mb )); then
+        print_error "Only ${home_free_mb}MB free on /home — need at least ${needed_mb} MB for ${#pkg_list[@]} variant(s)."
         return 1
     fi
 
-    if ! confirm "Install ${proton_pkg} (~615 MB download, ~1.6 GB installed to /home)?"; then
+    local total_label
+    (( ${#pkg_list[@]} > 1 )) && total_label="ALL ${#pkg_list[@]} variants" || total_label="${pkg_list[0]}"
+    if ! confirm "Install ${total_label} (~615 MB download each, ~1.6 GB installed each to /home)?"; then
         print_info "Cancelled."
         return 0
     fi
@@ -3899,123 +3831,115 @@ install_fsr4_proton() {
         return 1
     fi
 
-    # Download the package without installing (to avoid filling root partition)
-    local dl_dir="${REAL_HOME}/.cache/bc250-fsr4-download"
-    mkdir -p "$dl_dir"
-    print_info "Downloading ${proton_pkg} to ${dl_dir}..."
-    if ! LC_ALL=C pacman -Sw --noconfirm --cachedir "$dl_dir" "$proton_pkg" 2>&1 | tail -10; then
-        _mastag_repo_remove
-        (( was )) && steamos-readonly enable || true
-        rm -rf "$dl_dir"
-        print_error "Failed to download ${proton_pkg}."
-        return 1
-    fi
+    local pkg installed_tools=""
+    for pkg in "${pkg_list[@]}"; do
+        echo ""
+        print_info "Processing ${pkg}..."
+        if _fsr4_download_and_install "$pkg"; then
+            installed_tools+="$(grep "^${pkg}:" "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" | cut -d: -f2) "
+        else
+            print_error "Failed to install ${pkg}, continuing with remaining variants..."
+        fi
+    done
 
-    # Remove the temporary repo immediately (don't need it anymore)
+    # Remove the temporary repo and restore read-only
     _mastag_repo_remove
     LC_ALL=C pacman -Sy --noconfirm 2>/dev/null || true
     (( was )) && steamos-readonly enable || true
 
-    # Find the downloaded .pkg.tar.zst
-    local pkg_file
-    pkg_file=$(find "$dl_dir" -name "${proton_pkg}-*.pkg.tar.zst" -type f | head -1)
-    if [[ -z "$pkg_file" ]]; then
-        rm -rf "$dl_dir"
-        print_error "Downloaded package file not found."
+    if [[ -z "$installed_tools" ]]; then
+        print_error "No variants were installed successfully."
         return 1
     fi
 
-    # Extract the package to a temp dir on home
-    local extract_dir="${dl_dir}/extracted"
-    mkdir -p "$extract_dir"
-    print_info "Extracting package..."
-    if ! tar -x --use-compress-program=zstd -f "$pkg_file" -C "$extract_dir" 2>&1 | tail -5; then
-        rm -rf "$dl_dir"
-        print_error "Failed to extract package."
-        return 1
-    fi
-
-    # Find the compatibility tool directory inside the extracted package
-    # Packages install to usr/share/steam/compatibilitytools.d/<toolname>/
-    local tool_src
-    tool_src=$(find "$extract_dir" -type d -path "*/compatibilitytools.d/*" -mindepth 4 -maxdepth 4 | head -1)
-    if [[ -z "$tool_src" ]]; then
-        # Fallback: search more broadly
-        tool_src=$(find "$extract_dir" -type d -name "compatibilitytools.d" | head -1)
-        if [[ -n "$tool_src" ]]; then
-            # Get the first subdirectory inside compatibilitytools.d
-            tool_src=$(find "$tool_src" -mindepth 1 -maxdepth 1 -type d | head -1)
-        fi
-    fi
-    if [[ -z "$tool_src" ]]; then
-        rm -rf "$dl_dir"
-        print_error "Could not find compatibility tool directory in package."
-        return 1
-    fi
-
-    local tool_name
-    tool_name=$(basename "$tool_src")
-
-    # Install to Steam's user compatibility tools directory
-    mkdir -p "$STEAM_COMPAT_DIR"
-    print_info "Installing ${tool_name} to ${STEAM_COMPAT_DIR}..."
-    if [[ -d "$STEAM_COMPAT_DIR/$tool_name" ]]; then
-        rm -rf "$STEAM_COMPAT_DIR/$tool_name"
-    fi
-    if ! cp -a "$tool_src" "$STEAM_COMPAT_DIR/"; then
-        rm -rf "$dl_dir"
-        print_error "Failed to copy compatibility tool to ${STEAM_COMPAT_DIR}."
-        return 1
-    fi
-
-    # Write marker file to track installation (package name + tool dir name)
-    echo "${proton_pkg}:${tool_name}" > "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
-
-    # Cleanup download/extract dir
-    rm -rf "$dl_dir"
-
-    print_success "FSR4 Proton installed: ${tool_name}"
+    echo ""
+    print_success "FSR4 Proton installed: ${installed_tools}"
     echo ""
     echo -e "  ${BOLD}${CYAN}Next steps:${RESET}"
     echo -e "  ${DIM}  1. Restart Steam${RESET}"
-    echo -e "  ${DIM}  2. In game Properties → Compatibility, select:${RESET}"
-    echo -e "  ${DIM}     ${tool_name}${RESET}"
+    echo -e "  ${DIM}  2. In game Properties → Compatibility, select one of:${RESET}"
+    local t
+    for t in $installed_tools; do
+        echo -e "  ${DIM}     ${t}${RESET}"
+    done
     echo -e "  ${DIM}  3. FSR4 and OptiScaler are ON by default${RESET}"
     echo ""
     echo -e "  ${BOLD}Launch options (optional, per-game):${RESET}"
     echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%            # disable FSR4 upgrade${RESET}"
     echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%               # FSR4 watermark + OptiScaler log${RESET}"
     echo -e "  ${DIM}  RADV_GFX103=1 %command%                    # enable mesh/task shaders${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411f %command%     # BC-250 FSR4 fork RC9 (default)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=signed %command%     # use AMD's signed FSR4 build (default: fsr411f RC9)${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411b %command%     # third-party 4.1.1b, RDNA2 ghosting fix${RESET}"
+    echo -e "  ${DIM}  PROTON_OPTISCALER_NAME=dxgi.dll %command%  # fix for games shipping own winmm.dll${RESET}"
+    echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true\" %command%  # enable DLSS+Reflex via OptiScaler${RESET}"
+    echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true;Spoofing.Registry=true\" %command%${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=... %command%        # per-game OptiScaler overrides${RESET}"
     echo ""
     echo -e "  ${YELLOW}Note:${RESET} Do NOT use PROTON_DLSS_UPGRADE, PROTON_XESS_UPGRADE, etc."
     echo -e "  — the pinned manifest does not ship those, and they will prevent the game from starting."
     echo -e "  ${YELLOW}Anti-cheat:${RESET} FSR4/OptiScaler auto-disable on EAC/BattlEye detection."
     echo -e "  For manual override: PROTON_FSR4_UPGRADE=0 %command%"
+    echo -e "  ${YELLOW}DLSS spoof:${RESET} BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true\" makes games offer DLSS/Reflex"
+    echo -e "  which OptiScaler translates to FSR4. Add Spoofing.Registry=true if game warns about GPU/driver."
     echo ""
     persist_state_add "fsr4_proton"
 }
 
 revert_fsr4_proton() {
     print_step "R-FSR4" "Revert FSR4-capable Proton"
-    local installed_pkg installed_tool
-    installed_pkg=$(fsr4_proton_installed_pkg 2>/dev/null) || { print_info "Not installed."; return 0; }
-    installed_tool=$(fsr4_proton_installed_toolname 2>/dev/null)
-    confirm "Remove ${installed_pkg} (${installed_tool})?" || { print_info "Cancelled."; return 0; }
-
-    if [[ -n "$installed_tool" && -d "$STEAM_COMPAT_DIR/$installed_tool" ]]; then
-        print_info "Removing ${installed_tool} from ${STEAM_COMPAT_DIR}..."
-        rm -rf "$STEAM_COMPAT_DIR/$installed_tool"
-    else
-        print_error "Tool directory not found: ${installed_tool}"
+    if ! fsr4_proton_installed; then
+        print_info "No FSR4 Proton variants installed."
+        return 0
     fi
-    rm -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker"
 
-    print_success "FSR4 Proton removed: ${installed_tool}"
+    local installed_pkgs installed_tools
+    installed_pkgs=$(fsr4_proton_installed_pkgs)
+    installed_tools=$(fsr4_proton_installed_toolnames)
+
+    echo -e "  ${CYAN}Installed variants:${RESET}"
+    local i=1
+    local pkg tool
+    while IFS= read -r pkg && IFS= read -r tool <&3; do
+        echo -e "  ${DIM}  ${i}) ${pkg} (${tool})${RESET}"
+        (( i++ ))
+    done <<< "$installed_pkgs" 3<<< "$installed_tools"
+    echo -e "  ${DIM}  A) Remove ALL${RESET}"
+    echo ""
+    local revert_choice
+    read -rp "  Select [1-$((i-1)), A] (default A): " revert_choice
+
+    local -a remove_pkgs=()
+    if [[ "${revert_choice^^}" == "A" || -z "$revert_choice" ]]; then
+        mapfile -t remove_pkgs <<< "$installed_pkgs"
+    else
+        local idx=$((revert_choice - 1))
+        local -a all_pkgs=()
+        mapfile -t all_pkgs <<< "$installed_pkgs"
+        if (( idx >= 0 && idx < ${#all_pkgs[@]} )); then
+            remove_pkgs=("${all_pkgs[$idx]}")
+        else
+            print_error "Invalid selection."
+            return 1
+        fi
+    fi
+
+    confirm "Remove ${#remove_pkgs[@]} variant(s)?" || { print_info "Cancelled."; return 0; }
+
+    local pkg tool
+    for pkg in "${remove_pkgs[@]}"; do
+        tool=$(grep "^${pkg}:" "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" | cut -d: -f2)
+        if [[ -n "$tool" && -d "$STEAM_COMPAT_DIR/$tool" ]]; then
+            print_info "Removing ${tool} from ${STEAM_COMPAT_DIR}..."
+            rm -rf "$STEAM_COMPAT_DIR/$tool"
+        fi
+        fsr4_proton_marker_remove "$pkg"
+        print_success "Removed: ${tool}"
+    done
+
+    if ! fsr4_proton_installed; then
+        persist_state_remove "fsr4_proton"
+    fi
     print_info "Restart Steam to apply."
-    persist_state_remove "fsr4_proton"
 }
 
 gfx1013_ensure_mesa_build_deps() {
@@ -4250,14 +4174,9 @@ run_revert_gfx1013_fix() {
         sudo sed -i '/VK_DRIVER_FILES/d' "$env_file"
     fi
 
-    # Remove boot mode GRUB param if present
-    boot_mode_revert
-
     # Remove all GRUB params and modprobe configs added by install_combined_fix
-    audio_fix_remove_pcon_grub_param
     audio_fix_remove_hpd_debounce_grub_param
     audio_fix_remove_cs_legacy_grub_param
-    ycbcr444_remove_modprobe
     audio_fix_cleanup_legacy_edid
 
     # Remove persist states
@@ -4265,21 +4184,6 @@ run_revert_gfx1013_fix() {
     persist_state_remove "audio"
 
     print_success "Combined fix fully reverted: stock amdgpu.ko + all GRUB/modprobe configs removed. Reboot to apply."
-}
-
-boot_mode_revert() {
-    if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*video=DP-1:2560x1440@120' "$GRUB_DEFAULT" >/dev/null 2>&1; then
-        print_info "Removing video=DP-1:2560x1440@120 from GRUB..."
-        steamos_writable "
-            cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
-            sed -i 's/ video=DP-1:2560x1440@120//g' \"$GRUB_DEFAULT\"
-            update-grub
-        " || {
-            print_info "Failed to remove video=DP-1:2560x1440@120 from GRUB. Remove it manually."
-            return 0
-        }
-        print_info "Removed video=DP-1:2560x1440@120 from GRUB. Reboot to use EDID preferred timing."
-    fi
 }
 
 install_combined_fix() {
@@ -4292,7 +4196,7 @@ install_combined_fix() {
     echo -e "  ${DIM}Select which components to include in this build:${RESET}"
     echo ""
 
-    local do_audio=0 do_gfx=0 do_vrr=0 do_vrr_vtem=0 do_allm=0
+    local do_audio=0 do_gfx=0 do_dsc=0 do_dsc_pcon=0
     local patch_flags=()
 
     # Detect kernel major and minor version for version-specific skip logic
@@ -4308,25 +4212,17 @@ install_combined_fix() {
         "+SCLK Range (350-2230):Widen GPU clock range for userspace governors"
         "+KFD Flush TLB:Memory coherence fix for compute workloads"
         "+TTM NULL-page Guard:Prevent crashes from NULL page mappings"
-        # --- Kernel Patches: Hardware ---
-        "+DP Audio Clock:Fix audio/video at ~82% speed via DP/HDMI"
-        "+Boot 1440p120:Set preferred boot mode to 2560x1440@120 via GRUB"
-        # --- Kernel Patches: Experimental (DP/HDMI Port) ---
-        "+PCON FRL Hotplug (Exp):Preserve FRL config through hotplug events"
-        "+VRR PCON FreeSync (Exp):FreeSync fallback + HDMI VRR + LFC for PCON DP-HDMI"
-        "+VRR VTEM on TMDS (Exp):Emit VTEM for HF-VSDB VRR on TMDS links (upstream approach)"
-        "+ALLM via DP (Exp):Auto Low Latency Mode for PCON HDMI in Game Mode"
     )
+
+    # DSC and DSC PCON only on kernel 7.x
+    if [[ "$kver_major" -ge 7 ]]; then
+        checklist_items+=("+DSC Enable (Exp):Enable Display Stream Compression for PSVR2/4K120 via DP")
+        checklist_items+=("+DSC PCON HDMI 2.1 (Exp):Enable HDMI 2.1 FRL PCON support for 4K120 via DP-HDMI")
+    fi
 
     # DP Spread Spectrum only needed before kernel 7.2 (upstream since then)
     if [[ "$kver_major" -lt 7 ]] || { [[ "$kver_major" -eq 7 ]] && [[ "$kver_minor" -lt 2 ]]; }; then
-        # Insert after DP Audio Clock (index 7)
         checklist_items+=("+DP Spread Spectrum:Cleaner audio via DP/HDMI (disable spread spectrum)")
-    fi
-
-    # YCbCr 4:4:4 only on kernel 7.x
-    if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+YCbCr 444 Deep Color (Exp):Force YCbCr 4:4:4 + 10-bit + fix colorspace via PCON CH7218")
     fi
 
     echo -e "  ${DIM}Groups: Performance/Graphics | Hardware | Experimental (DP/HDMI Port)${RESET}"
@@ -4336,27 +4232,20 @@ install_combined_fix() {
     local selected_str="${PICK_SELECTED[*]}"
 
     # Audio sub-patches (require --audio base flag)
-    [[ " $selected_str " == *" DP Audio Clock "* ]] || patch_flags+=(--no-audio-clock)
     [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || patch_flags+=(--no-telemetry)
     [[ " $selected_str " == *" DP Spread Spectrum "* ]] || patch_flags+=(--no-ss)
 
     # If any audio sub-patch is selected, add --audio
-    if [[ " $selected_str " == *" DP Audio Clock "* ]] || \
-       [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || \
+    if [[ " $selected_str " == *" GPU Telemetry+Cache "* ]] || \
        [[ " $selected_str " == *" DP Spread Spectrum "* ]]; then
         do_audio=1
         patch_flags=(--audio "${patch_flags[@]}")
     fi
 
     # Always-applied patches (now individually excludable)
-    [[ " $selected_str " == *" PCON FRL Hotplug "* ]] || patch_flags+=(--no-frl-hp)
     [[ " $selected_str " == *" TTM NULL-page Guard "* ]] || patch_flags+=(--no-ttm)
     [[ " $selected_str " == *" SCLK Range (350-2230) "* ]] || patch_flags+=(--no-sclk)
     [[ " $selected_str " == *" KFD Flush TLB "* ]] || patch_flags+=(--no-kfd)
-
-    if [[ "$kver_major" -ge 7 ]]; then
-        [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]] || patch_flags+=(--no-ycbcr444)
-    fi
 
     # GFX1013
     if [[ " $selected_str " == *" GFX1013 Compute+Mesa "* ]]; then
@@ -4364,33 +4253,22 @@ install_combined_fix() {
         patch_flags+=(--gfx1013)
     fi
 
-    # Boot 1440p120
-    local do_boot_mode=0
-    if [[ " $selected_str " == *" Boot 1440p120 "* ]]; then
-        do_boot_mode=1
+    if [[ " $selected_str " == *" DSC Enable "* ]]; then
+        do_dsc=1
+        patch_flags+=(--dsc)
+    fi
+    if [[ " $selected_str " == *" DSC PCON HDMI 2.1 "* ]]; then
+        do_dsc_pcon=1
+        patch_flags+=(--dsc-pcon)
     fi
 
-    # VRR, VRR VTEM, and ALLM
-    if [[ " $selected_str " == *" VRR PCON FreeSync "* ]]; then
-        do_vrr=1
-        patch_flags+=(--vrr)
-    fi
-    if [[ " $selected_str " == *" VRR VTEM on TMDS "* ]]; then
-        do_vrr_vtem=1
-        patch_flags+=(--vrr-vtem)
-    fi
-    if [[ " $selected_str " == *" ALLM via DP "* ]]; then
-        do_allm=1
-        patch_flags+=(--allm)
-    fi
-
-    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_vrr -eq 0 && $do_vrr_vtem -eq 0 && $do_allm -eq 0 && $do_boot_mode -eq 0 ]]; then
+    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_dsc -eq 0 && $do_dsc_pcon -eq 0 ]]; then
         print_info "No patches selected. Nothing to do."
         return 0
     fi
 
     # Only validate build prerequisites if actual kernel/Mesa patches are selected
-    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_vrr -eq 1 || $do_vrr_vtem -eq 1 || $do_allm -eq 1 ]]; then
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 || $do_dsc_pcon -eq 1 ]]; then
         validate_combined_fix_prerequisites "$do_gfx" || return 1
     fi
 
@@ -4411,14 +4289,13 @@ install_combined_fix() {
 
     local flags_str="${patch_flags[*]}"
     local confirm_msg="Continue with selected components: ${flags_str:-none}"
-    [[ $do_boot_mode -eq 1 ]] && confirm_msg="$confirm_msg + boot 1440p120"
     if ! confirm "$confirm_msg?"; then
         print_info "Cancelled."
         return 0
     fi
 
     # Apply kernel/Mesa patches if any are selected
-    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 || $do_dsc_pcon -eq 1 ]]; then
         fixes_repo_sync || return 1
 
         local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
@@ -4478,24 +4355,6 @@ install_combined_fix() {
         [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
         [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
         print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
-    else
-        print_success "Boot mode configuration applied! Reboot required."
-    fi
-
-    if [[ $do_vrr -eq 1 || $do_allm -eq 1 ]]; then
-        echo ""
-        echo -e "  ${CYAN}The patched amdgpu.ko includes VRR and ALLM support for DP→HDMI PCON adapters.${RESET}"
-        echo -e "  ${DIM}VRR: FreeSync fallback + HDMI VRR (VTEM) with improved range extending (LFC-aware).${RESET}"
-        echo -e "  ${DIM}ALLM: Auto Low Latency Mode via AVI content_type hint to PCON.${RESET}"
-        echo -e "  ${DIM}Requires amdgpu.freesync_pcon_allow_all=1 in the kernel command line for PCON VRR bypass.${RESET}"
-        echo ""
-        if audio_fix_pcon_grub_installed; then
-            print_info "amdgpu.freesync_pcon_allow_all=1 is already in GRUB — VRR/ALLM ready."
-        elif confirm "Add amdgpu.freesync_pcon_allow_all=1 to GRUB for VRR over PCON?"; then
-            audio_fix_ensure_pcon_grub_param
-        else
-            print_info "Skipped GRUB param. Add amdgpu.freesync_pcon_allow_all=1 manually for VRR over PCON."
-        fi
     fi
 
     # Kernel 7.x telemetry: 8-core without patched SMU BIOS needs cs_legacy_8core_metrics=1
@@ -4536,57 +4395,6 @@ install_combined_fix() {
         audio_fix_ensure_hpd_debounce_grub_param
     else
         print_info "Skipped HPD debounce param. Add amdgpu.hdmi_hpd_debounce_delay_ms=1500 manually if needed."
-    fi
-
-    echo ""
-    echo -e "  ${CYAN}HDMI 2.1 FRL for DP-HDMI PCON${RESET}"
-    echo -e "  ${DIM}Enables HDMI 2.1 FRL (dcfeaturemask=0x402) for CH7218 PCON dongles.${RESET}"
-    echo -e "  ${DIM}FRL allows higher bandwidth: 1440p@120 10-bit or 4K@60 10-bit.${RESET}"
-    echo -e "  ${DIM}The driver auto-negotiates pixel encoding and color depth per mode.${RESET}"
-    echo -e "  ${DIM}Requires a DP-HDMI PCON dongle (e.g. Ugreen CH7218).${RESET}"
-    echo ""
-    if ycbcr444_modprobe_installed; then
-        print_info "HDMI 2.1 FRL is already enabled (modprobe.d config present)."
-    elif confirm "Enable HDMI 2.1 FRL for DP-HDMI PCON output?"; then
-        ycbcr444_ensure_modprobe
-    else
-        print_info "Skipped FRL. Enable manually with: echo 'options amdgpu dcfeaturemask=0x402' > $YCBCR444_MODPROBE_FILE"
-    fi
-
-    # Activate YCbCr 4:4:4 force params if patch was selected
-    if [[ "$kver_major" -ge 7 ]] && [[ " $selected_str " == *" YCbCr 444 Deep Color "* ]]; then
-        echo ""
-        echo -e "  ${CYAN}YCbCr 4:4:4 Deep Color${RESET}"
-        echo -e "  ${DIM}Forces YCbCr 4:4:4 pixel encoding + minimum 10-bit color depth via modprobe.d.${RESET}"
-        echo -e "  ${DIM}Also forces SRGB (BT.709) colorspace to fix blown-out SDR colors in gamescope HDR mode.${RESET}"
-        echo ""
-        if ycbcr444_force_installed; then
-            print_info "YCbCr 4:4:4 force params already enabled (modprobe.d config present)."
-        else
-            ycbcr444_ensure_force
-        fi
-    fi
-
-    # Boot 1440p120: set video=DP-1:2560x1440@120 in GRUB
-    if [[ $do_boot_mode -eq 1 ]]; then
-        echo ""
-        echo -e "  ${CYAN}Boot Display Mode${RESET}"
-        echo -e "  ${DIM}Sets video=DP-1:2560x1440@120 in GRUB to use 1440p@120 from boot.${RESET}"
-        echo ""
-        if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*video=DP-1:2560x1440@120' "$GRUB_DEFAULT" >/dev/null 2>&1; then
-            print_info "video=DP-1:2560x1440@120 is already in GRUB — boot mode set."
-        else
-            steamos_writable "
-                cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
-                if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'video=DP-1:2560x1440@120'; then
-                    sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 video=DP-1:2560x1440@120\"/' \"$GRUB_DEFAULT\"
-                fi
-                update-grub
-            " || {
-                print_info "Failed to add video=DP-1:2560x1440@120 to GRUB. Add it manually."
-            }
-            print_info "Added video=DP-1:2560x1440@120 to GRUB. Reboot to boot at 1440p@120."
-        fi
     fi
 }
 
@@ -6414,8 +6222,6 @@ run_revert_all() {
     echo ""
     run_revert_gfx1013_fix
     echo ""
-    boot_mode_revert
-    echo ""
     run_revert_aic8800_wifi
 }
 
@@ -6674,6 +6480,22 @@ install_toolkit_steamos_control_plugin() {
         return 1
     }
     print_success "Toolkit SteamOS Control installed. Open Decky's Quick Access Menu to use it."
+}
+
+install_fsr4_launch_options_plugin() {
+    print_step "FSR4-LO" "BC-250 FSR4 Launch Options Decky Plugin"
+
+    local plugin_dir="$SCRIPT_DIR/extras/bc250-fsr4-launch-options"
+    if [[ ! -f "$plugin_dir/install.sh" ]]; then
+        fail_with_log "BC-250 FSR4 Launch Options plugin files are missing." "Decky Plugin Install"
+        return 1
+    fi
+    print_info "Installing prebuilt BC-250 FSR4 Launch Options for Decky..."
+    sudo -u "$REAL_USER" -H bash "$plugin_dir/install.sh" || {
+        fail_with_log "Decky plugin installation failed." "Decky Plugin Install"
+        return 1
+    }
+    print_success "BC-250 FSR4 Launch Options installed. Open Decky's Quick Access Menu to use it."
 }
 
 run_extras_menu() {

@@ -1669,7 +1669,7 @@ static int rwnx_plat_patch_load(struct rwnx_hw *rwnx_hw)
     if(rwnx_hw->usbdev->chipid == PRODUCT_ID_AIC8800DC ||
         rwnx_hw->usbdev->chipid == PRODUCT_ID_AIC8800DW){
 #ifndef ANDROID_PLATFORM
-        sprintf(aic_fw_path, "%s/%s", aic_fw_path, "aic8800DC");
+        { char _tmp_path[FW_PATH_MAX_LEN]; sprintf(_tmp_path, "%s/%s", aic_fw_path, "aic8800DC"); strcpy(aic_fw_path, _tmp_path); }
 #endif
         AICWFDBG(LOGINFO, "testmode=%d\n", testmode);
         if (chip_sub_id == 0) {
@@ -1808,7 +1808,7 @@ static int rwnx_plat_patch_load(struct rwnx_hw *rwnx_hw)
         }
     } else if(rwnx_hw->usbdev->chipid == PRODUCT_ID_AIC8800D80N) {
 #ifndef ANDROID_PLATFORM
-        sprintf(aic_fw_path, "%s/%s", aic_fw_path, "aic8800D80N");
+        { char _tmp_path[FW_PATH_MAX_LEN]; sprintf(_tmp_path, "%s/%s", aic_fw_path, "aic8800D80N"); strcpy(aic_fw_path, _tmp_path); }
 #endif
         if (testmode == FW_NORMAL_MODE) {
             ret = aicwf_plat_patch_load_8800d80n(rwnx_hw);
@@ -1838,7 +1838,7 @@ static int rwnx_plat_patch_load(struct rwnx_hw *rwnx_hw)
     }
     else if(rwnx_hw->usbdev->chipid == PRODUCT_ID_AIC8800DLN) {
 #ifndef ANDROID_PLATFORM
-        sprintf(aic_fw_path, "%s/%s", aic_fw_path, "aic8800DLN");
+        { char _tmp_path[FW_PATH_MAX_LEN]; sprintf(_tmp_path, "%s/%s", aic_fw_path, "aic8800DLN"); strcpy(aic_fw_path, _tmp_path); }
 #endif
         if (testmode == FW_NORMAL_MODE) {
             aicwf_patch_config_8800dln(rwnx_hw);

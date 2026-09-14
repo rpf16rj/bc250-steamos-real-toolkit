@@ -1,0 +1,74 @@
+From: BC-250 SteamOS Real Toolkit
+Subject: [PATCH] dcn201: enable DCN200-compatible DSC engines
+
+Oberon / Cyan Skillfish (BC-250) implements two DCN200-compatible DSC
+engines, but the stock dcn201 resource pool exposes zero DSC encoders.
+
+This patch reuses the DCN200 DSC implementation (already linked via
+dcn20_resource.h) to:
+  1. Set res_cap_dnc201.num_dsc from 0 to 2
+  2. Destroy DSC objects in dcn201_resource_destruct()
+  3. Wire dcn20_add_dsc_to_stream_resource
+  4. Propagate num_dsc to dcn201_ip before dml_init_instance()
+  5. Create DSC0 and DSC1 through dcn20_dsc_create()
+
+Based on investigation by alex-reid:
+https://gist.github.com/alex-reid/b55328c246ade7baef8566fb2cadea9b
+
+--- a/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c
++++ b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c
+@@ -568,7 +568,7 @@
+ 		.num_stream_encoder = 2,
+ 		.num_pll = 2,
+ 		.num_dwb = 0,
+-		.num_dsc = 0,
++		.num_dsc = 2,
+ 		.num_ddc = 2,
+ };
+ 
+@@ -1010,6 +1010,11 @@
+ 
+ 	if (pool->base.dccg != NULL)
+ 		dcn_dccg_destroy(&pool->base.dccg);
++
++	for (i = 0; i < pool->base.res_cap->num_dsc; i++) {
++		if (pool->base.dscs[i] != NULL)
++			dcn20_dsc_destroy(&pool->base.dscs[i]);
++	}
+ }
+ 
+ static struct hubp *dcn201_hubp_create(
+@@ -1106,7 +1111,7 @@
+ 	.validate_bandwidth = dcn20_validate_bandwidth,
+ 	.populate_dml_pipes = dcn20_populate_dml_pipes_from_context,
+ 	.add_stream_to_ctx = dcn20_add_stream_to_ctx,
+-	.add_dsc_to_stream_resource = NULL,
++	.add_dsc_to_stream_resource = dcn20_add_dsc_to_stream_resource,
+ 	.remove_stream_from_ctx = dcn20_remove_stream_from_ctx,
+ 	.acquire_free_pipe_as_secondary_dpp_pipe = dcn201_acquire_free_pipe_for_layer,
+ 	.release_pipe = dcn20_release_pipe,
+@@ -1229,6 +1234,7 @@
+ 
+ 	dcn201_ip.max_num_otg = pool->base.res_cap->num_timing_generator;
+ 	dcn201_ip.max_num_dpp = pool->base.pipe_count;
++	dcn201_ip.num_dsc = pool->base.res_cap->num_dsc;
+ 	dml_init_instance(&dc->dml, &dcn201_soc, &dcn201_ip, DML_PROJECT_DCN201);
+ 	{
+ 		struct irq_service_init_data init_data;
+@@ -1318,6 +1324,16 @@
+ 		goto create_fail;
+ 	}
+ 
++
++	/* DSC */
++	for (i = 0; i < pool->base.res_cap->num_dsc; i++) {
++		pool->base.dscs[i] = dcn20_dsc_create(ctx, i);
++		if (pool->base.dscs[i] == NULL) {
++			BREAK_TO_DEBUGGER();
++			dm_error("DC: failed to create dsc %d!\n", i);
++			goto create_fail;
++		}
++	}
+ 	if (!resource_construct(num_virtual_links, dc, &pool->base,
+ 			&res_create_funcs))
+ 		goto create_fail;
