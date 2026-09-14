@@ -26,8 +26,10 @@ como histórico datado de antes da adoção de versões numeradas.
   `PROTON_USE_OPTISCALER` explícito); opção `signed` usa o build FSR4 assinado
   da AMD.
 - **Alterado:** Patches de audio reorganizados — removidos patches obsoletos de
-  VRR/ALLM/YCbCr, adicionados `bc250-dcn201-dsc-enable` e
-  `bc250-dcn201-pcon-hdmi21`.
+  YCbCr 4:4:4, VRR, ALLM, FRL hot-plug e clock de audio DP (não mais necessários
+  pois os patches de DSC + PCON HDMI 2.1 os substituem). Adicionados
+  `bc250-dcn201-dsc-enable` e `bc250-dcn201-pcon-hdmi21` baseados na investigação
+  de registradores DCN/DSC por [alex-reid](https://gist.github.com/alex-reid/b55328c246ade7baef8566fb2cadea9b).
 
 ## v1.9.0 — 2026-09-12
 
