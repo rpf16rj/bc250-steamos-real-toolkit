@@ -7,6 +7,23 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.9.2 — 2026-09-15
+
+- **Fixed:** Dual-output audio (option 12) upgraded to MastaG v0.14. E-AC-3
+  removed entirely (helper binary, systemd service, and all WirePlumber arbiter
+  code paths), matching upstream. AC-3 is now the only encoded mode.
+- **Fixed:** Intermittent audio sync loss and clipping during AC-3 playback —
+  restored upstream timing parameters (`switch-delay-ms` 500→1000,
+  `api-alsa-start-delay` 1024→1536, `startup-settle-ms` 1000→1500) that were
+  too aggressive in v0.13 and could cause EBUSY races on `hw:Generic,3`.
+- **Fixed:** Combined Fix (option 10) exiting silently when build tools
+  (`make`/`gcc`/`patch`) were missing — now auto-installs `base-devel` and
+  shows the diagnostic log + support instructions on failure instead of a
+  silent exit.
+- **Changed:** AC-3 bitrate references updated from 448 to 640 kbps (the ALSA
+  config already used 640). Installer no longer requires `ffmpeg`/`aplay`/`dd`
+  (only needed for the removed E-AC-3 path).
+
 ## v1.9.1 — 2026-09-13
 
 - **Added:** `proton-cachyos-slr-bc250` Proton variant (CachyOS in Steam Linux

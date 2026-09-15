@@ -7,6 +7,25 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.9.2 — 2026-09-15
+
+- **Corrigido:** Dual-output audio (opção 12) atualizado para MastaG v0.14.
+  E-AC-3 removido completamente (binário helper, serviço systemd e todos os
+  caminhos de código do árbitro WirePlumber), seguindo o upstream. AC-3 é agora
+  o único modo codificado.
+- **Corrigido:** Perda de sync intermitente e clipping de áudio durante
+  playback AC-3 — restaurados os parâmetros de timing do upstream
+  (`switch-delay-ms` 500→1000, `api-alsa-start-delay` 1024→1536,
+  `startup-settle-ms` 1000→1500) que estavam agressivos demais no v0.13 e
+  podiam causar corridas de EBUSY em `hw:Generic,3`.
+- **Corrigido:** Combined Fix (opção 10) saindo silenciosamente quando
+  ferramentas de build (`make`/`gcc`/`patch`) estavam faltando — agora
+  instala `base-devel` automaticamente e mostra o log de diagnóstico +
+  instruções de suporte em caso de falha, em vez de sair sem mensagem.
+- **Alterado:** Referências de bitrate AC-3 atualizadas de 448 para 640 kbps
+  (a config ALSA já usava 640). Installer não requer mais
+  `ffmpeg`/`aplay`/`dd` (necessários apenas para o path E-AC-3 removido).
+
 ## v1.9.1 — 2026-09-13
 
 - **Adicionado:** Variante `proton-cachyos-slr-bc250` (CachyOS em Steam Linux
