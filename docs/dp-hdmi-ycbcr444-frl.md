@@ -1,3 +1,13 @@
+> **⚠ DEPRECATED.**
+> The YCbCr 4:4:4, VRR, ALLM, FRL hot-plug, and DP audio clock patches
+> documented here have been removed as of toolkit v1.9.1. They are no longer
+> needed — the new `bc250-dcn201-dsc-enable` and `bc250-dcn201-pcon-hdmi21`
+> patches enable DSC and HDMI 2.1 PCON support at the DCN201 driver level,
+> superseding all previous PCON/FRL workarounds.
+>
+> This document is kept for historical reference only. For current display
+> patch details, see the [BC-250 DCN/DSC investigation by alex-reid](https://gist.github.com/alex-reid/b55328c246ade7baef8566fb2cadea9b).
+
 # DP-HDMI YCbCr 4:4:4 Deep Color + HDMI 2.1 FRL
 
 This document covers the DP-HDMI PCON deep color and FRL support added to the

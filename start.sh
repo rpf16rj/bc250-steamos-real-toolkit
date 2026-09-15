@@ -3506,17 +3506,15 @@ dual_audio_ensure_wireplumber() {
 }
 
 install_dual_audio() {
-    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.13)"
-    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3 448 kbps)${RESET}"
+    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.14)"
+    echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3 640 kbps)${RESET}"
     echo ""
     dual_audio_installed && { print_info "Already installed."; return 0; }
     dual_audio_ensure_wireplumber || return 1
     ac3_surround_installed && { print_info "Old AC-3 detected; reverting..."; run_revert_ac3_surround || true; }
-    # Check and install dependencies (ffmpeg, alsa-utils for AC3 backend)
-    print_info "Checking dependencies (ffmpeg, alsa-utils)..."
+    # Check and install dependencies (pipewire-tools for wp-metadata/pw-metadata)
+    print_info "Checking dependencies (pipewire-tools)..."
     local missing=()
-    command -v ffmpeg >/dev/null 2>&1 || missing+=("ffmpeg")
-    command -v aplay >/dev/null 2>&1 || missing+=("alsa-utils")
     command -v pw-metadata >/dev/null 2>&1 || missing+=("pipewire-tools")
     if (( ${#missing[@]} > 0 )); then
         print_info "Installing missing dependencies: ${missing[*]}"
@@ -3537,9 +3535,11 @@ install_dual_audio() {
     sudo install -m 0644 "$DUAL_AUDIO_DIR/etc/alsa/conf.d/61-bc250-a52.conf" /etc/alsa/conf.d/61-bc250-a52.conf
     sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
     sudo install -m 0644 "$DUAL_AUDIO_DIR/usr/local/share/wireplumber/scripts/monitors/alsa.lua" /usr/local/share/wireplumber/scripts/monitors/alsa.lua
-    # Remove leftover EAC3 backend from previous v0.12 install
-    sudo rm -f /usr/local/libexec/bc250-eac3-backend
+    # Remove leftover EAC3 backend from previous v0.12/v0.13 install (v0.14 removed E-AC-3)
+    sudo rm -f /usr/local/libexec/bc250-eac3-backend /usr/local/libexec/bc250-pipe-size
     sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
+    rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u "$REAL_USER")}/bc250-eac3-768.pcm" \
+          "${XDG_RUNTIME_DIR:-/run/user/$(id -u "$REAL_USER")}/bc250-eac3.pcm" 2>/dev/null || true
     (( was )) && steamos-readonly enable || true
     # WirePlumber and PipeWire user configs go in ~/.config — /etc/ paths are
     # volatile on SteamOS (symlinked to /run/ or restored to stock on reboot).
@@ -3563,7 +3563,7 @@ install_dual_audio() {
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     sleep 4
-    print_success "Dual-output audio v0.13 installed! Reboot before use."
+    print_success "Dual-output audio v0.14 installed! Reboot before use."
     persist_state_add "dual_audio"
 }
 
@@ -3577,8 +3577,10 @@ run_revert_dual_audio() {
     sudo rm -f /etc/alsa/conf.d/61-bc250-a52.conf
     sudo rm -f /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
     sudo rm -f /usr/local/share/wireplumber/scripts/monitors/alsa.lua
-    sudo rm -f /usr/local/libexec/bc250-eac3-backend
+    sudo rm -f /usr/local/libexec/bc250-eac3-backend /usr/local/libexec/bc250-pipe-size
     sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
+    rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u "$REAL_USER")}/bc250-eac3-768.pcm" \
+          "${XDG_RUNTIME_DIR:-/run/user/$(id -u "$REAL_USER")}/bc250-eac3.pcm" 2>/dev/null || true
 
     # Restore stock SteamOS WirePlumber (0.5.15) if dual audio had replaced it
     local wp_ver
@@ -5964,7 +5966,7 @@ run_status() {
 
     if ram_split_installed; then
         local uma_now
-        uma_now=$(ram_split_current_uma 2>/dev/null)
+        uma_now=$(ram_split_current_uma 2>/dev/null) || uma_now=""
         echo -e "  ${CYAN}RAM/VRAM Split${RESET}    ${ICON_OK} ${GREEN}UMA_SIZE=${uma_now:-?}MB${RESET}, ttm.pages_limit ceiling active"
     else
         echo -e "  ${CYAN}RAM/VRAM Split${RESET}    ${DIM}not installed (stock ${RAM_SPLIT_STOCK_UMA_MB}MB split, SteamOS default)${RESET}"
@@ -6113,7 +6115,7 @@ run_status() {
     if ac3_surround_installed; then
         local uid ac3_active
         uid=$(id -u "$REAL_USER")
-        ac3_active=$(sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" bash "$AC3_USER_SCRIPT" detect 2>/dev/null | grep "^AC3_ACTIVE=" | cut -d= -f2)
+        ac3_active=$(sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" bash "$AC3_USER_SCRIPT" detect 2>/dev/null | grep "^AC3_ACTIVE=" | cut -d= -f2) || ac3_active=""
         if [[ "$ac3_active" == "yes" ]]; then
             ac3_icon="$ICON_OK"; ac3_color="$GREEN"; ac3_label="installed — AC-3 profile active"
         else
@@ -6126,7 +6128,7 @@ run_status() {
 
     local dual_icon dual_color dual_label
     if dual_audio_installed; then
-        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.8)"
+        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.14)"
     else
         dual_icon="$DIM"; dual_color="$DIM"; dual_label="not installed"
     fi
@@ -6252,7 +6254,7 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
-        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.13) — requires WP 0.5.17"
+        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.14) — requires WP 0.5.17"
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "13"  "Install FSR4 Proton (MastaG)"     "Pre-built Proton + OptiScaler + FSR4 + fakenvapi — 3 variants (GE/Native/SLR)"
         print_item "13R" "Revert FSR4 Proton"              "Remove FSR4 Proton compatibility tool"
@@ -6808,9 +6810,24 @@ validate_combined_fix_prerequisites() {
     done
 
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
-        print_error "Missing build tools: ${missing_tools[*]}"
-        print_info "Please install the missing tools and try again"
-        return 1
+        print_warning "Missing build tools: ${missing_tools[*]}"
+        print_info "Installing base-devel (provides make, gcc, patch, etc.)..."
+        if ! steamos_writable 'pacman -Sy --noconfirm --needed base-devel'; then
+            fail_with_log "Failed to install build tools (base-devel). Please install manually: sudo pacman -S base-devel" "Combined Fix — missing build tools"
+            return 1
+        fi
+        # Re-check after installation
+        missing_tools=()
+        for tool in "${build_tools[@]}"; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+                missing_tools+=("$tool")
+            fi
+        done
+        if [[ ${#missing_tools[@]} -gt 0 ]]; then
+            fail_with_log "Build tools still missing after installing base-devel: ${missing_tools[*]}" "Combined Fix — missing build tools"
+            return 1
+        fi
+        print_success "Build tools installed successfully"
     fi
 
     if [[ "$check_mesa" == "1" ]]; then
