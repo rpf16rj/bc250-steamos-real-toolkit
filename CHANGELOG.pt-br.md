@@ -7,6 +7,32 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.9.3 — 2026-09-15
+
+- **Alterado:** Patches de display DSC + HDMI 2.1 PCON substituídos pelas versões
+  upstream (TeleBooth), agora controlados por um único parâmetro de kernel
+  `amdgpu.bc250_hdmi21` (ligado por padrão; `amdgpu.bc250_hdmi21=0` restaura um
+  kernel não-patcheado, caminho por caminho). Os dois patches são aplicados como
+  uma unidade pelo Combined Fix — as antigas opções separadas "DSC Enable" e
+  "DSC PCON HDMI 2.1" agora são uma só. Requer um adaptador DP→HDMI 2.1; monitor
+  DisplayPort nativo não é afetado. Se a tela ficar preta após instalar, inicialize
+  com `amdgpu.bc250_hdmi21=0` — sem precisar recompilar.
+- **Alterado:** Ambos os patches adaptados ao kernel do SteamOS da Valve
+  (7.2.4-valve1-1-neptune-72) e verificados para aplicar com zero fuzz, em ordem
+  (PCON primeiro, depois DSC, que depende do campo de config que o patch PCON adiciona).
+- **Alterado:** O bridge FSR4 padrão agora é o RC10 (4.1.1r10) do fork BC-250, que
+  reduz o tempo de setup da compilação de shaders a frio (sem mudança de FPS). O
+  toolkit baixa via os pacotes Proton do MastaG; texto de ajuda atualizado para RC10.
+- **Corrigido:** `amdgpu.cs_legacy_8core_metrics=1` não é mais oferecido às cegas
+  no kernel 7.x. O toolkit agora lê `/sys/class/dmi/id/bios_version` e decide: BIOS
+  stock (`P3.00`) precisa do layout legado de telemetria de 8 cores, BIOS modded
+  (a community BIOS atual carrega o patch de telemetria SMU) não — e se o parâmetro
+  já estiver no GRUB numa placa modded, o toolkit oferece removê-lo. No firmware
+  patcheado o decode legado faz a maioria das temperaturas por-core ler 0, que é o
+  que vários usuários da comunidade encontraram após instalar.
+- **Docs:** adicionado `docs/dsc-hdmi21-pcon.md`; o doc depreciado de YCbCr 4:4:4 FRL
+  agora aponta para ele.
+
 ## v1.9.2 — 2026-09-15
 
 - **Corrigido:** Dual-output audio (opção 12) atualizado para MastaG v0.14.

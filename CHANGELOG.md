@@ -7,6 +7,32 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.9.3 — 2026-09-15
+
+- **Changed:** Display DSC + HDMI 2.1 PCON patches replaced with the upstream
+  (TeleBooth) versions, now gated behind a single kernel parameter
+  `amdgpu.bc250_hdmi21` (on by default; `amdgpu.bc250_hdmi21=0` restores an
+  unpatched kernel path-for-path). The two patches are applied as one unit by
+  the Combined Fix — the previous separate "DSC Enable" and "DSC PCON HDMI 2.1"
+  checklist entries are now a single option. Needs a DP→HDMI 2.1 adapter; a
+  native DisplayPort monitor is unaffected. If the display stays dark after
+  installing, boot with `amdgpu.bc250_hdmi21=0` — no rebuild needed.
+- **Changed:** Both patches adapted to Valve's SteamOS kernel
+  (7.2.4-valve1-1-neptune-72) and verified to apply with zero fuzz, in order
+  (PCON first, then DSC, which depends on the config field the PCON patch adds).
+- **Changed:** FSR4 default bridge is now the BC-250 fork's RC10 (4.1.1r10),
+  which trims cold shader compilation setup time (no FPS change). The toolkit
+  pulls it through the MastaG Proton packages; help text updated to RC10.
+- **Fixed:** `amdgpu.cs_legacy_8core_metrics=1` is no longer offered blindly on
+  kernel 7.x. The toolkit now reads `/sys/class/dmi/id/bios_version` and decides:
+  a stock BIOS (`P3.00`) needs the legacy 8-core telemetry layout, while a modded
+  BIOS (the current community BIOS carries the SMU telemetry patch) does not — and
+  if the parameter is already in GRUB on a modded board, the toolkit offers to
+  remove it. On the patched firmware the legacy decode makes most per-core
+  temperatures read 0, which is what several community users hit after install.
+- **Docs:** added `docs/dsc-hdmi21-pcon.md`; the deprecated YCbCr 4:4:4 FRL doc
+  now points at it.
+
 ## v1.9.2 — 2026-09-15
 
 - **Fixed:** Dual-output audio (option 12) upgraded to MastaG v0.14. E-AC-3
