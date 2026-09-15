@@ -2646,6 +2646,39 @@ audio_fix_remove_cs_legacy_grub_param() {
     print_info "Removed amdgpu.cs_legacy_8core_metrics=1 from GRUB."
 }
 
+# The 8-core SMU metrics layout depends on the BIOS: the current community BIOS
+# carries the SMU telemetry patch (136-byte tables), while a stock ASRock board
+# (P3.00) and older modded BIOSes do not (116-byte tables). Only the latter need
+# amdgpu.cs_legacy_8core_metrics=1; on the patched firmware the legacy decode
+# produces garbage, which reads as most per-core temperatures being 0.
+bc250_bios_version() {
+    cat /sys/class/dmi/id/bios_version 2>/dev/null || echo "unknown"
+}
+
+audio_fix_cs_legacy_grub_installed() {
+    [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.cs_legacy_8core_metrics=1' "$GRUB_DEFAULT" >/dev/null 2>&1
+}
+
+audio_fix_ensure_cs_legacy_grub_param() {
+    audio_fix_cs_legacy_grub_installed && return 0
+    if [[ ! -f "$GRUB_DEFAULT" ]] || ! command -v update-grub >/dev/null 2>&1; then
+        print_info "Could not add amdgpu.cs_legacy_8core_metrics=1 to GRUB (missing $GRUB_DEFAULT or update-grub)."
+        print_info "Add it manually: edit $GRUB_DEFAULT and run sudo update-grub."
+        return 0
+    fi
+    steamos_writable "
+        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
+        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.cs_legacy_8core_metrics=1'; then
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.cs_legacy_8core_metrics=1\"/' \"$GRUB_DEFAULT\"
+        fi
+        update-grub
+    " || {
+        print_info "Failed to add amdgpu.cs_legacy_8core_metrics=1 to GRUB. Add it manually."
+        return 0
+    }
+    print_info "Added amdgpu.cs_legacy_8core_metrics=1 to GRUB. Reboot to activate correct telemetry."
+}
+
 audio_fix_cleanup_legacy_edid() {
     local changed=0
 
@@ -3870,7 +3903,7 @@ install_fsr4_proton() {
     echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%            # disable FSR4 upgrade${RESET}"
     echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%               # FSR4 watermark + OptiScaler log${RESET}"
     echo -e "  ${DIM}  RADV_GFX103=1 %command%                    # enable mesh/task shaders${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=signed %command%     # use AMD's signed FSR4 build (default: fsr411f RC9)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=signed %command%     # use AMD's signed FSR4 build (default: fsr411f RC10)${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411b %command%     # third-party 4.1.1b, RDNA2 ghosting fix${RESET}"
     echo -e "  ${DIM}  PROTON_OPTISCALER_NAME=dxgi.dll %command%  # fix for games shipping own winmm.dll${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true\" %command%  # enable DLSS+Reflex via OptiScaler${RESET}"
@@ -4198,7 +4231,7 @@ install_combined_fix() {
     echo -e "  ${DIM}Select which components to include in this build:${RESET}"
     echo ""
 
-    local do_audio=0 do_gfx=0 do_dsc=0 do_dsc_pcon=0
+    local do_audio=0 do_gfx=0 do_dsc=0
     local patch_flags=()
 
     # Detect kernel major and minor version for version-specific skip logic
@@ -4216,10 +4249,9 @@ install_combined_fix() {
         "+TTM NULL-page Guard:Prevent crashes from NULL page mappings"
     )
 
-    # DSC and DSC PCON only on kernel 7.x
+    # DSC + HDMI 2.1 PCON is one feature (one amdgpu.bc250_hdmi21 switch); kernel 7.x only
     if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+DSC Enable (Exp):Enable Display Stream Compression for PSVR2/4K120 via DP")
-        checklist_items+=("+DSC PCON HDMI 2.1 (Exp):Enable HDMI 2.1 FRL PCON support for 4K120 via DP-HDMI")
+        checklist_items+=("+DSC + HDMI 2.1 PCON (Exp):4K120 4:4:4 via DP->HDMI 2.1 (amdgpu.bc250_hdmi21=0 disables)")
     fi
 
     # DP Spread Spectrum only needed before kernel 7.2 (upstream since then)
@@ -4255,22 +4287,18 @@ install_combined_fix() {
         patch_flags+=(--gfx1013)
     fi
 
-    if [[ " $selected_str " == *" DSC Enable "* ]]; then
+    if [[ " $selected_str " == *" DSC + HDMI 2.1 PCON "* ]]; then
         do_dsc=1
         patch_flags+=(--dsc)
     fi
-    if [[ " $selected_str " == *" DSC PCON HDMI 2.1 "* ]]; then
-        do_dsc_pcon=1
-        patch_flags+=(--dsc-pcon)
-    fi
 
-    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_dsc -eq 0 && $do_dsc_pcon -eq 0 ]]; then
+    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_dsc -eq 0 ]]; then
         print_info "No patches selected. Nothing to do."
         return 0
     fi
 
     # Only validate build prerequisites if actual kernel/Mesa patches are selected
-    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 || $do_dsc_pcon -eq 1 ]]; then
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 ]]; then
         validate_combined_fix_prerequisites "$do_gfx" || return 1
     fi
 
@@ -4297,7 +4325,7 @@ install_combined_fix() {
     fi
 
     # Apply kernel/Mesa patches if any are selected
-    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 || $do_dsc_pcon -eq 1 ]]; then
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 ]]; then
         fixes_repo_sync || return 1
 
         local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
@@ -4356,38 +4384,55 @@ install_combined_fix() {
         [[ $do_audio -eq 1 ]] && persist_state_add "audio"
         [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
         [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+        if [[ $do_dsc -eq 1 ]]; then
+            echo ""
+            echo -e "  ${DIM}DSC + HDMI 2.1 PCON is on by default (amdgpu.bc250_hdmi21=1).${RESET}"
+            echo -e "  ${DIM}4K120 4:4:4 needs a DP->HDMI 2.1 adapter; a native DP monitor is unaffected.${RESET}"
+            echo -e "  ${DIM}If the display stays dark after reboot, boot with ${RESET}${BOLD}amdgpu.bc250_hdmi21=0${RESET}${DIM} (add it to${RESET}"
+            echo -e "  ${DIM}GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub, then run update-grub).${RESET}"
+        fi
         print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
     fi
 
-    # Kernel 7.x telemetry: 8-core without patched SMU BIOS needs cs_legacy_8core_metrics=1
+    # Kernel 7.x telemetry: the 8-core layout the SMU reports depends on the BIOS.
+    # The current community BIOS carries the SMU telemetry patch, so the default
+    # (SMU-patched) decode is correct and the legacy one produces garbage — most
+    # per-core temperatures read 0. A stock ASRock board (P3.00) and older modded
+    # BIOSes are the other way round and need amdgpu.cs_legacy_8core_metrics=1.
     if [[ "$do_audio" -eq 1 && "$kver_major" -ge 7 ]]; then
-        # BC-250 always has 8 cores / 16 threads physically — don't check nproc
-        # (core unlock may not be applied yet in manual install)
-            if [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*amdgpu\.cs_legacy_8core_metrics=1' "$GRUB_DEFAULT" >/dev/null 2>&1; then
-                : # already set
+        local bios_ver
+        bios_ver=$(bc250_bios_version)
+        if [[ "$bios_ver" == "P3.00" ]]; then
+            if audio_fix_cs_legacy_grub_installed; then
+                print_info "Stock BIOS ($bios_ver): amdgpu.cs_legacy_8core_metrics=1 already in GRUB — correct for 8-core telemetry."
             else
                 echo ""
-                echo -e "  ${YELLOW}8-core detected with kernel 7.x telemetry patch.${RESET}"
-                echo -e "  ${DIM}The new telemetry patch defaults to the SMU-patched 8-core layout (136-byte tables).${RESET}"
-                echo -e "  ${DIM}If your BIOS does NOT have the SMU telemetry patch (stock BIOS P3.00),${RESET}"
-                echo -e "  ${DIM}GPU temperature and some metrics will read as 0 until you add:${RESET}"
-                echo -e "  ${CYAN}amdgpu.cs_legacy_8core_metrics=1${RESET} ${DIM}to the kernel command line.${RESET}"
+                echo -e "  ${YELLOW}Stock BIOS detected ($bios_ver) with the kernel 7.x telemetry patch.${RESET}"
+                echo -e "  ${DIM}The telemetry patch defaults to the SMU-patched 8-core layout; a stock BIOS${RESET}"
+                echo -e "  ${DIM}needs the legacy layout or GPU temperature reads 0 after unlocking 8 cores.${RESET}"
                 echo ""
-                if confirm "Are you running a stock BIOS (no SMU patch)? Add cs_legacy_8core_metrics=1 to GRUB?"; then
-                    steamos_writable "
-                        cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
-                        if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.cs_legacy_8core_metrics=1'; then
-                            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.cs_legacy_8core_metrics=1\"/' \"$GRUB_DEFAULT\"
-                        fi
-                        update-grub
-                    " || {
-                        print_info "Failed to add amdgpu.cs_legacy_8core_metrics=1 to GRUB. Add it manually."
-                    }
-                    print_info "Added amdgpu.cs_legacy_8core_metrics=1 to GRUB. Reboot to activate correct telemetry."
+                if confirm "Add amdgpu.cs_legacy_8core_metrics=1 to GRUB (correct for a stock BIOS)?"; then
+                    audio_fix_ensure_cs_legacy_grub_param
                 else
-                    print_info "Skipped. If GPU temperature reads 0, add amdgpu.cs_legacy_8core_metrics=1 to GRUB manually."
+                    print_info "Skipped. If GPU temperature reads 0 on 8 cores, add amdgpu.cs_legacy_8core_metrics=1 to GRUB manually."
                 fi
             fi
+        else
+            if audio_fix_cs_legacy_grub_installed; then
+                echo ""
+                echo -e "  ${YELLOW}Modded BIOS detected ($bios_ver) but amdgpu.cs_legacy_8core_metrics=1 is in GRUB.${RESET}"
+                echo -e "  ${DIM}If this BIOS carries the SMU telemetry patch (the current community BIOS),${RESET}"
+                echo -e "  ${DIM}that legacy decode makes telemetry read 0. It should be removed.${RESET}"
+                echo ""
+                if confirm "Remove amdgpu.cs_legacy_8core_metrics=1 from GRUB?"; then
+                    audio_fix_remove_cs_legacy_grub_param
+                else
+                    print_info "Kept. Only correct on a BIOS without the SMU telemetry patch."
+                fi
+            else
+                print_info "Modded BIOS ($bios_ver): the default telemetry layout is in use — no GRUB change needed."
+            fi
+        fi
     fi
 
     echo ""

@@ -1,25 +1,100 @@
 From: BC-250 SteamOS Real Toolkit
-Subject: [PATCH] dcn201: enable DP-HDMI 2.1 PCON support
+Subject: [PATCH] drm/amd/display: HDMI 2.1 PCON support on DCN201 (amdgpu.bc250_hdmi21)
 
-Set dc->caps.dp_hdmi21_pcon_support = true to allow DCN201 to negotiate
-HDMI 2.1 FRL through a DP-to-HDMI PCON bridge chip (e.g. CH7218).
+Advertise dc->caps.dp_hdmi21_pcon_support on DCN201, behind a BC-250
+module parameter, amdgpu.bc250_hdmi21, that defaults to on and exists
+so that amdgpu.bc250_hdmi21=0 gives an unpatched kernel back.
 
-This is separate from DSC enable — it only advertises the PCON HDMI 2.1
-capability to the display core. DSC must be enabled separately for
-modes that require compression (e.g. 4K120).
+DCN201 is the only DCN2-class resource pool that leaves that flag false.
+What it gates is which ceiling link_validation.c checks a mode against
+through a DP-to-HDMI converter: with it set, the converter's FRL link
+bandwidth read from DPCD; without it, the converter's TMDS pixel-clock
+limit (one DPCD byte times 2.5 MHz, 600 MHz in practice). Against 600
+MHz, 4K120 is reachable only at 4:2:0 8-bit and 4K60 HDR only via 4:2:2,
+whatever the adapter's own HDMI side can do.
 
-Based on investigation by alex-reid:
-https://gist.github.com/alex-reid/b55328c246ade7baef8566fb2cadea9b
+The parameter is plumbed the way DC expects OS-side switches to arrive:
+amdgpu_drv.c defines it, amdgpu_dm.c copies it into dc_init_data.flags,
+and it lands in dc->config.bc250_hdmi21, which the resource pool reads.
+With amdgpu.bc250_hdmi21=0 every touched path is identical to an
+unpatched kernel.
 
+Author: TeleBooth, published at
+https://gist.github.com/TeleBooth/d88ef745895d444a401d0e621de9818e
+as bc250-dcn201-pcon-hdmi21.patch (the file itself is signed "Anonymous").
+Adapted for the BC-250 SteamOS Real Toolkit against Valve's kernel
+(7.2.4-valve1-1-neptune-72): default on, =0 is the off switch so a user
+whose display goes dark can recover from the GRUB command line without
+rebuilding the kernel.
+
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu.h
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+@@ -261,6 +261,7 @@
+ #define AMDGPU_UMSCHFW_LOG_SIZE (32 * 1024)
+ extern int amdgpu_vcnfw_log;
+ extern int amdgpu_sg_display;
++extern int amdgpu_bc250_hdmi21;
+ extern int amdgpu_umsch_mm;
+ extern int amdgpu_seamless;
+ extern int amdgpu_umsch_mm_fwlog;
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+@@ -237,6 +237,7 @@
+ int amdgpu_use_xgmi_p2p = 1;
+ int amdgpu_vcnfw_log;
+ int amdgpu_sg_display = -1; /* auto */
++int amdgpu_bc250_hdmi21 = 1;
+ int amdgpu_user_partt_mode = AMDGPU_AUTO_COMPUTE_PARTITION_MODE;
+ int amdgpu_indirect_sram = -1;
+ int amdgpu_umsch_mm;
+@@ -991,6 +992,16 @@
+  */
+ MODULE_PARM_DESC(sg_display, "S/G Display (-1 = auto (default), 0 = disable)");
+ module_param_named(sg_display, amdgpu_sg_display, int, 0444);
++/**
++ * DOC: bc250_hdmi21 (int)
++ * BC-250 (Cyan Skillfish, DCN 2.0.1) only. Enable HDMI 2.1 PCON negotiation
++ * and the two on-die DSC engines, both of which the DCN201 driver otherwise
++ * leaves disabled. Needed for 4K120 at 4:4:4 through a DP 1.4 to HDMI 2.1
++ * FRL adapter; inert on a native DisplayPort monitor or a passive adapter.
++ * (0 = disabled, 1 = enabled (default))
++ */
++MODULE_PARM_DESC(bc250_hdmi21, "BC-250: HDMI 2.1 PCON and DSC on DCN201 (0 = disabled, 1 = enabled (default))");
++module_param_named(bc250_hdmi21, amdgpu_bc250_hdmi21, int, 0444);
+ 
+ /**
+  * DOC: umsch_mm (int)
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+@@ -2245,6 +2245,8 @@
+ 	if (amdgpu_dc_feature_mask & DC_FRL_MASK)
+ 		init_data.flags.enable_frl = true;
+ 
++	init_data.flags.bc250_hdmi21 = (amdgpu_bc250_hdmi21 != 0);
++
+ 	init_data.flags.seamless_boot_edp_requested = false;
+ 
+ 	if (amdgpu_device_seamless_boot_supported(adev)) {
+--- a/drivers/gpu/drm/amd/display/dc/dc.h
++++ b/drivers/gpu/drm/amd/display/dc/dc.h
+@@ -590,6 +590,7 @@
+ 	bool ignore_dpref_ss;
+ 	bool enable_mipi_converter_optimization;
+ 	bool enable_frl;
++	bool bc250_hdmi21;
+ 	bool force_hdmi21_frl_enc_enable;
+ 	bool skip_frl_pretraining;
+ 	bool use_default_clock_table;
 --- a/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c
 +++ b/drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c
-@@ -1326,6 +1326,8 @@
+@@ -1331,6 +1331,10 @@
+ 
  	dc->caps.max_odm_combine_factor = 2;
  
++	/* BC-250: amdgpu.bc250_hdmi21, on by default; 0 restores stock behaviour */
++	if (dc->config.bc250_hdmi21)
++		dc->caps.dp_hdmi21_pcon_support = true;
++
  	dc->cap_funcs = cap_funcs;
  
-+	dc->caps.dp_hdmi21_pcon_support = true;
-+
  	return true;
- 
- create_fail:

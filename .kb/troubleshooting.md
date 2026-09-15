@@ -105,3 +105,34 @@ ls -la /lib/firmware/edid/
 # dmesg for PCON/FRL
 dmesg | grep -iE 'CH7218|PCON|FRL|frl_lt|dongle'
 ```
+
+## Telemetry Issues
+
+### GPU temperature / per-core metrics read 0 after install (8 cores unlocked)
+- **Symptom**: after installing the Combined Fix on a modded-BIOS board, GPU
+  temperature and most per-core metrics read 0 (or garbage) in amdgpu_top /
+  MangoHud.
+- **Root cause**: the kernel 7.x telemetry patch defaults to the SMU-patched
+  8-core layout (136-byte tables). `amdgpu.cs_legacy_8core_metrics=1` selects the
+  older 116-byte layout instead. Only a BIOS **without** the SMU telemetry patch
+  needs the legacy layout; on the patched firmware it produces garbage.
+- **Which BIOS needs what**:
+  | BIOS | `cs_legacy_8core_metrics=1`? |
+  |---|---|
+  | Stock ASRock `P3.00` (12/09/2021) | yes |
+  | Older modded BIOS (unlocks cores, no SMU patch) | yes |
+  | Current community BIOS (carries SMU telemetry patch) | no |
+- **Fix (test at runtime, no reboot)**: the parameter is writable.
+  ```bash
+  echo 0 | sudo tee /sys/module/amdgpu/parameters/cs_legacy_8core_metrics
+  # then check amdgpu_top / MangoHud
+  echo 1 | sudo tee /sys/module/amdgpu/parameters/cs_full_telemetry
+  cat /sys/bus/pci/devices/0000:01:00.0/pp_dpm_socclk   # shows layout + per-core
+  ```
+  If telemetry returns, remove the param from GRUB permanently
+  (`audio_fix_remove_cs_legacy_grub_param` does it; manually: sed out
+  `amdgpu.cs_legacy_8core_metrics=1` from `/etc/default/grub`, `update-grub`,
+  with `steamos-readonly disable/enable` on SteamOS).
+- **Detect the BIOS**: `cat /sys/class/dmi/id/bios_version` (`P3.00` = stock).
+- **Toolkit behaviour (v1.9.3+)**: reads the BIOS version and only offers the
+  param on a stock BIOS; on a modded board it offers to remove it if present.
