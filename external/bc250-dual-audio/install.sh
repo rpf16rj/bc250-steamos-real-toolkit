@@ -11,8 +11,8 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$HOME/.local/state/bc250-audio-backup/$STAMP"
 mkdir -p "$BACKUP/user" "$BACKUP/system"
 
-echo "BC-250 Dual Audio v0.13 installer"
-echo "Native HDMI/DP + AC3 448 kbps"
+echo "BC-250 Dual Audio v0.14 installer"
+echo "Native HDMI/DP + AC3 640 kbps"
 echo "Backup: $BACKUP"
 
 # ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@ fi
 if [[ -f "$STOCK_ALSA" && "${BC250_ALLOW_UNTESTED_WP:-0}" != "1" ]]; then
   STOCK_ALSA_SHA256=$(sha256sum "$STOCK_ALSA" | awk '{print $1}')
   if [[ "$STOCK_ALSA_SHA256" != "$EXPECTED_STOCK_ALSA_SHA256" ]]; then
-    echo "ERROR: distro stock alsa.lua does not match the WirePlumber 0.5.17 base used by v0.13." >&2
+    echo "ERROR: distro stock alsa.lua does not match the WirePlumber 0.5.17 base used by v0.14." >&2
     echo "Expected: $EXPECTED_STOCK_ALSA_SHA256" >&2
     echo "Found:    $STOCK_ALSA_SHA256" >&2
     echo "Refusing to install a full monitor shadow override onto an unknown base." >&2
@@ -42,17 +42,12 @@ if [[ -f "$STOCK_ALSA" && "${BC250_ALLOW_UNTESTED_WP:-0}" != "1" ]]; then
   fi
 fi
 
-for cmd in ffmpeg aplay pactl wpctl pw-metadata dd sha256sum grep tr stat; do
+for cmd in pactl wpctl pw-metadata sha256sum grep tr awk; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: required command not found: $cmd" >&2
     exit 4
   fi
 done
-
-if ! ffmpeg -hide_banner -muxers 2>/dev/null | grep -Eq '[[:space:]]spdif[[:space:]]'; then
-  echo "ERROR: this FFmpeg build has no IEC61937/SPDIF muxer." >&2
-  exit 6
-fi
 
 # Remember whether v0.7's old AC3 node was the configured default so we can
 # migrate it to the new SteamOS-friendly node.name after PipeWire restarts.
@@ -60,10 +55,19 @@ OLD_CONFIGURED_SINK=$(pw-metadata -n default 0 2>/dev/null | \
   sed -n 's/.*default\.configured\.audio\.sink.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | \
   head -1 || true)
 MIGRATE_LEGACY_AC3=0
-if [[ "$OLD_CONFIGURED_SINK" == "bc250_ac3" || "$OLD_CONFIGURED_SINK" == "bc250_ac3_448" ]]; then
-  MIGRATE_LEGACY_AC3=1
-  echo "Will migrate configured default $OLD_CONFIGURED_SINK -> dolby_digital_ac3"
-fi
+case "$OLD_CONFIGURED_SINK" in
+  bc250_ac3|bc250_ac3_448|dolby_digital_ac3)
+    MIGRATE_LEGACY_AC3=1
+    [[ "$OLD_CONFIGURED_SINK" != "dolby_digital_ac3" ]] && \
+      echo "Will migrate configured default $OLD_CONFIGURED_SINK -> dolby_digital_ac3"
+    ;;
+  bc250_eac3|bc250_eac3_768|dolby_digital_plus)
+    # v0.14 removed E-AC-3. Anyone whose saved default was an E-AC-3 sink is
+    # moved to AC-3 rather than left pointing at a sink that no longer exists.
+    MIGRATE_LEGACY_AC3=1
+    echo "Will migrate configured default $OLD_CONFIGURED_SINK -> dolby_digital_ac3 (E-AC-3 removed in v0.14)"
+    ;;
+esac
 
 backup_user_file() {
   local path=$1
@@ -97,6 +101,10 @@ backup_system_file "/etc/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf" "sy
 backup_system_file "/etc/alsa/conf.d/61-bc250-a52.conf" "system-61-bc250-a52.conf"
 backup_system_file "/usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua" "system-90-bc250-audio-mode.lua"
 backup_system_file "/usr/local/share/wireplumber/scripts/monitors/alsa.lua" "system-alsa.lua"
+# Still backed up, not still installed: these are what a v0.13 system has, and
+# rollback.sh restores them if someone goes back.
+backup_system_file "/usr/local/libexec/bc250-eac3-backend" "system-bc250-eac3-backend"
+backup_system_file "/etc/systemd/user/bc250-eac3-backend.service" "system-bc250-eac3-backend.service"
 
 echo "$BACKUP" > "$HOME/.local/state/bc250-audio-last-backup"
 
@@ -138,10 +146,17 @@ sudo install -m 0644 "$ROOT_DIR/usr/local/share/wireplumber/scripts/90-bc250-aud
   /usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
 sudo install -m 0644 "$ROOT_DIR/usr/local/share/wireplumber/scripts/monitors/alsa.lua" \
   /usr/local/share/wireplumber/scripts/monitors/alsa.lua
-# Stop and remove any leftover EAC3 backend from a previous v0.12 install
+# Stop and remove any leftover EAC3 backend from a previous v0.12/v0.13 install.
+# v0.14 removed E-AC-3 entirely. Anyone coming from v0.13 has a resident helper
+# service holding a FIFO, and leaving it enabled would keep a unit running with
+# nothing to feed it -- and keep a claimant for hw:Generic,3 around. Retire it
+# here rather than expecting people to know it existed.
 systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
-sudo rm -f /usr/local/libexec/bc250-eac3-backend
-sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
+sudo rm -f /etc/systemd/user/bc250-eac3-backend.service \
+  /usr/local/libexec/bc250-eac3-backend \
+  /usr/local/libexec/bc250-pipe-size
+rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bc250-eac3-768.pcm" \
+      "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bc250-eac3.pcm"
 systemctl --user daemon-reload
 
 echo

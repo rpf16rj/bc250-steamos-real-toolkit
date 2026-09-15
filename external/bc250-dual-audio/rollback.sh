@@ -76,7 +76,7 @@ restore_system "system-90-bc250-audio-mode.lua" "/usr/local/share/wireplumber/sc
 restore_system "system-alsa.lua" "/usr/local/share/wireplumber/scripts/monitors/alsa.lua"
 systemctl --user daemon-reload
 
-# Remove any leftover EAC3 backend (EAC3 was removed in v0.13)
+# Remove any leftover EAC3 backend (E-AC-3 removed in v0.14)
 systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
 sudo rm -f /etc/systemd/user/bc250-eac3-backend.service
 sudo rm -f /usr/local/libexec/bc250-eac3-backend
