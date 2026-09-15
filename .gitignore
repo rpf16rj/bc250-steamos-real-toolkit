@@ -29,3 +29,6 @@
 /external/bc250-core-unlock/bc250-core-unlock-boot.sh
 /nohup.out
 /external/bc250-steamos/**/.patch-driver.lock
+
+# Personal agent rules (local only)
+/AGENTS.local.md

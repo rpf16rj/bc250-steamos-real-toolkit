@@ -10,8 +10,10 @@
 # --gfx1013 is forwarded to build.sh (GFX1013 compute queue fix patches for
 # async compute support on BC-250). When --gfx1013 is used alone, audio fix
 # patches are NOT applied. Use --gfx1013 --audio to apply both sets of patches.
-# --dsc applies the DCN201 DSC enable patch (Display Stream Compression).
-# --dsc-pcon applies the DCN201 PCON HDMI 2.1 patch (dp_hdmi21_pcon_support).
+# --dsc applies the DCN201 DSC + PCON HDMI 2.1 patch pair (Display Stream
+# Compression and HDMI 2.1 FRL PCON, both gated at runtime by
+# amdgpu.bc250_hdmi21, on by default; amdgpu.bc250_hdmi21=0 disables them).
+# --dsc-pcon is accepted as an alias for --dsc.
 # --no-ss skips the DP spread spectrum disable patch (within --audio).
 # --no-telemetry skips the Cyan Skillfish telemetry+cache patch (within --audio).
 # --no-ttm skips the TTM NULL-page guard patch.
@@ -154,7 +156,6 @@ flock 9
 WITH_GFX1013=()
 WITH_AUDIO=()
 WITH_DSC=()
-WITH_DSC_PCON=()
 NO_SS=()
 NO_TELEMETRY=()
 NO_TTM=()
@@ -166,7 +167,7 @@ for a in "$@"; do
         --gfx1013)        WITH_GFX1013=(--gfx1013) ;;
         --audio)          WITH_AUDIO=(--audio) ;;
         --dsc)            WITH_DSC=(--dsc) ;;
-        --dsc-pcon)       WITH_DSC_PCON=(--dsc-pcon) ;;
+        --dsc-pcon)       WITH_DSC=(--dsc) ;;
         --no-ss)          NO_SS=(--no-ss) ;;
         --no-telemetry)   NO_TELEMETRY=(--no-telemetry) ;;
         --no-ttm)         NO_TTM=(--no-ttm) ;;
@@ -177,5 +178,5 @@ for a in "$@"; do
 done
 
 "$HERE/fetch-sources.sh" "${ARGS[@]}"
-"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_DSC[@]}" "${WITH_DSC_PCON[@]}" "${NO_SS[@]}" "${NO_TELEMETRY[@]}" "${NO_TTM[@]}" "${NO_SCLK[@]}" "${NO_KFD[@]}" "${ARGS[@]}"
+"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_DSC[@]}" "${NO_SS[@]}" "${NO_TELEMETRY[@]}" "${NO_TTM[@]}" "${NO_SCLK[@]}" "${NO_KFD[@]}" "${ARGS[@]}"
 sudo "$HERE/install.sh"

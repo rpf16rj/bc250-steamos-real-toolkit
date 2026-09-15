@@ -96,6 +96,8 @@ external/
 
 ## Git Policy
 - **Never commit to develop or main without explicit user permission**
+- **Never commit, push to main, or cut a release unless the user explicitly asks at that moment.
+  The user always wants to test first — finish the work, then stop and wait for them.**
 - `develop` is where work happens
 - `main` only receives merges at release time (GitFlow)
 - `.kb/` is local-only (in .gitignore)

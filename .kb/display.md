@@ -9,6 +9,35 @@ GPU (DCN201) → DisplayPort → CH7218 PCON → HDMI 2.1 → Samsung Q80A (HDMI
 The BC-250 has no native HDMI output. Display goes through DisplayPort to a
 CH7218 PCON (Protocol Converter) dongle, which converts DP to HDMI 2.1 with FRL.
 
+## DSC + HDMI 2.1 PCON (current, v1.9.3)
+Two patches on DCN201, gated by one kernel parameter `amdgpu.bc250_hdmi21`
+(on by default; `=0` restores stock behaviour, path-for-path):
+- `bc250-dcn201-pcon-hdmi21.patch` — sets `dc->caps.dp_hdmi21_pcon_support`.
+  Without it, link validation checks the PCON against its TMDS pixel-clock limit
+  (600 MHz), so 4K120 only fits at 4:2:0 and 4K60 HDR only via 4:2:2.
+- `bc250-dcn201-dsc-enable.patch` — selects a second `resource_caps` with
+  `num_dsc = 2`, creates the DSC objects via `dcn20_dsc_create()`, wires
+  `dcn20_add_dsc_to_stream_resource`, and sets `dcn201_ip.num_dsc` before
+  `dml_init_instance()` (DML reads NumberOfDSC from there).
+
+Both are the upstream TeleBooth versions (carried by MastaG), adapted to Valve's
+kernel 7.2.4-valve1-1-neptune-72. Applied as one unit by the Combined Fix; the
+DSC patch depends on the `dc->config.bc250_hdmi21` field the PCON patch adds.
+They supersede the removed YCbCr 4:4:4 / FRL workaround patches. See
+`docs/dsc-hdmi21-pcon.md`.
+
+**Verified on the BC-250 (2026-09-15):** after Combined Fix + reboot,
+`cat /sys/module/amdgpu/parameters/bc250_hdmi21` = 1 (no GRUB entry needed —
+the default is compiled in) and `dmesg` shows `DP-HDMI FRL PCON supported`.
+`dsc_clock` does not appear in dmesg at desktop/login (4K60/4:2:0 fits
+uncompressed); it only engages for a mode that needs it (4K120 4:4:4) and is
+read from debugfs, not dmesg.
+
+Recovery: if the display stays dark after installing, boot with
+`amdgpu.bc250_hdmi21=0` (GRUB `GRUB_CMDLINE_LINUX_DEFAULT` + `update-grub`).
+Some DP→HDMI adapters show black from boot until a hotplug even with the feature
+off — that's a BIOS/GOP→amdgpu handover issue, not these patches.
+
 ## FRL (Fixed Rate Link)
 - FRL is HDMI 2.1's high-bandwidth transport, replacing TMDS for high-res modes
 - CH7218 supports FRL up to 48 Gbps (4 lanes × 12 Gbps)

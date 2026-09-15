@@ -23,6 +23,9 @@ Local knowledge base for Cascade. Not committed to git.
 6. Always simplify: prefer the simplest functional solution, minimal code, efficient logic
 7. For any command, always look in the KB first
 8. When editing a very large file, use a piecemeal edit approach to save time and tokens
+9. **NEVER commit, push to main, or release a version unless the user explicitly asks in that
+   moment. The user always wants to test changes first. Do the work, then stop and let them
+   test — never release on your own initiative.**
 
 ## Tags
 Each file starts with `<!-- tags: ... -->` listing keywords for fast grep-based lookup.

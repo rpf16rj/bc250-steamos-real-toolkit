@@ -50,8 +50,10 @@ relax_libbpf_host_tool_werror() {
 
 WITH_GFX1013=0
 WITH_AUDIO=0
-WITH_DSC=0
-WITH_DSC_PCON=0
+# DSC and PCON HDMI 2.1 are one feature: the DSC patch depends on
+# dc->config.bc250_hdmi21, which the PCON patch adds, and both are gated at
+# runtime by amdgpu.bc250_hdmi21. Either flag enables the pair.
+WITH_DSC_HDMI21=0
 NO_SS=0
 NO_TELEMETRY=0
 NO_TTM=0
@@ -64,8 +66,8 @@ for a in "$@"; do
     case "$a" in
         --gfx1013)        WITH_GFX1013=1 ;;
         --audio)          WITH_AUDIO=1 ;;
-        --dsc)            WITH_DSC=1 ;;
-        --dsc-pcon)       WITH_DSC_PCON=1 ;;
+        --dsc)            WITH_DSC_HDMI21=1 ;;
+        --dsc-pcon)       WITH_DSC_HDMI21=1 ;;
         --no-ss)          NO_SS=1 ;;
         --no-telemetry)   NO_TELEMETRY=1 ;;
         --no-ttm)         NO_TTM=1 ;;
@@ -478,10 +480,13 @@ else
     fi
 fi
 
-# DSC PCON HDMI 2.1 must be applied BEFORE DSC enable (order matters for clean apply)
-if [ "$WITH_DSC_PCON" = 1 ]; then
+# DSC + PCON HDMI 2.1 are one feature now (two patches, one amdgpu.bc250_hdmi21
+# switch). The DSC patch reads dc->config.bc250_hdmi21, which the PCON patch
+# adds, so PCON is applied first and reversed last.
+PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
+DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
+if [ "$WITH_DSC_HDMI21" = 1 ]; then
     step "apply DCN201 PCON HDMI 2.1 patch (dp_hdmi21_pcon_support)"
-    PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
         echo "DCN201 PCON HDMI 2.1 patch already applied"
     elif patch -p1 --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
@@ -490,18 +495,8 @@ if [ "$WITH_DSC_PCON" = 1 ]; then
     else
         die "DCN201 PCON HDMI 2.1 patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
-else
-    step "skipping DCN201 PCON HDMI 2.1 patch (not requested)"
-    PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
-    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
-        patch -p1 -R --fuzz=3 -s < "$PCON_PATCH"
-        echo "DCN201 PCON HDMI 2.1 patch REVERSED (leftover from a previous build)"
-    fi
-fi
 
-if [ "$WITH_DSC" = 1 ]; then
     step "apply DCN201 DSC enable patch (DCN200-compatible DSC engines)"
-    DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
         echo "DCN201 DSC enable patch already applied"
     elif patch -p1 --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
@@ -511,11 +506,15 @@ if [ "$WITH_DSC" = 1 ]; then
         die "DCN201 DSC enable patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 else
-    step "skipping DCN201 DSC enable patch (not requested)"
-    DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
+    step "skipping DCN201 DSC + PCON HDMI 2.1 patches (not requested)"
+    # Reverse in the opposite order they were applied: DSC first, then PCON.
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$DSC_PATCH"
         echo "DCN201 DSC enable patch REVERSED (leftover from a previous build)"
+    fi
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$PCON_PATCH"
+        echo "DCN201 PCON HDMI 2.1 patch REVERSED (leftover from a previous build)"
     fi
 fi
 
