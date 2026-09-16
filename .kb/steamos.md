@@ -38,7 +38,17 @@ EFI (nvme0n1p1) → steamcl.efi → GRUB → vmlinuz-linux-neptune-72
   `/etc/grub.d/42_bc250-recovery` writes the two menuentries, `update-grub`
   regenerates `/efi/EFI/steamos/grub.cfg` (log: "Installing grub configuration
   file at /efi/EFI/steamos/grub.cfg"), and the toolkit's post-check finds
-  "BC-250 recovery: HDMI21-DSC OFF" in it. They show up in the Esc boot menu.
+  "BC-250 recovery: HDMI21-DSC OFF" in it. They show up in the boot menu.
+- **The GRUB menu is hidden by default and `GRUB_TIMEOUT` does nothing.**
+  `00_header` never emits `set timeout=${GRUB_TIMEOUT}`; it hardcodes
+  `timeout=0` / `timeout_style=menu` in its steamenv block and calls
+  `steamenv_init`, which sets the timeout from GRUB's command-line args passed
+  by `steamcl.efi`. On a Steam Deck, holding the "..." button makes steamcl
+  request the menu; a BC-250 has no such button, so the menu never appears and
+  pressing Esc/arrows does nothing (no countdown window). To show it, a later
+  grub.d script must emit `set timeout=N` / `set timeout_style=menu` (it runs
+  after 00_header, so it overrides). The toolkit's recovery script sets a 3 s
+  timeout for this. Verified: the menu appeared after adding the override.
 
 ## EFI Partitions
 - `/esp` (nvme0n1p1) — EFI System Partition (bootloader, steamcl.efi)

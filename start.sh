@@ -6722,6 +6722,11 @@ run_extras_menu() {
 # so the entries are plain menuentries rather than /boot/loader/entries files.
 
 RECOVERY_GRUB_SCRIPT="/etc/grub.d/42_bc250-recovery"
+# SteamOS hardcodes timeout=0 and its steamenv_init ignores GRUB_TIMEOUT, so on
+# hardware without the Deck's "..." button the menu never shows. The recovery
+# grub.d script sets this timeout (after 00_header runs) so the entries are
+# reachable at boot. Seconds.
+RECOVERY_MENU_TIMEOUT=3
 RECOVERY_CTL="$PERSIST_STATE_DIR/bc250-recovery-ctl.sh"
 RECOVERY_TOOLKIT_PATH_FILE="$PERSIST_STATE_DIR/toolkit-path"
 RECOVERY_REVERT_UNIT="/etc/systemd/system/bc250-recovery-revert.service"
@@ -6965,6 +6970,16 @@ emit_entry() {
 emit_entry "SteamOS (BC-250 recovery: HDMI21-DSC OFF)" "amdgpu.bc250_hdmi21=0"
 emit_entry "BC-250 RECOVERY: revert whole toolkit and reboot" "bc250.revert_all=1"
 EOF
+    # SteamOS's 00_header hardcodes timeout=0 and its steamenv_init ignores
+    # GRUB_TIMEOUT, so the menu never appears on hardware without the Deck
+    # button. Emit the timeout here — this script runs after 00_header — so the
+    # recovery entries are reachable at boot. Removing this script (and running
+    # update-grub) reverts the menu to hidden.
+    cat >> "$RECOVERY_GRUB_SCRIPT" <<EOF
+
+echo 'set timeout=$RECOVERY_MENU_TIMEOUT'
+echo 'set timeout_style=menu'
+EOF
     chmod 755 "$RECOVERY_GRUB_SCRIPT"
 }
 
@@ -6977,7 +6992,7 @@ install_recovery_entries() {
         return 1
     fi
 
-    if [[ "$auto" != "auto" ]] && ! confirm "This adds two entries to the GRUB menu (Esc during boot): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0) and 'REVERT TOOLKIT' (bc250.revert_all=1 — reverts everything and reboots). Proceed?"; then
+    if [[ "$auto" != "auto" ]] && ! confirm "This adds two entries to the GRUB menu and shows the menu for ${RECOVERY_MENU_TIMEOUT}s at boot (SteamOS hides it by default): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0) and 'REVERT TOOLKIT' (bc250.revert_all=1 — reverts everything and reboots). Proceed?"; then
         print_info "Cancelled."
         return 0
     fi
@@ -7017,7 +7032,7 @@ install_recovery_entries() {
     fi
 
     persist_state_add "recovery_entries"
-    print_info "They appear in the GRUB menu (press ${CYAN}Esc${RESET} during boot). 'REVERT TOOLKIT' reverts everything and reboots automatically."
+    print_info "They appear in the GRUB menu, shown for ${RECOVERY_MENU_TIMEOUT}s at boot. 'REVERT TOOLKIT' reverts everything and reboots automatically."
 }
 
 uninstall_recovery_entries() {
@@ -7047,7 +7062,8 @@ run_recovery_menu() {
         print_banner
         print_section "GRUB Recovery Boot Entries"
         echo ""
-        echo -e "  ${DIM}Adds two extra entries to the GRUB menu (press Esc during boot):${RESET}"
+        echo -e "  ${DIM}Adds two extra entries to the GRUB menu, shown for ${RECOVERY_MENU_TIMEOUT}s at boot${RESET}"
+        echo -e "  ${DIM}(SteamOS hides the menu by default on hardware without the Deck button):${RESET}"
         echo -e "  ${DIM}  • 'HDMI21-DSC patch OFF' — boots with amdgpu.bc250_hdmi21=0 for${RESET}"
         echo -e "  ${DIM}    displays that stay dark with the Combined Fix DSC/PCON patch.${RESET}"
         echo -e "  ${DIM}  • 'REVERT TOOLKIT' — boots with bc250.revert_all=1, reverts the${RESET}"
@@ -7090,7 +7106,7 @@ maybe_prompt_recovery_entries() {
     recovery_entries_installed && return 0
     toolkit_has_installed_components || return 0
     print_section "GRUB Recovery Boot Entries"
-    if confirm "Recovery boot entries are not installed. They add 'HDMI21-DSC OFF' and 'REVERT TOOLKIT' options to the GRUB menu (Esc during boot) — recommended as a safety net. Install now?"; then
+    if confirm "Recovery boot entries are not installed. They add 'HDMI21-DSC OFF' and 'REVERT TOOLKIT' options to the GRUB menu (shown for ${RECOVERY_MENU_TIMEOUT}s at boot) — recommended as a safety net. Install now?"; then
         install_recovery_entries auto
         press_enter
     else
