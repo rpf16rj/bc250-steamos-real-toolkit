@@ -34,6 +34,11 @@ EFI (nvme0n1p1) → steamcl.efi → GRUB → vmlinuz-linux-neptune-72
   `force_ycbcr444` and `force_min_bpc` must use modprobe.d, not GRUB.
 - `GRUB_VIDEO_BACKEND=efi_gop` makes `00_header` emit only `insmod efi_gop`,
   avoiding the missing `efi_uga.mod` boot hang.
+- **Recovery entries — verified working (2026-09-16):** the toolkit's
+  `/etc/grub.d/42_bc250-recovery` writes the two menuentries, `update-grub`
+  regenerates `/efi/EFI/steamos/grub.cfg` (log: "Installing grub configuration
+  file at /efi/EFI/steamos/grub.cfg"), and the toolkit's post-check finds
+  "BC-250 recovery: HDMI21-DSC OFF" in it. They show up in the Esc boot menu.
 
 ## EFI Partitions
 - `/esp` (nvme0n1p1) — EFI System Partition (bootloader, steamcl.efi)
