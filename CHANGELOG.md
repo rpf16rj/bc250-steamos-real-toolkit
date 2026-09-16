@@ -12,15 +12,22 @@ before the toolkit adopted numbered releases.
 - **Added:** GRUB recovery boot entries (Extras → "GRUB Recovery Entries").
   Installed as the first step of Install All, and offered automatically at
   toolkit startup to existing installs that don't have them yet (silent when
-  already installed). Two extra BLS entries cloned from the running
-  kernel's stock entry appear in the GRUB menu (press Esc during boot):
+  already installed). Two extra entries appear in the GRUB menu (press Esc
+  during boot), emitted by a `/etc/grub.d/42_bc250-recovery` script so
+  grub-mkconfig regenerates them on every `update-grub` — including the ones a
+  SteamOS update triggers — and they always track the current kernel:
   *"HDMI21-DSC patch OFF"* boots with `amdgpu.bc250_hdmi21=0` for displays that
   stay dark with the Combined Fix DSC/PCON patch; *"REVERT TOOLKIT"* boots with
   `bc250.revert_all=1`, runs a full unattended toolkit revert (GRUB params,
   services, patched amdgpu.ko override — falls back to a self-contained
   emergency revert if the toolkit folder is gone) and reboots into stock
-  config. A `bc250-recovery-entries.service` refreshes both entries at every
-  boot so they always point at a kernel that exists.
+  config. (SteamOS uses GRUB, not BLS — `/boot/loader/entries` does not exist
+  and the module set ships no `blscfg` — so the entries are plain menuentries,
+  not BLS `.conf` files.)
+- **Fixed:** `GRUB_CFG` was hardcoded to `/boot/grub/grub.cfg`, which does not
+  exist on SteamOS (its `update-grub` writes `/efi/EFI/steamos/grub.cfg`). The
+  missing-module prune and the boot-hang repair read and patched the wrong file
+  and were silent no-ops. The path is now detected.
 - **Added:** `start.sh --revert-all` non-interactive flag (used by the recovery
   entry; `AUTO=1`, errexit disabled so one failed component can't abort).
 - **Fixed:** `print_warning` was called in several places but never defined.

@@ -12,16 +12,22 @@ como histórico datado de antes da adoção de versões numeradas.
 - **Adicionado:** Entradas de recovery no GRUB (Extras → "GRUB Recovery
   Entries"). Instaladas como primeiro passo do Install All, e oferecidas
   automaticamente na abertura do toolkit para instalações existentes que
-  ainda não as têm (silencioso quando já instaladas). Duas entradas BLS extras
-  clonadas da entrada stock do kernel atual aparecem no menu do GRUB (Esc
-  durante o boot): *"HDMI21-DSC patch OFF"* boota com `amdgpu.bc250_hdmi21=0`
-  para telas que ficam pretas com o patch DSC/PCON do Combined Fix;
-  *"REVERT TOOLKIT"* boota com `bc250.revert_all=1`, executa o revert completo
-  do toolkit sem interação (params do GRUB, serviços, override do amdgpu.ko —
-  com fallback de revert de emergência autocontido se a pasta do toolkit não
-  existir) e reboota na config stock. O `bc250-recovery-entries.service`
-  regenera as duas entradas a cada boot para sempre apontarem para um kernel
-  existente.
+  ainda não as têm (silencioso quando já instaladas). Duas entradas extras
+  aparecem no menu do GRUB (Esc durante o boot), emitidas por um script
+  `/etc/grub.d/42_bc250-recovery`, então o grub-mkconfig as regenera em todo
+  `update-grub` — incluindo os disparados por updates do SteamOS — e elas
+  sempre acompanham o kernel atual: *"HDMI21-DSC patch OFF"* boota com
+  `amdgpu.bc250_hdmi21=0` para telas que ficam pretas com o patch DSC/PCON do
+  Combined Fix; *"REVERT TOOLKIT"* boota com `bc250.revert_all=1`, executa o
+  revert completo do toolkit sem interação (params do GRUB, serviços, override
+  do amdgpu.ko — com fallback de revert de emergência autocontido se a pasta do
+  toolkit não existir) e reboota na config stock. (O SteamOS usa GRUB, não BLS
+  — `/boot/loader/entries` não existe e o conjunto de módulos não tem
+  `blscfg` — então as entradas são menuentries comuns, não arquivos `.conf` BLS.)
+- **Corrigido:** `GRUB_CFG` estava fixo em `/boot/grub/grub.cfg`, que não existe
+  no SteamOS (o `update-grub` dele escreve `/efi/EFI/steamos/grub.cfg`). A poda
+  de módulos ausentes e o reparo de boot-hang liam/patcheavam o arquivo errado
+  e eram no-ops silenciosos. O caminho agora é detectado.
 - **Adicionado:** flag `start.sh --revert-all` não-interativa (usada pela
   entrada de recovery; `AUTO=1`, errexit desabilitado para um componente
   falho não abortar o processo).
