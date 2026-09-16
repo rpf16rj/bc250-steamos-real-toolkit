@@ -7,6 +7,37 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## Unreleased
+
+- **Added:** GRUB recovery boot entries (Extras → "GRUB Recovery Entries").
+  Installed as the first step of Install All, and offered automatically at
+  toolkit startup to existing installs that don't have them yet (silent when
+  already installed). Two extra BLS entries cloned from the running
+  kernel's stock entry appear in the GRUB menu (press Esc during boot):
+  *"HDMI21-DSC patch OFF"* boots with `amdgpu.bc250_hdmi21=0` for displays that
+  stay dark with the Combined Fix DSC/PCON patch; *"REVERT TOOLKIT"* boots with
+  `bc250.revert_all=1`, runs a full unattended toolkit revert (GRUB params,
+  services, patched amdgpu.ko override — falls back to a self-contained
+  emergency revert if the toolkit folder is gone) and reboots into stock
+  config. A `bc250-recovery-entries.service` refreshes both entries at every
+  boot so they always point at a kernel that exists.
+- **Added:** `start.sh --revert-all` non-interactive flag (used by the recovery
+  entry; `AUTO=1`, errexit disabled so one failed component can't abort).
+- **Fixed:** `print_warning` was called in several places but never defined.
+
+- **Fixed:** GRUB boot hang on SteamOS 3.9.x — `error: file
+  '/boot/grub/x86_64-efi/efi_uga.mod' not found` followed by `Press any key to
+  continue...`, which on a keyboard-less console hangs boot forever. Newer GRUB
+  builds emit `insmod efi_uga` unconditionally for EFI, but Valve's pruned
+  module set doesn't ship `efi_uga.mod`. The toolkit now writes
+  `GRUB_VIDEO_BACKEND=efi_gop` to `/etc/default/grub` (persisted across SteamOS
+  updates) so every future `grub-mkconfig` only loads `efi_gop`, and comments
+  out any `insmod` line in `grub.cfg` that references a module missing from
+  `/boot/grub/*-efi` — repairs existing configs and covers modules
+  `GRUB_VIDEO_BACKEND` doesn't control. Applied automatically on Install All
+  and on the post-update re-apply pass; also available manually under
+  Extras → "Fix GRUB Boot Hang".
+
 ## v1.9.3 — 2026-09-15
 
 - **Changed:** Display DSC + HDMI 2.1 PCON patches replaced with the upstream

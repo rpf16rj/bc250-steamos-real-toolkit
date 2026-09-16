@@ -135,6 +135,7 @@ persist_detect_and_record_installed() {
     dual_audio_installed 2>/dev/null && persist_state_add "dual_audio"
     ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
     ds5_chord_vdf_patched 2>/dev/null && persist_state_add "ds5_chord_vdf"
+    recovery_entries_installed 2>/dev/null && persist_state_add "recovery_entries"
     if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
        && grep -q "VK_DRIVER_FILES=.*bc250-gfx1013" /etc/environment 2>/dev/null; then
         persist_state_add "gfx1013"
@@ -254,6 +255,7 @@ print_item() {
 
 print_success() { echo -e "\n  ${BOLD}${GREEN}✔  $1${RESET}\n"; }
 print_error()   { echo -e "\n  ${BOLD}${RED}✘  $1${RESET}\n"; }
+print_warning() { echo -e "  ${YELLOW}⚠${RESET}  $1"; }
 print_info()    { echo -e "  ${CYAN}→${RESET}  $1"; }
 print_step()    { echo -e "\n  ${BOLD}${MAGENTA}[$1]${RESET}  $2"; }
 
@@ -1250,7 +1252,7 @@ install_ram_split() {
         cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
         sed -i 's/ ttm\\.pages_limit=[0-9]*//g; s/ttm\\.pages_limit=[0-9]* //g; s/ttm\\.pages_limit=[0-9]*//g' \"$GRUB_DEFAULT\"
         sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 ttm.pages_limit=$RAM_SPLIT_DEFAULT_TTM_PAGES\"/' \"$GRUB_DEFAULT\"
-        update-grub
+        grub_regen
     " || {
         fail_with_log "Failed to update GRUB with ttm.pages_limit." "RAM/VRAM Split — grub"
         return 1
@@ -1286,7 +1288,7 @@ run_revert_ram_split() {
     steamos_writable "
         cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
         sed -i 's/ ttm\\.pages_limit=[0-9]*//g; s/ttm\\.pages_limit=[0-9]* //g; s/ttm\\.pages_limit=[0-9]*//g' \"$GRUB_DEFAULT\"
-        update-grub
+        grub_regen
     " || {
         fail_with_log "Failed to remove ttm.pages_limit from GRUB." "RAM/VRAM Split — grub revert"
         return 1
@@ -1322,6 +1324,111 @@ run_revert_core_unlock() {
 # ==============================================================================
 
 GRUB_DEFAULT="/etc/default/grub"
+GRUB_CFG="/boot/grub/grub.cfg"
+
+# --- GRUB missing-module guard ----------------------------------------------
+# SteamOS ships a pruned GRUB module set (e.g. no efi_uga.mod on 3.9.x), but
+# grub-mkconfig still emits `insmod efi_uga` — unconditionally on EFI since the
+# upstream "Disable loading all_video for EFI" change, or via the all_video
+# fallback list on older builds. A failed insmod raises a GRUB error that stops
+# boot at a "Press any key to continue..." prompt, which on a keyboard-less
+# console is a permanent hang. Two layers of defense:
+#   1. GRUB_VIDEO_BACKEND=efi_gop makes 00_header emit only `insmod efi_gop`,
+#      so every future regeneration (toolkit, self-heal service, SteamOS
+#      update, manual update-grub) stays clean.
+#   2. grub_prune_missing_insmods comments out any `insmod <mod>` line whose
+#      <mod>.mod is absent — repairs already-generated configs and covers
+#      modules GRUB_VIDEO_BACKEND doesn't control.
+
+grub_mod_dir() {
+    local d
+    for d in /boot/grub/*-efi /boot/grub/i386-pc; do
+        [[ -d "$d" ]] && { echo "$d"; return 0; }
+    done
+    return 1
+}
+
+grub_ensure_efi_video_backend() {
+    local moddir
+    moddir=$(grub_mod_dir) || return 0
+    [[ "$moddir" == *-efi ]] || return 0
+    [[ -f "$moddir/efi_gop.mod" ]] || return 0
+    [[ -w "$GRUB_DEFAULT" ]] || return 0
+    if grep -qE '^GRUB_VIDEO_BACKEND="?efi_gop"?[[:space:]]*$' "$GRUB_DEFAULT"; then
+        return 0
+    elif grep -q '^GRUB_VIDEO_BACKEND=' "$GRUB_DEFAULT"; then
+        sed -i 's/^GRUB_VIDEO_BACKEND=.*/GRUB_VIDEO_BACKEND=efi_gop/' "$GRUB_DEFAULT"
+    else
+        echo 'GRUB_VIDEO_BACKEND=efi_gop' >> "$GRUB_DEFAULT"
+    fi
+}
+
+grub_prune_missing_insmods() {
+    local moddir mod
+    moddir=$(grub_mod_dir) || return 0
+    [[ -f "$GRUB_CFG" && -w "$GRUB_CFG" ]] || return 0
+    while read -r mod; do
+        [[ -n "$mod" ]] || continue
+        [[ -f "$moddir/$mod.mod" ]] || \
+            sed -i "/^[[:space:]]*insmod[[:space:]]\\+$mod\\([[:space:]]\\|$\\)/s/^\\([[:space:]]*\\)/\\1# /" "$GRUB_CFG"
+    done < <(sed -n 's/^[[:space:]]*insmod[[:space:]]\+\([A-Za-z0-9_+-]\+\).*/\1/p' "$GRUB_CFG" | sort -u)
+}
+
+grub_regen() {
+    grub_ensure_efi_video_backend
+    local rc=0
+    if command -v update-grub >/dev/null 2>&1; then
+        update-grub || rc=1
+    else
+        grub-mkconfig -o "$GRUB_CFG" || rc=1
+    fi
+    grub_prune_missing_insmods
+    return $rc
+}
+
+# Repair a grub.cfg that references modules not present on disk. Silent no-op
+# when everything is already fine; pass "manual" for user-facing output.
+run_grub_boot_fix() {
+    local manual="${1:-}"
+    [[ "$manual" == "manual" ]] && print_step "GRUB" "GRUB missing-module boot fix"
+
+    local moddir
+    moddir=$(grub_mod_dir) || {
+        [[ "$manual" == "manual" ]] && print_info "No GRUB module directory under /boot/grub — nothing to do."
+        return 0
+    }
+
+    local dirty=0 mod
+    if [[ -f "$GRUB_CFG" ]]; then
+        while read -r mod; do
+            [[ -n "$mod" && ! -f "$moddir/$mod.mod" ]] && { dirty=1; break; }
+        done < <(sed -n 's/^[[:space:]]*insmod[[:space:]]\+\([A-Za-z0-9_+-]\+\).*/\1/p' "$GRUB_CFG" | sort -u)
+    fi
+
+    local var_needed=0
+    if [[ "$moddir" == *-efi && -f "$moddir/efi_gop.mod" ]] && \
+       ! grep -qE '^GRUB_VIDEO_BACKEND="?efi_gop"?[[:space:]]*$' "$GRUB_DEFAULT" 2>/dev/null; then
+        var_needed=1
+    fi
+
+    if (( !dirty && !var_needed )); then
+        [[ "$manual" == "manual" ]] && print_success "grub.cfg is clean and GRUB_VIDEO_BACKEND=efi_gop is already set."
+        return 0
+    fi
+
+    if (( dirty )); then
+        print_info "grub.cfg loads modules missing from $moddir — regenerating with efi_gop only..."
+        if steamos_writable 'grub_regen'; then
+            print_success "GRUB config repaired — boot will no longer pause at 'Press any key to continue'."
+        else
+            steamos_writable 'grub_prune_missing_insmods' || true
+            print_warning "GRUB regeneration failed. Manually: add GRUB_VIDEO_BACKEND=efi_gop to $GRUB_DEFAULT, run sudo update-grub."
+        fi
+    else
+        steamos_writable 'grub_ensure_efi_video_backend' || true
+        print_info "Set GRUB_VIDEO_BACKEND=efi_gop so future GRUB regenerations skip efi_uga."
+    fi
+}
 
 mitigations_currently_off() {
     [[ -f "$GRUB_DEFAULT" ]] && grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=.*mitigations=off' "$GRUB_DEFAULT" >/dev/null 2>&1
@@ -1358,7 +1465,7 @@ run_disable_mitigations() {
         else
             sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 mitigations=off\"/' \"$GRUB_DEFAULT\"
         fi
-        update-grub
+        grub_regen
     " || {
         print_error "Failed to disable CPU mitigations."
         return 1
@@ -1396,7 +1503,7 @@ run_revert_mitigations() {
     steamos_writable "
         cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
         sed -i 's/ mitigations=off//g; s/mitigations=off //g; s/mitigations=off//g' \"$GRUB_DEFAULT\"
-        update-grub
+        grub_regen
     " || {
         print_error "Failed to re-enable CPU mitigations."
         return 1
@@ -1599,7 +1706,7 @@ run_zram_zswap_toggle() {
         fi
         printf '%s\n' 'w /sys/module/zswap/parameters/enabled - - - - Y' > \"$ZSWAP_TMPFILES_CONF\"
         systemd-tmpfiles --create \"$ZSWAP_TMPFILES_CONF\"
-        update-grub
+        grub_regen
     " || {
         fail_with_log "Failed to disable ZRAM / enable ZSWAP." "ZRAM->ZSWAP — grub/mkinitcpio"
         return 1
@@ -1646,7 +1753,7 @@ run_revert_zram_zswap() {
         sed -i 's/ lz4_compress//g; s/ lz4\\b//g' \"$MKINITCPIO_CONF\" 2>/dev/null || true
         mkinitcpio -P 2>/dev/null || true
         rm -f \"$ZSWAP_TMPFILES_CONF\"
-        update-grub
+        grub_regen
     " || {
         fail_with_log "Failed to revert ZRAM/ZSWAP." "Revert ZRAM/ZSWAP — grub/mkinitcpio"
         return 1
@@ -2362,11 +2469,7 @@ install_acpi_fix() {
 
     print_info "Regenerating GRUB config..."
     local grub_rc=0
-    if command -v update-grub >/dev/null 2>&1; then
-        update-grub || grub_rc=1
-    else
-        grub-mkconfig -o /boot/grub/grub.cfg || grub_rc=1
-    fi
+    grub_regen || grub_rc=1
     if [[ $grub_rc -ne 0 ]]; then
         fail_with_log "Failed to regenerate GRUB config." "ACPI Fix — grub-mkconfig"
         (( was_steamos )) && { steamos-readonly enable || true; }
@@ -2385,6 +2488,7 @@ ExecStart=/bin/bash -c '\\
     steamos-readonly disable; \\
     cp -f "$ACPI_FIX_CPIO_MASTER" "$ACPI_FIX_CPIO_BOOT"; \\
     command -v update-grub >/dev/null && update-grub || grub-mkconfig -o /boot/grub/grub.cfg; \\
+    sed -i '/^[[:space:]]*insmod[[:space:]]\\+efi_uga\\b/s/^/#/' /boot/grub/grub.cfg; \\
     steamos-readonly enable; \\
     echo "bc250: ACPI override restored after OS update; REBOOT to re-activate C/P-states" | systemd-cat -p warning; \\
   fi'
@@ -2449,7 +2553,7 @@ run_revert_acpi_fix() {
 
     rm -f "$ACPI_FIX_CPIO_BOOT" "$ACPI_FIX_HEAL_UNIT" "$ACPI_FIX_CPUFREQ_UNIT"
     sed -i '/^GRUB_EARLY_INITRD_LINUX_CUSTOM=/d' "$GRUB_DEFAULT" 2>/dev/null || true
-    if command -v update-grub >/dev/null 2>&1; then update-grub || true; else grub-mkconfig -o /boot/grub/grub.cfg || true; fi
+    grub_regen || true
     systemctl daemon-reload
 
     if (( was_steamos )); then
@@ -2602,7 +2706,7 @@ audio_fix_ensure_hpd_debounce_grub_param() {
         if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.hdmi_hpd_debounce_delay_ms=1500'; then
             sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.hdmi_hpd_debounce_delay_ms=1500\"/' \"$GRUB_DEFAULT\"
         fi
-        update-grub
+        grub_regen
     " || {
         print_info "Failed to add amdgpu.hdmi_hpd_debounce_delay_ms=1500 to GRUB. Add it manually for HDMI HPD debounce."
         return 0
@@ -2620,7 +2724,7 @@ audio_fix_remove_hpd_debounce_grub_param() {
     steamos_writable "
         cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
         sed -i 's/ amdgpu\\.hdmi_hpd_debounce_delay_ms=1500//g; s/amdgpu\\.hdmi_hpd_debounce_delay_ms=1500 //g; s/amdgpu\\.hdmi_hpd_debounce_delay_ms=1500//g' \"$GRUB_DEFAULT\"
-        update-grub
+        grub_regen
     " || {
         print_info "Failed to remove amdgpu.hdmi_hpd_debounce_delay_ms=1500 from GRUB."
         return 0
@@ -2638,7 +2742,7 @@ audio_fix_remove_cs_legacy_grub_param() {
     steamos_writable "
         cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
         sed -i 's/ amdgpu\\.cs_legacy_8core_metrics=1//g; s/amdgpu\\.cs_legacy_8core_metrics=1 //g; s/amdgpu\\.cs_legacy_8core_metrics=1//g' \"$GRUB_DEFAULT\"
-        update-grub
+        grub_regen
     " || {
         print_info "Failed to remove amdgpu.cs_legacy_8core_metrics=1 from GRUB."
         return 0
@@ -2671,7 +2775,7 @@ audio_fix_ensure_cs_legacy_grub_param() {
         if ! grep -E 'GRUB_CMDLINE_LINUX_DEFAULT=' \"$GRUB_DEFAULT\" | grep -q 'amdgpu.cs_legacy_8core_metrics=1'; then
             sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\\([^\"]*\\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\\1 amdgpu.cs_legacy_8core_metrics=1\"/' \"$GRUB_DEFAULT\"
         fi
-        update-grub
+        grub_regen
     " || {
         print_info "Failed to add amdgpu.cs_legacy_8core_metrics=1 to GRUB. Add it manually."
         return 0
@@ -2708,7 +2812,7 @@ audio_fix_cleanup_legacy_edid() {
         steamos_writable "
             cp \"$GRUB_DEFAULT\" \"$GRUB_DEFAULT.bak\"
             sed -i 's/ drm\\.edid_firmware=[^ \"\\t]*//g; s/drm\\.edid_firmware=[^ \"\\t]* //g; s/drm\\.edid_firmware=[^ \"\\t]*//g' \"$GRUB_DEFAULT\"
-            update-grub
+            grub_regen
         " || {
             print_info "Failed to remove drm.edid_firmware from GRUB. Remove it manually."
         }
@@ -6210,7 +6314,7 @@ run_install_all_step() {
 }
 
 run_install_all() {
-    print_step "00" "Install All — Swap/ZSWAP + Mitigations + ACPI + RAM/VRAM + Sensor PWM + CoolerControl + Core Unlock + Validation + CPU/GPU Governor + CU Live Manager + Combined Fix + AC-3 Surround"
+    print_step "00" "Install All — Recovery Entries + Swap/ZSWAP + Mitigations + ACPI + RAM/VRAM + Sensor PWM + CoolerControl + Core Unlock + Validation + CPU/GPU Governor + CU Live Manager + Combined Fix + AC-3 Surround"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -6222,20 +6326,22 @@ run_install_all() {
         install_all_progress_init
     fi
 
-    run_install_all_step 1 14 "Configuring Swap" run_configure_swap auto || return 1
-    run_install_all_step 2 14 "Enabling ZSWAP/Disabling ZRAM" run_zram_zswap_toggle auto || return 1
-    run_install_all_step 3 14 "Disabling CPU Mitigations" run_disable_mitigations auto || return 1
-    run_install_all_step 4 14 "Installing ACPI Fix" install_acpi_fix || return 1
-    run_install_all_step 5 14 "Installing RAM/VRAM Split" install_ram_split auto || return 1
-    run_install_all_step 6 14 "Ensuring Sensor PWM Driver" ensure_sensors_pwm_installed || return 1
-    run_install_all_step 7 14 "Ensuring CoolerControl Installation" ensure_coolercontrol_installed || return 1
-    run_install_all_step 8 14 "Installing Core Unlock" install_core_unlock auto || true
-    run_install_all_step 9 14 "Validating Core Unlock" validate_core_unlock || true
-    run_install_all_step 10 14 "Installing CPU Governor" run_cpu_governor || true
-    run_install_all_step 11 14 "Installing GPU Governor" run_gpu_governor || true
-    run_install_all_step 12 14 "Installing CU Live Manager" run_cu_live_manager || return 1
-    run_install_all_step 13 14 "Installing Combined Fix" install_combined_fix || return 1
-    run_install_all_step 14 14 "Installing AC-3 Surround" install_ac3_surround auto || return 1
+    run_grub_boot_fix
+    run_install_all_step 1 15 "Installing GRUB Recovery Entries" install_recovery_entries auto || true
+    run_install_all_step 2 15 "Configuring Swap" run_configure_swap auto || return 1
+    run_install_all_step 3 15 "Enabling ZSWAP/Disabling ZRAM" run_zram_zswap_toggle auto || return 1
+    run_install_all_step 4 15 "Disabling CPU Mitigations" run_disable_mitigations auto || return 1
+    run_install_all_step 5 15 "Installing ACPI Fix" install_acpi_fix || return 1
+    run_install_all_step 6 15 "Installing RAM/VRAM Split" install_ram_split auto || return 1
+    run_install_all_step 7 15 "Ensuring Sensor PWM Driver" ensure_sensors_pwm_installed || return 1
+    run_install_all_step 8 15 "Ensuring CoolerControl Installation" ensure_coolercontrol_installed || return 1
+    run_install_all_step 9 15 "Installing Core Unlock" install_core_unlock auto || true
+    run_install_all_step 10 15 "Validating Core Unlock" validate_core_unlock || true
+    run_install_all_step 11 15 "Installing CPU Governor" run_cpu_governor || true
+    run_install_all_step 12 15 "Installing GPU Governor" run_gpu_governor || true
+    run_install_all_step 13 15 "Installing CU Live Manager" run_cu_live_manager || return 1
+    run_install_all_step 14 15 "Installing Combined Fix" install_combined_fix || return 1
+    run_install_all_step 15 15 "Installing AC-3 Surround" install_ac3_surround auto || return 1
 
     install_all_progress_clear
     print_success "Install All completed!"
@@ -6270,6 +6376,8 @@ run_revert_all() {
     run_revert_gfx1013_fix
     echo ""
     run_revert_aic8800_wifi
+    echo ""
+    uninstall_recovery_entries
 }
 
 run_install_manual() {
@@ -6560,6 +6668,8 @@ run_extras_menu() {
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "O" "OpenLinkHub"                  "Install/revert Corsair iCUE LINK Hub control — status: $(openlinkhub_status_label)"
         print_item "Z" "Toolkit SteamOS Control"      "Install Decky fan profiles and LED bar controls"
+        print_item "B" "Fix GRUB Boot Hang"           "efi_uga.mod not found → boot stuck at 'Press any key to continue'"
+        print_item "R" "GRUB Recovery Entries"         "Boot menu entries: HDMI21-DSC off + full toolkit revert"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -6576,6 +6686,8 @@ run_extras_menu() {
             X) run_xbox_adapter_menu ;;
             O) install_openlinkhub;        press_enter ;;
             Z) install_toolkit_steamos_control_plugin; press_enter ;;
+            B) run_grub_boot_fix manual;   press_enter ;;
+            R) run_recovery_menu ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$extras_choice'"
@@ -6586,6 +6698,358 @@ run_extras_menu() {
 }
 
 # ==============================================================================
+# RECOVERY BOOT ENTRIES
+# ==============================================================================
+# Two extra BLS entries cloned from the running kernel's stock entry. blscfg
+# reads /boot/loader/entries/*.conf at boot, so no grub-mkconfig is needed and
+# the entries show up in the GRUB menu (Esc during boot) automatically:
+#   1. "HDMI21/DSC OFF" — appends amdgpu.bc250_hdmi21=0, for users whose
+#      display stays dark with the Combined Fix's DSC/PCON patch.
+#   2. "REVERT TOOLKIT" — appends bc250.revert_all=1; a oneshot unit sees the
+#      flag, reverts the whole toolkit, and reboots back to stock config.
+# A boot-time refresh service rewrites both entries when the kernel changes so
+# they never point at a deleted kernel after a SteamOS update.
+
+RECOVERY_ENTRIES_DIR="/boot/loader/entries"
+RECOVERY_CTL="$PERSIST_STATE_DIR/bc250-recovery-ctl.sh"
+RECOVERY_TOOLKIT_PATH_FILE="$PERSIST_STATE_DIR/toolkit-path"
+RECOVERY_REFRESH_UNIT="/etc/systemd/system/bc250-recovery-entries.service"
+RECOVERY_REVERT_UNIT="/etc/systemd/system/bc250-recovery-revert.service"
+RECOVERY_REFRESH_WANTS="/etc/systemd/system/multi-user.target.wants/bc250-recovery-entries.service"
+RECOVERY_REVERT_WANTS="/etc/systemd/system/multi-user.target.wants/bc250-recovery-revert.service"
+
+recovery_entries_installed() {
+    [[ -f "$RECOVERY_CTL" && -f "$RECOVERY_REFRESH_UNIT" && -f "$RECOVERY_REVERT_UNIT" ]]
+}
+
+recovery_write_ctl() {
+    mkdir -p "$PERSIST_STATE_DIR"
+    cat > "$RECOVERY_CTL" <<'EOF'
+#!/usr/bin/env bash
+# BC-250 recovery boot entries helper — generated by bc250-steamos-real-toolkit.
+# refresh: rewrite the two recovery BLS entries from the running kernel's stock
+#          entry (keeps them pointing at a kernel that exists after updates).
+# revert:  run when the kernel cmdline carries bc250.revert_all=1 — reverts the
+#          whole toolkit, removes the recovery entries, and reboots.
+set -u
+
+ENTRIES_DIR=/boot/loader/entries
+GRUB_CFG=/boot/grub/grub.cfg
+GRUB_DEFAULT=/etc/default/grub
+UNLOCKED=0
+
+unlock() {
+    (( UNLOCKED )) && return 0
+    if steamos-readonly status 2>/dev/null | grep -qi enabled; then
+        steamos-readonly disable && UNLOCKED=1
+    fi
+    return 0
+}
+trap '(( UNLOCKED )) && steamos-readonly enable 2>/dev/null || true' EXIT
+
+stock_entry() {
+    local mid f lp
+    mid=$(cat /etc/machine-id 2>/dev/null) || return 1
+    f="$ENTRIES_DIR/${mid}-$(uname -r).conf"
+    [[ -f $f ]] && { echo "$f"; return 0; }
+    while IFS= read -r f; do
+        case "$f" in *-bc250-*.conf) continue ;; esac
+        lp=$(awk '/^linux /{print $2; exit}' "$f")
+        [[ -n $lp && -f "/boot${lp}" ]] && { echo "$f"; return 0; }
+    done < <(ls -1 "$ENTRIES_DIR"/"${mid}"-*.conf 2>/dev/null | sort -Vr)
+    return 1
+}
+
+emit_entry() {  # $1 stock entry, $2 suffix, $3 title, $4 kernel param
+    awk -v title="$3" -v suffix="$2" -v karg="$4" '
+        /^title /   { print "title " title; next }
+        /^version / { sub(/[[:space:]]*$/,""); print $0 "-" suffix; next }
+        /^options / { if (index($0, karg) == 0) { print $0 " " karg } else { print } ; next }
+        { print }
+    ' "$1"
+}
+
+cmd_refresh() {
+    local stock mid tmp target suffix title karg
+    stock=$(stock_entry) || exit 0
+    grep -q '^options ' "$stock" || exit 0
+    mid=$(cat /etc/machine-id)
+    for spec in \
+        "nodsc|SteamOS (BC-250 recovery: HDMI21-DSC patch OFF)|amdgpu.bc250_hdmi21=0" \
+        "revert|BC-250 RECOVERY: revert whole toolkit and reboot|bc250.revert_all=1"
+    do
+        IFS='|' read -r suffix title karg <<< "$spec"
+        target="$ENTRIES_DIR/${mid}-bc250-${suffix}.conf"
+        tmp=$(mktemp)
+        emit_entry "$stock" "$suffix" "$title" "$karg" > "$tmp"
+        if ! cmp -s "$tmp" "$target" 2>/dev/null; then
+            unlock
+            install -m 0644 "$tmp" "$target"
+            echo "bc250-recovery: updated $target" | systemd-cat -t bc250-recovery -p info
+        fi
+        rm -f "$tmp"
+    done
+}
+
+grub_strip_toolkit_params() {
+    local g=$GRUB_DEFAULT
+    [[ -f $g ]] || return 0
+    cp "$g" "$g.bak"
+    sed -i '/^GRUB_EARLY_INITRD_LINUX_CUSTOM=/d; /^GRUB_VIDEO_BACKEND=efi_gop$/d' "$g"
+    sed -i 's/ ttm\.pages_limit=[0-9]*//g; s/ttm\.pages_limit=[0-9]* //g; s/ttm\.pages_limit=[0-9]*//g' "$g"
+    sed -i 's/ mitigations=off//g; s/mitigations=off //g; s/mitigations=off//g' "$g"
+    sed -i 's/ systemd\.zram=0//g; s/systemd\.zram=0 //g; s/systemd\.zram=0//g' "$g"
+    sed -i 's/ zswap\.[a-z_]*=[a-zA-Z0-9_]*//g; s/zswap\.[a-z_]*=[a-zA-Z0-9_]* //g; s/zswap\.[a-z_]*=[a-zA-Z0-9_]*//g' "$g"
+    sed -i 's/ amdgpu\.hdmi_hpd_debounce_delay_ms=[0-9]*//g; s/amdgpu\.hdmi_hpd_debounce_delay_ms=[0-9]* //g; s/amdgpu\.hdmi_hpd_debounce_delay_ms=[0-9]*//g' "$g"
+    sed -i 's/ amdgpu\.cs_legacy_8core_metrics=[0-9]*//g; s/amdgpu\.cs_legacy_8core_metrics=[0-9]* //g; s/amdgpu\.cs_legacy_8core_metrics=[0-9]*//g' "$g"
+    sed -i 's/ drm\.edid_firmware=[^ "	]*//g; s/drm\.edid_firmware=[^ "	]* //g; s/drm\.edid_firmware=[^ "	]*//g' "$g"
+    sed -i 's/ bc250\.gfx1013_v33=1//g; s/bc250\.gfx1013_v33=1 //g; s/bc250\.gfx1013_v33=1//g' "$g"
+    sed -i 's/ bc250\.revert_all=1//g; s/bc250\.revert_all=1 //g; s/bc250\.revert_all=1//g' "$g"
+}
+
+emergency_revert() {
+    # Self-contained revert used only when the real toolkit tree is gone.
+    grub_strip_toolkit_params
+    rm -f /boot/acpi_override.cpio
+    rm -f /usr/lib/modules/*/updates/amdgpu.ko* 2>/dev/null
+    rm -rf /opt/bc250-gfx1013
+    sed -i '/VK_DRIVER_FILES/d' /etc/environment 2>/dev/null
+    depmod -a 2>/dev/null || true
+    mkinitcpio -P 2>/dev/null || true
+    local keep u
+    for keep in /home/*/.bc250-toolkit/bc250-toolkit-keep.conf /root/.bc250-toolkit/bc250-toolkit-keep.conf; do
+        [[ -f $keep ]] || continue
+        while IFS= read -r path; do
+            [[ $path =~ ^[[:space:]]*# || -z $path ]] && continue
+            # /etc/default/grub is kept — its toolkit params were already
+            # stripped above; deleting it would break grub-mkconfig.
+            [[ $path == /etc/default/grub ]] && continue
+            case $path in
+                /etc/systemd/system/*.service) systemctl disable --now "$(basename "$path")" 2>/dev/null ;;
+            esac
+            rm -rf "$path" 2>/dev/null
+        done < "$keep"
+    done
+    for u in bc250-smu-oc cyan-skillfish-governor-smu bc250-acpi-heal bc250-cpufreq \
+             bc250-gpu-freq-restore bc250-cu-live-manager bc250-core-unlock aic8800-modules \
+             bc250-toolkit-persist bc250-cec-poweroff-standby toolkit-steamos-fan; do
+        systemctl disable --now "$u.service" 2>/dev/null || true
+    done
+    if command -v update-grub >/dev/null 2>&1; then
+        update-grub || true
+    else
+        grub-mkconfig -o "$GRUB_CFG" || true
+    fi
+    [[ -f $GRUB_CFG ]] && sed -i '/^[[:space:]]*insmod[[:space:]]\+efi_uga\b/s/^/#/' "$GRUB_CFG"
+}
+
+cmd_revert() {
+    grep -q 'bc250\.revert_all=1' /proc/cmdline || { echo "no bc250.revert_all=1 on cmdline — doing nothing"; exit 0; }
+    echo "bc250.revert_all=1 detected — reverting toolkit installation"
+    unlock
+
+    local state_dir toolkit=""
+    state_dir=$(dirname "$(readlink -f "$0")")
+    [[ -f $state_dir/toolkit-path ]] && toolkit=$(cat "$state_dir/toolkit-path")
+    # Fall back to the canonical self-bootstrap clone under each home dir.
+    if [[ -z $toolkit || ! -f $toolkit ]]; then
+        local c
+        for c in /home/*/.bc250-toolkit/bc250-steamos-real-toolkit/start.sh; do
+            [[ -f $c ]] && { toolkit=$c; break; }
+        done
+    fi
+
+    if [[ -n $toolkit && -f $toolkit ]]; then
+        echo "running toolkit revert-all via $toolkit"
+        # The toolkit re-resolves its state dir from SUDO_USER — hand it the
+        # owner of the state dir so persist files land in the right home.
+        local owner
+        owner=$(stat -c %U "$state_dir" 2>/dev/null || true)
+        [[ -n $owner && $owner != root ]] && export SUDO_USER=$owner
+        AUTO=1 bash "$toolkit" --revert-all || echo "toolkit revert-all exited non-zero — continuing cleanup"
+    else
+        echo "toolkit tree not found — running self-contained emergency revert"
+        emergency_revert
+    fi
+
+    rm -f "$ENTRIES_DIR"/*-bc250-nodsc.conf "$ENTRIES_DIR"/*-bc250-revert.conf
+    systemctl disable bc250-recovery-entries.service bc250-recovery-revert.service 2>/dev/null || true
+    rm -f /etc/systemd/system/bc250-recovery-entries.service \
+          /etc/systemd/system/bc250-recovery-revert.service \
+          /etc/systemd/system/multi-user.target.wants/bc250-recovery-entries.service \
+          /etc/systemd/system/multi-user.target.wants/bc250-recovery-revert.service
+    systemctl daemon-reload || true
+    sync
+    echo "toolkit reverted — rebooting into stock configuration in 5s"
+    sleep 5
+    systemctl reboot
+}
+
+case "${1:-}" in
+    refresh) cmd_refresh ;;
+    revert)  cmd_revert ;;
+    *) echo "usage: $0 {refresh|revert}" >&2; exit 1 ;;
+esac
+EOF
+    chmod 755 "$RECOVERY_CTL"
+    chown "$REAL_USER":"$REAL_USER" "$RECOVERY_CTL" 2>/dev/null || true
+    printf '%s\n' "$SCRIPT_PATH" > "$RECOVERY_TOOLKIT_PATH_FILE"
+    chown "$REAL_USER":"$REAL_USER" "$RECOVERY_TOOLKIT_PATH_FILE" 2>/dev/null || true
+}
+
+recovery_write_units() {
+    cat > "$RECOVERY_REFRESH_UNIT" <<EOF
+[Unit]
+Description=BC-250 recovery boot entries refresh
+After=local-fs.target
+RequiresMountsFor=$PERSIST_STATE_DIR
+ConditionKernelCommandLine=!steamos-recovery
+
+[Service]
+Type=oneshot
+ExecStart=$RECOVERY_CTL refresh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat > "$RECOVERY_REVERT_UNIT" <<EOF
+[Unit]
+Description=BC-250 toolkit full revert (kernel cmdline bc250.revert_all=1)
+ConditionKernelCommandLine=bc250.revert_all=1
+After=local-fs.target
+RequiresMountsFor=$PERSIST_STATE_DIR
+Before=multi-user.target graphical.target
+
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=$RECOVERY_CTL revert
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+install_recovery_entries() {
+    local auto="${1:-}"
+    print_step "REC" "Install GRUB Recovery Boot Entries"
+
+    if [[ ! -d "$RECOVERY_ENTRIES_DIR" ]]; then
+        print_error "$RECOVERY_ENTRIES_DIR not found — this feature needs SteamOS-style BLS boot entries."
+        return 1
+    fi
+
+    if [[ "$auto" != "auto" ]] && ! confirm "This adds two entries to the GRUB menu (Esc during boot): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0) and 'REVERT TOOLKIT' (bc250.revert_all=1 — reverts everything and reboots). Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    recovery_write_ctl
+
+    local was_steamos=0
+    if is_steamos; then
+        was_steamos=1
+        if ! steamos-readonly disable; then
+            fail_with_log "Failed to disable SteamOS read-only mode." "Recovery Entries — readonly disable"
+            return 1
+        fi
+    fi
+
+    recovery_write_units
+    systemctl daemon-reload
+    systemctl enable bc250-recovery-entries.service bc250-recovery-revert.service
+    "$RECOVERY_CTL" refresh || true
+
+    if (( was_steamos )); then
+        steamos-readonly enable || true
+    fi
+
+    persist_state_add "recovery_entries"
+    print_success "Recovery boot entries installed."
+    print_info "They appear in the GRUB menu (press ${CYAN}Esc${RESET} during boot). 'REVERT TOOLKIT' reverts everything and reboots automatically."
+}
+
+uninstall_recovery_entries() {
+    print_step "REC-R" "Remove GRUB Recovery Boot Entries"
+    if ! recovery_entries_installed && ! compgen -G "$RECOVERY_ENTRIES_DIR/*-bc250-*.conf" >/dev/null; then
+        print_info "Recovery entries do not appear to be installed — nothing to revert."
+        return 0
+    fi
+    steamos_writable "
+        systemctl disable --now bc250-recovery-entries.service bc250-recovery-revert.service 2>/dev/null || true
+        rm -f \"$RECOVERY_REFRESH_UNIT\" \"$RECOVERY_REVERT_UNIT\" \"$RECOVERY_REFRESH_WANTS\" \"$RECOVERY_REVERT_WANTS\"
+        rm -f $RECOVERY_ENTRIES_DIR/*-bc250-nodsc.conf $RECOVERY_ENTRIES_DIR/*-bc250-revert.conf
+        systemctl daemon-reload
+    " || print_error "Failed to remove recovery entries."
+    # NOTE: $RECOVERY_CTL is left behind on purpose — this function may be
+    # invoked *by* that script (via --revert-all), and deleting a running bash
+    # script can corrupt its incremental read. Without the units it's inert.
+    rm -f "$RECOVERY_TOOLKIT_PATH_FILE"
+    persist_state_remove "recovery_entries"
+    print_success "Recovery boot entries removed."
+}
+
+run_recovery_menu() {
+    while true; do
+        print_banner
+        print_section "GRUB Recovery Boot Entries"
+        echo ""
+        echo -e "  ${DIM}Adds two extra entries to the GRUB menu (press Esc during boot):${RESET}"
+        echo -e "  ${DIM}  • 'HDMI21-DSC patch OFF' — boots with amdgpu.bc250_hdmi21=0 for${RESET}"
+        echo -e "  ${DIM}    displays that stay dark with the Combined Fix DSC/PCON patch.${RESET}"
+        echo -e "  ${DIM}  • 'REVERT TOOLKIT' — boots with bc250.revert_all=1, reverts the${RESET}"
+        echo -e "  ${DIM}    entire toolkit (GRUB params, services, patched amdgpu.ko) and reboots.${RESET}"
+        echo -e "  ${DIM}Entries are cloned from the running kernel's stock boot entry and${RESET}"
+        echo -e "  ${DIM}refreshed automatically after kernel updates.${RESET}"
+        echo ""
+        print_item "I" "Install / Refresh Recovery Entries" "$(recovery_entries_installed && echo 'installed' || echo 'not installed')"
+        print_item "R" "Remove Recovery Entries"          "Delete both entries, units and helper"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" rec_choice
+
+        case "${rec_choice^^}" in
+            I) install_recovery_entries;   press_enter ;;
+            R) uninstall_recovery_entries; press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$rec_choice'"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Returns 0 when the toolkit already has components installed — used to offer
+# the recovery entries only to existing installs at startup.
+toolkit_has_installed_components() {
+    [[ -s $PERSIST_STATE_FILE ]] && return 0
+    compgen -G "/etc/systemd/system/bc250-*.service" >/dev/null && return 0
+    compgen -G "/etc/systemd/system/cyan-skillfish-*.service" >/dev/null && return 0
+    return 1
+}
+
+# One-shot offer shown on toolkit startup for existing installs that don't have
+# the recovery boot entries yet. Silent when they're already installed.
+maybe_prompt_recovery_entries() {
+    [[ "$AUTO" == "1" ]] && return 0
+    recovery_entries_installed && return 0
+    toolkit_has_installed_components || return 0
+    print_section "GRUB Recovery Boot Entries"
+    if confirm "Recovery boot entries are not installed. They add 'HDMI21-DSC OFF' and 'REVERT TOOLKIT' options to the GRUB menu (Esc during boot) — recommended as a safety net. Install now?"; then
+        install_recovery_entries auto
+        press_enter
+    else
+        print_info "Skipped — you can install them later via Extras → GRUB Recovery Entries."
+        sleep 1
+    fi
+}
+
+# ==============================================================================
 # STEAMOS UPDATE PERSISTENCE
 # ==============================================================================
 # Track which components have been installed and automatically re-apply them
@@ -6593,6 +7057,7 @@ run_extras_menu() {
 
 reapply_installed_components() {
     print_step "RAP" "Re-applying toolkit settings after SteamOS update"
+    run_grub_boot_fix
     local component
     if [[ ! -f "$PERSIST_STATE_FILE" ]]; then
         print_info "No persisted toolkit state to re-apply."
@@ -6623,6 +7088,7 @@ reapply_installed_components() {
             openlinkhub)   install_openlinkhub || print_error "OpenLinkHub reapply failed" ;;
             xbox)       install_xbox_adapter || print_error "Xbox adapter reapply failed" ;;
             persistence) install_persistence || print_error "Persistence reapply failed" ;;
+            recovery_entries) install_recovery_entries auto || print_error "Recovery entries reapply failed" ;;
             *)          print_info "Unknown persisted component: $component" ;;
         esac
         echo ""
@@ -6715,6 +7181,10 @@ EOF
 /etc/systemd/system/multi-user.target.wants/bc250-core-unlock.service
 /etc/systemd/system/multi-user.target.wants/aic8800-modules.service
 /etc/systemd/system/multi-user.target.wants/bc250-toolkit-persist.service
+/etc/systemd/system/bc250-recovery-entries.service
+/etc/systemd/system/bc250-recovery-revert.service
+/etc/systemd/system/multi-user.target.wants/bc250-recovery-entries.service
+/etc/systemd/system/multi-user.target.wants/bc250-recovery-revert.service
 /etc/systemd/system-sleep/bc250-cec-amp.sh
 /etc/systemd/system/bc250-cec-poweroff-standby.service
 /etc/systemd/system/multi-user.target.wants/bc250-cec-poweroff-standby.service
@@ -6827,6 +7297,15 @@ if [[ "${1:-}" == "--reapply-all" ]]; then
     exit 0
 fi
 
+# Non-interactive full revert used by the "REVERT TOOLKIT" GRUB recovery entry.
+if [[ "${1:-}" == "--revert-all" ]]; then
+    AUTO=1
+    # '|| true' disables errexit inside the whole revert chain so one failed
+    # component can't abort the recovery halfway through.
+    run_revert_all || true
+    exit 0
+fi
+
 # Validate prerequisites for Combined Fix installation
 validate_combined_fix_prerequisites() {
     local check_mesa="${1:-1}"
@@ -6895,6 +7374,9 @@ validate_combined_fix_prerequisites() {
     print_success "All Combined Fix prerequisites met"
     return 0
 }
+
+# Offer recovery boot entries on startup to existing installs that lack them.
+maybe_prompt_recovery_entries
 
 while true; do
     show_menu
