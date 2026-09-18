@@ -312,15 +312,22 @@ fi
 # 0007 TTM NULL-page guard, 0008 SCLK range are always applied
 git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c \
+    drivers/gpu/drm/amd/amdgpu/amdgpu.h \
+    drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c \
     drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
     drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu11_driver_if_cyan_skillfish.h \
+    drivers/gpu/drm/amd/pm/swsmu/inc/smu_types.h \
     drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c \
     drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_helpers.c \
     drivers/gpu/drm/amd/display/dc/core/dc_resource.c \
+    drivers/gpu/drm/amd/display/dc/dc.h \
     drivers/gpu/drm/amd/display/dc/dio/dcn10/dcn10_stream_encoder.c \
     drivers/gpu/drm/amd/display/dc/dio/dcn20/dcn20_stream_encoder.h \
     drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c \
+    drivers/gpu/drm/amd/display/dc/link/link_dpms.c \
     drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c \
+    drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_training.c \
+    drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c \
     drivers/gpu/drm/amd/display/dc/link/link_detection.c \
     drivers/gpu/drm/amd/display/dc/link/link_validation.c
 
@@ -485,6 +492,30 @@ fi
 # adds, so PCON is applied first and reversed last.
 PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
 DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
+
+# Defer-OD family (ported from MastaG's cs-defer-od stack, patches 0011-0016).
+# Holds off Cyan Skillfish OD clock/voltage commits — and briefly releases a
+# held ForceGfxclk/ForceGfxVid override — while a display link is being
+# brought up: native HDMI FRL training, DP link training, and the PCON's own
+# autonomous HDMI-side training after a modeset. Without it a governor commit
+# (or a held override) landing inside the training window desyncs the link —
+# the KDE<->gamescope mode-switch signal loss on 4K120/DSC/HBR2.
+# bc250-cs-defer-od-externs supplies the externs MastaG carries in his 8-core
+# patch, which we do not take. Applied after DSC/PCON, reversed before them:
+# cs_defer_od_for_dp_hdmi21_pcon() reads dc->caps.dp_hdmi21_pcon_support, which
+# only the PCON patch advertises.
+# Runtime knobs: amdgpu.cs_pcon_frl_defer_ms (2000, 0=off),
+# amdgpu.cs_od_unforce_ms (3000, 0=off), amdgpu.cs_od_unforce_settle_ms (0),
+# amdgpu.cs_od_defer_debug (0).
+DEFER_OD_PATCHES=(
+    "$HERE/bc250-cs-defer-od-externs.patch"
+    "$HERE/bc250-cs-defer-od-during-frl-link-training.patch"
+    "$HERE/bc250-cs-defer-od-during-pcon-frl-training.patch"
+    "$HERE/bc250-cs-defer-od-during-dp-link-training.patch"
+    "$HERE/bc250-cs-release-gfx-override-during-link-bringup.patch"
+    "$HERE/bc250-cs-map-unforce-gfxfreq.patch"
+    "$HERE/bc250-cs-release-gfx-override-at-commit-start.patch"
+)
 if [ "$WITH_DSC_HDMI21" = 1 ]; then
     step "apply DCN201 PCON HDMI 2.1 patch (dp_hdmi21_pcon_support)"
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
@@ -505,9 +536,29 @@ if [ "$WITH_DSC_HDMI21" = 1 ]; then
     else
         die "DCN201 DSC enable patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
+
+    step "apply defer-OD link-bringup patches (cs-defer-od)"
+    for p in "${DEFER_OD_PATCHES[@]}"; do
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$p" >/dev/null 2>&1; then
+            echo "$(basename "$p") already applied"
+        elif patch -p1 --dry-run --fuzz=3 -s -f < "$p" >/dev/null 2>&1; then
+            patch -p1 --fuzz=3 -s < "$p"
+            echo "$(basename "$p") applied"
+        else
+            die "$(basename "$p") neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+        fi
+    done
 else
     step "skipping DCN201 DSC + PCON HDMI 2.1 patches (not requested)"
-    # Reverse in the opposite order they were applied: DSC first, then PCON.
+    # Reverse in the opposite order they were applied: defer-OD (applied
+    # last) first, then DSC, then PCON.
+    for ((i=${#DEFER_OD_PATCHES[@]}-1; i>=0; i--)); do
+        p=${DEFER_OD_PATCHES[i]}
+        if patch -p1 -R --dry-run --fuzz=3 -s -f < "$p" >/dev/null 2>&1; then
+            patch -p1 -R --fuzz=3 -s < "$p"
+            echo "$(basename "$p") REVERSED (leftover from a previous build)"
+        fi
+    done
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$DSC_PATCH"
         echo "DCN201 DSC enable patch REVERSED (leftover from a previous build)"

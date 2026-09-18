@@ -1,0 +1,111 @@
+diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c b/drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c
+index c35074177a36..c4043795cba8 100644
+--- a/drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c
++++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c
+@@ -34,6 +34,9 @@
+  * specification as much as possible and tested through HDMI electrical and
+  * link layer compliance.
+  */
++#include <linux/atomic.h>
++#include <linux/moduleparam.h>
++
+ #include "link_hdmi_frl.h"
+ #include "link_ddc.h"
+ #include "link/link_dpms.h"
+@@ -43,6 +46,25 @@
+ 
+ #include "dml/dml1_frl_cap_chk.h"
+ 
++/*
++ * Cyan Skillfish's OD clock/voltage commit path (SMU_MSG_RequestGfxclk /
++ * SMU_MSG_ForceGfxVid in cyan_skillfish_ppt.c) sends forced, hard clock and
++ * voltage overrides to the SMU. On boards with a fragile external HDMI2.1
++ * PCON (e.g. a Chrontel CH7218 DP->HDMI adapter), one of these landing while
++ * FRL link training -- or an SCDC-triggered FRL retrain later in a running
++ * session -- is in progress is enough to desync the link. This flag lets
++ * that commit path know to defer while training is active. Kept as a plain
++ * global rather than threaded through dc_link/amdgpu_device: a board only
++ * ever trains one FRL link at a time in practice, and this is a small,
++ * project-local interlock, not a general DC<->SMU coordination mechanism.
++ */
++atomic_t cs_hdmi_frl_training_active = ATOMIC_INIT(0);
++
++bool cs_od_defer_debug;
++module_param(cs_od_defer_debug, bool, 0644);
++MODULE_PARM_DESC(cs_od_defer_debug,
++		 "Log to dmesg when HDMI FRL link training starts/ends and when a GPU clock/voltage commit is deferred because of it");
++
+ #define DC_LOGGER \
+ 	dc_logger
+ #define DC_LOGGER_INIT(logger) \
+@@ -345,6 +367,10 @@ void hdmi_frl_poll_start(struct ddc_service *ddc_service)
+ 
+ 	DC_LOGGER_INIT(ddc_service->link->ctx->logger);
+ 
++	atomic_set(&cs_hdmi_frl_training_active, 1);
++	if (cs_od_defer_debug)
++		pr_info("amdgpu: cs_od_defer: FRL start poll began, deferring OD clock/voltage commits\n");
++
+ 	/*Test Condition - FLT_no_timeout avoid link training*/
+ 	offset = HDMI_SCDC_SOURCE_TEST_REQ;
+ 	link_query_ddc_data(ddc_service, slave_address, &offset,
+@@ -354,7 +380,7 @@ void hdmi_frl_poll_start(struct ddc_service *ddc_service)
+ 
+ 	/*Test Condition - No need to poll FRL_START if FLT_no_timeout*/
+ 	if (flt_no_timeout)
+-		return;
++		goto out;
+ 
+ 	offset = HDMI_SCDC_UPDATE_0;
+ 	/*LTS:P: Check FRL_START, poll for 200ms */
+@@ -383,6 +409,10 @@ void hdmi_frl_poll_start(struct ddc_service *ddc_service)
+ 			break;
+ 		}
+ 	}
++out:
++	atomic_set(&cs_hdmi_frl_training_active, 0);
++	if (cs_od_defer_debug)
++		pr_info("amdgpu: cs_od_defer: FRL start poll finished, OD clock/voltage commits allowed\n");
+ 	return;
+ }
+ 
+@@ -695,6 +725,10 @@ enum link_result hdmi_frl_perform_link_training_with_retries(
+ 
+ 	DC_LOGGER_INIT(link->ctx->logger);
+ 
++	atomic_set(&cs_hdmi_frl_training_active, 1);
++	if (cs_od_defer_debug)
++		pr_info("amdgpu: cs_od_defer: FRL link training started, deferring OD clock/voltage commits\n");
++
+ 	if (link->preferred_hdmi_frl_settings.valid)
+ 		max_retries = link->preferred_hdmi_frl_settings.max_retries;
+ 
+@@ -719,6 +753,10 @@ enum link_result hdmi_frl_perform_link_training_with_retries(
+ 		}
+ 	}
+ 
++	atomic_set(&cs_hdmi_frl_training_active, 0);
++	if (cs_od_defer_debug)
++		pr_info("amdgpu: cs_od_defer: FRL link training finished, OD clock/voltage commits allowed\n");
++
+ 	return status;
+ }
+ 
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
+index f9cd1f33e204..a149f1285411 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
+@@ -950,6 +950,13 @@ static int cyan_skillfish_od_edit_dpm_table(struct smu_context *smu,
+ 			return -EINVAL;
+ 		}
+ 
++		if (atomic_read(&cs_hdmi_frl_training_active)) {
++			if (cs_od_defer_debug)
++				dev_info(smu->adev->dev,
++					 "cs_od_defer: deferring OD commit, HDMI FRL link training is active\n");
++			return -EBUSY;
++		}
++
+ 		if (cyan_skillfish_user_settings.sclk < CYAN_SKILLFISH_SCLK_MIN ||
+ 		    cyan_skillfish_user_settings.sclk > CYAN_SKILLFISH_SCLK_MAX) {
+ 			dev_err(smu->adev->dev, "Invalid sclk! Valid sclk range: %uMHz - %uMhz\n",

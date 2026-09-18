@@ -18,23 +18,37 @@ receiver gets true 5.1 surround sound instead of PCM stereo.
 
 ## Why this is needed (SteamOS / BC-250)
 
-The BC-250's HDMI audio card supports AC-3 encoding, and SteamOS ships the
-necessary profile configuration (`hdmi-ac3.conf`). However, the profile is
+The BC-250's HDMI audio card supports AC-3 encoding, and SteamOS ships a
+profile configuration for it (`hdmi-ac3.conf`). However, the profile is
 never loaded because the BC-250 identifies itself as "AMD BC-250" in DMI
 instead of Valve's "OEM F7F" — so the hardware profile that triggers AC-3
-support is silently skipped. This script works around that by installing a
-udev rule and WirePlumber config that activates the profile directly.
+support is silently skipped. This script works around that by installing its
+own tuned profile set plus a udev rule and WirePlumber config that activate
+the profile directly.
 
-On other distros (CachyOS, Arch, etc.) where `hdmi-ac3.conf` doesn't ship by
-default, the script creates it automatically.
+The bundled `bc250-hdmi-ac3.conf` profile set improves on the stock
+`hdmi-ac3.conf` in exactly one way: it encodes at **640 kbps** (the AC-3
+maximum — the stock profile leaves BITRATE unset, so the a52 plugin uses its
+448 kbps default, which produces audible quantization harshness). It does this
+by passing RATE and BITRATE positionally to the a52 plugin:
+
+```
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,3',48000,640"}
+```
+
+The transport itself is the proven stock one — the a52 plugin wraps the bare
+`hw:` slave and the receiver locks Dolby Digital from the AC3 sync word. No
+`hdmi:`/AES wrapper is used: that approach (borrowed from the dual-audio
+reference) was never validated on BC-250 hardware and produced a PCM-locked,
+silent stream. The stock file is left untouched.
 
 ## Requirements
 
 - PipeWire + WirePlumber
 - `alsa-plugins` (provides the `a52` PCM plugin)
 - `ffmpeg` (provides libavcodec, used by the a52 plugin)
-- `alsa-card-profile` (provides the profile set framework; the script creates
-  `hdmi-ac3.conf` automatically if it's missing)
+- `alsa-card-profile` (provides the profile set framework; the tuned
+  `bc250-hdmi-ac3.conf` is installed by the script)
 - An HDMI audio device (e.g. HDA ATI HDMI)
 - A display connected via HDMI or an active DisplayPort-to-HDMI adapter
 - An AV receiver or soundbar with Dolby Digital support
@@ -67,20 +81,24 @@ Your receiver should now show Dolby Digital when audio plays.
 ## How it works
 
 1. **Udev rule** (`/etc/udev/rules.d/91-ac3-audio.rules`): sets
-   `ACP_PROFILE_SET=hdmi-ac3.conf` for the HDMI audio card, making the AC-3
-   profiles discoverable by PipeWire/WirePlumber.
+   `ACP_PROFILE_SET=bc250-hdmi-ac3.conf` for the HDMI audio card, making the
+   AC-3 profiles discoverable by PipeWire/WirePlumber.
 
 2. **WirePlumber config** (`~/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf`):
-   - Sets `device.profile-set = "hdmi-ac3.conf"` for the HDMI card
+   - Sets `device.profile-set = "bc250-hdmi-ac3.conf"` for the HDMI card
    - Sets `session.suspend-timeout-seconds = 3600` (keep sink alive 1h)
-   - Sets `api.alsa.start-delay = 1536` (prevent a52 plugin EPIPE on startup)
-   - Sets `api.alsa.period-size = 768` and `api.alsa.period-num = 4` (64ms
-     buffer for low latency)
+   - Sets `api.alsa.start-delay = 1536` on the AC-3 sinks (prevents the a52
+     plugin from raising EPIPE on playback start). The rule matches
+     `node.name = "~alsa_output.*ac3.*"` — matching `alsa.name` would silently
+     never fire, since the a52 plugin reports an empty `alsa.name` when it is
+     reached through a named PCM.
 
-3. **ACP profile set** (`/usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf`):
-   defines the `hdmi-ac3-surround` mapping using
-   `device-strings = plug:{SLAVE="a52:%f,'hw:%f,3'"}`, which routes audio
-   through the ALSA `a52` plugin to encode 6-channel PCM to AC-3.
+3. **ACP profile set** (`/usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf`):
+   defines the `hdmi-ac3-surround` mapping using the stock transport with the
+   bitrate added:
+   `device-strings = plug:{SLAVE="a52:%f,'hw:%f,3',48000,640"}` — `plug` →
+   `a52` at 640 kbps → bare `hw:` slave. The same `hw:` device indices as the
+   stock profile (3, 7, 8 … 16) are used for the extra mappings.
 
 4. **Profile selection**: the script selects `output:hdmi-ac3-surround` and
    sets the resulting sink as the default.

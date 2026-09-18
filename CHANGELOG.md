@@ -7,6 +7,51 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## Unreleased
+
+- **Added:** Cyan Skillfish defer-OD link-bringup patches (ported from
+  MastaG's cs-defer-od stack to the Valve 7.2.4 kernel; applied by the
+  Combined Fix right after the PCON/DSC pair). GPU clock/voltage commits are
+  now refused while a display link is being brought up — native HDMI FRL
+  training, DP link training, and the PCON's own autonomous HDMI-side
+  training after a modeset (deadline `amdgpu.cs_pcon_frl_defer_ms`, default
+  2000 ms) — and a held ForceGfxclk/ForceGfxVid override is briefly released
+  across the bring-up (`amdgpu.cs_od_unforce_ms`, default 3000 ms) and
+  restored afterwards, using the newly mapped `SMU_MSG_UnForceGfxFreq`.
+  Targets the signal loss on KDE ↔ gamescope mode switches (4K120, DSC,
+  HBR2) that happened when a governor commit or a held override landed
+  inside the training window. Tunables: `amdgpu.cs_pcon_frl_defer_ms` (0
+  disables the PCON defer), `amdgpu.cs_od_unforce_ms` (0 disables the
+  override release), `amdgpu.cs_od_unforce_settle_ms` (default 0 — extra
+  settle delay after release), `amdgpu.cs_od_defer_debug=1` (dmesg
+  diagnostics). The 8-core telemetry patches are unchanged.
+- **Changed:** "AC-3 Surround" now installs its own tuned ACP profile set
+  (`bc250-hdmi-ac3.conf`) instead of relying on the stock `hdmi-ac3.conf`.
+  The profile set is the proven stock transport with the bitrate added:
+  the a52 plugin takes RATE and BITRATE positionally, so
+  `plug:{SLAVE="a52:%f,'hw:%f,3',48000,640"}` lifts the encoder from the
+  448 kbps default — which produced audible high-frequency harshness — to
+  the AC-3 maximum of 640 kbps. The slave stays the bare `hw:` device and
+  no IEC61937/AES wrapper is used; the receiver locks Dolby Digital from
+  the AC3 sync word. ACP profile names are unchanged
+  (`output:hdmi-ac3-surround`), and the stock file is not touched.
+- **Fixed:** the WirePlumber rule that sets
+  `api.alsa.start-delay = 1536` (without which the a52 plugin raises EPIPE
+  on every playback start) never matched: it matched on `alsa.name`, which
+  the a52 plugin reports as empty. It now matches
+  `node.name = "~alsa_output.*ac3.*"`, which is backend-agnostic.
+- **Changed:** FSR4 help text updated to MastaG's current packages — the
+  default bridge is now the BC-250 fork's RC11; RC9 and RC10 remain
+  selectable per game via `PROTON_USE_OPTISCALER=fsr411rc9` /
+  `fsr411rc10`. The Proton packages already ship this payload; only the
+  documentation still said the default was RC10. The "BC-250 FSR4 Launch
+  Options" Decky plugin was updated to match — it now lists the fsr411f
+  RC11 default, `signed`, `fsr411b`, `fsr411rc9` and `fsr411rc10`.
+- **Fixed:** `build.sh`'s pristine-reset list now covers every file the
+  patch stack touches — `amdgpu.h`, `amdgpu_drv.c`, `dc.h`, `link_dpms.c`,
+  `link_dp_training.c`, `link_hdmi_frl.c` and `smu_types.h` were missing,
+  so a partially patched tree could leave the next build in a mixed state.
+
 ## v1.9.4 — 2026-09-17
 
 - **Added:** GRUB recovery boot entries (Extras → "GRUB Recovery Entries").

@@ -65,7 +65,7 @@ standard 2-channel PCM signal. The receiver detects the AC-3 bitstream
 |---|---|---|---|
 | ALSA a52 plugin | `alsa-plugins` | `libasound2-plugins` | AC-3 encoding via `libasound_module_pcm_a52.so` |
 | FFmpeg / libavcodec | `ffmpeg` | `ffmpeg` | Provides the AC-3 encoder used by the a52 plugin |
-| ALSA card profiles | `alsa-card-profile` | (may need manual creation) | Provides the `hdmi-ac3.conf` profile set |
+| ALSA card profiles | `alsa-card-profile` | (may need manual creation) | Profile set framework — this toolkit ships the tuned `bc250-hdmi-ac3.conf` |
 | PipeWire | `pipewire` | `pipewire` | Audio server |
 | WirePlumber | `wireplumber` | `wireplumber` | Session manager for PipeWire |
 
@@ -77,24 +77,32 @@ ldconfig -p | grep libavcodec
 
 ## Implementation Steps
 
-### Step 1: Create the `hdmi-ac3.conf` profile set
+### Step 1: Install the `bc250-hdmi-ac3.conf` profile set
 
-If your system does not already ship `/usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf`,
-create it. This file defines the ALSA card profile that maps a 6-channel PCM
+Install the tuned profile set shipped in this directory
+(`/usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf`).
+It defines the ALSA card profile that maps a 6-channel PCM
 sink to the a52 encoder, which outputs to the HDMI hardware device.
 
 The critical line is the `device-strings` — it tells ALSA to route audio through
-the a52 plugin into the HDMI PCM device:
+the a52 plugin into the HDMI PCM device. It is the stock transport with the
+bitrate added: the a52 plugin takes RATE and BITRATE positionally
+(`a52:<card>,'hw:<card>,<dev>',<rate>,<bitrate>`), so passing `48000,640`
+lifts the encoder from the 448 kbps default to the AC-3 maximum of **640 kbps**
+(the 448 kbps default is what caused the audible high-frequency harshness).
+The slave stays the bare `hw:` device, exactly as the stock profile — the a52
+plugin (with its `card` parameter) wraps it and the receiver locks Dolby
+Digital from the AC3 sync word:
 
 ```ini
-; hdmi-ac3.conf — AC-3 (Dolby Digital) encoding profile set
+; bc250-hdmi-ac3.conf — AC-3 (Dolby Digital) encoding profile set
 ; The a52 plugin encodes 6-channel PCM to AC-3 in real-time using libavcodec.
 
 .include default.conf
 
 [Mapping hdmi-ac3-surround]
 description = Digital Surround 5.1 (HDMI/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,3'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,3',48000,640"}
 paths-output = hdmi-output-0
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -128,7 +136,7 @@ persists across reboots:
 
 ```bash
 # /etc/udev/rules.d/91-ac3-audio.rules
-SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="hdmi-ac3.conf"
+SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="bc250-hdmi-ac3.conf"
 ```
 
 Reload udev:
@@ -168,7 +176,7 @@ monitor.alsa.rules = [
         -- Disable the pro-audio profile to avoid conflicts
         api.acp.disable-pro-audio = true
         -- Load the AC-3 profile set
-        device.profile-set = "hdmi-ac3.conf"
+        device.profile-set = "bc250-hdmi-ac3.conf"
         device.routes.default-sink-volume = 1.0
       }
     }
@@ -192,9 +200,11 @@ monitor.alsa.rules = [
   {
     matches = [
       {
-        -- Match the a52-encoded sink specifically
-        node.name = "~alsa_output.pci-.*hdmi.*"
-        alsa.name = "~a52.*"
+        -- Match the AC-3 sinks by node name. This is deliberately not an
+        -- alsa.name match: when the encoder is reached through a named
+        -- PCM the a52 plugin reports an empty alsa.name, so an alsa.name
+        -- rule silently never fires and the sink EPIPEs on every start.
+        node.name = "~alsa_output.*ac3.*"
       }
     ]
     actions = {
@@ -212,7 +222,7 @@ monitor.alsa.rules = [
 
 **Why these three rules matter:**
 
-1. **Profile selection** — Without `device.profile-set = "hdmi-ac3.conf"`,
+1. **Profile selection** — Without `device.profile-set = "bc250-hdmi-ac3.conf"`,
    WirePlumber loads the default profile set, which only has stereo mappings.
    The `api.acp.disable-pro-audio = true` prevents the pro-audio profile from
    taking priority (it would expose raw channels without the a52 encoder).
@@ -340,9 +350,11 @@ internally maps these to the AC-3 channel order (L, C, R, Ls, Rs, LFE).
 
 ### EPIPE error on playback start
 
-- The `api.alsa.start-delay = 1536` setting is missing or incorrect
-- This must be set on the a52 sink node specifically (the third WirePlumber
-  rule with `alsa.name = "~a52.*"`)
+- The `api.alsa.start-delay = 1536` setting is missing or the rule does not
+  match the sink node
+- The rule matches `node.name = "~alsa_output.*ac3.*"` because the a52
+  plugin reports an empty `alsa.name` when reached through a named PCM —
+  matching `alsa.name` would silently never fire
 
 ### Wrong HDMI device
 
@@ -369,7 +381,9 @@ To restore stereo PCM:
 SteamOS ships `hdmi-ac3.conf` and has a hardware profile (`valve-fremont`) that
 loads it automatically — but only when the DMI board name matches `OEM F7F`.
 The BC-250's DMI identifies as `AMD BC-250`, so the profile is never loaded.
-The udev rule + WirePlumber config in this guide bypass that DMI check.
+The udev rule + WirePlumber config in this guide bypass that DMI check and
+load our tuned `bc250-hdmi-ac3.conf` instead (640 kbps + AES channel status,
+vs stock 448 kbps/none).
 
 The BC-250 also requires a kernel patch (`bc250-audio.patch`) that disables DP
 spread spectrum for Cyan Skillfish (`ignore_dpref_ss`), without which HDMI audio
@@ -379,22 +393,22 @@ AC-3 encoding approach.
 ### Arch Linux / CachyOS
 
 Install `alsa-plugins`, `ffmpeg`, and `alsa-card-profile` from the official
-repositories. The `hdmi-ac3.conf` file may not exist — create it as described
-in Step 1. No DMI-specific workarounds are needed.
+repositories. No DMI-specific workarounds are needed — just install the tuned
+`bc250-hdmi-ac3.conf` as described in Step 1.
 
 ### Debian / Ubuntu
 
 Install `libasound2-plugins` (provides the a52 plugin) and `ffmpeg`. The
-`alsa-card-profile` package may not be available — if not, create the
-`hdmi-ac3.conf` file manually in `/usr/share/alsa-card-profile/mixer/profile-sets/`
-or in a custom path referenced by your WirePlumber config.
+`alsa-card-profile` package may not be available — the tuned profile set only
+needs to exist at `/usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf`
+(or a custom path referenced by your WirePlumber config).
 
 ### Non-PipeWire systems (PulseAudio)
 
 The same approach works with PulseAudio instead of PipeWire/WirePlumber, but the
 configuration method differs:
 
-1. Create the `hdmi-ac3.conf` profile set (same as Step 1)
+1. Install the `bc250-hdmi-ac3.conf` profile set (same as Step 1)
 2. Set the profile via `pactl set-card-profile` (PulseAudio loads profile sets
    from the same `/usr/share/alsa-card-profile/mixer/profile-sets/` directory)
 3. No WirePlumber config is needed — PulseAudio's module-alsa-card reads the
@@ -419,7 +433,7 @@ results, though macOS's HDMI audio handling is more restrictive.
 
 | Step | What | Why |
 |---|---|---|
-| 1 | Create `hdmi-ac3.conf` profile set | Defines the a52-encoded 5.1 sink mapping |
+| 1 | Install `bc250-hdmi-ac3.conf` profile set | Defines the a52-encoded 5.1 sink mapping (640 kbps + AES) |
 | 2 | Install udev rule (`ACP_PROFILE_SET`) | Tells ALSA which profile set to load for the HDMI card |
 | 3 | Configure WirePlumber | Matches the device, sets profile, prevents suspend, fixes EPIPE |
 | 4 | Restart WirePlumber + select profile | Activates the AC-3 sink |
