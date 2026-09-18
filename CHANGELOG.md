@@ -7,7 +7,7 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
-## Unreleased
+## v1.9.4 — 2026-09-17
 
 - **Added:** GRUB recovery boot entries (Extras → "GRUB Recovery Entries").
   Installed as the first step of Install All, and managed at any time from

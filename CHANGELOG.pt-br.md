@@ -7,7 +7,7 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
-## Não lançado
+## v1.9.4 — 2026-09-17
 
 - **Adicionado:** Entradas de recovery no GRUB (Extras → "GRUB Recovery
   Entries"). Instaladas como primeiro passo do Install All, e gerenciadas a
