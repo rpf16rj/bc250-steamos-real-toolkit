@@ -652,7 +652,7 @@ method = "busy-flag"
 flush-every = 10
 
 [gpu]
-set-method = "smu"          # firmware calls; no kernel patch
+set-method = "kernel"       # via pp_od_clk_voltage so the driver interlock applies
 
 [dbus]
 enabled = true
