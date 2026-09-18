@@ -10,22 +10,26 @@ before the toolkit adopted numbered releases.
 ## Unreleased
 
 - **Added:** GRUB recovery boot entries (Extras → "GRUB Recovery Entries").
-  Installed as the first step of Install All, and offered automatically at
-  toolkit startup to existing installs that don't have them yet (silent when
-  already installed). Two extra entries appear in the GRUB menu, emitted by a
-  `/etc/grub.d/42_bc250-recovery` script so grub-mkconfig regenerates them on
-  every `update-grub` — including the ones a SteamOS update triggers — and they
-  always track the current kernel: *"HDMI21-DSC patch OFF"* boots with
-  `amdgpu.bc250_hdmi21=0` for displays that stay dark with the Combined Fix
-  DSC/PCON patch; *"REVERT TOOLKIT"* boots with `bc250.revert_all=1`, runs a
-  full unattended toolkit revert (GRUB params, services, patched amdgpu.ko
-  override — falls back to a self-contained emergency revert if the toolkit
-  folder is gone) and reboots into stock config. The same script sets a 3 s GRUB
-  timeout, because SteamOS hides the menu by default (`00_header` hardcodes
-  `timeout=0` and its `steamenv_init` ignores `GRUB_TIMEOUT`, so on hardware
-  without the Deck's "..." button the menu never appears). (SteamOS uses GRUB,
-  not BLS — `/boot/loader/entries` does not exist and the module set ships no
-  `blscfg` — so the entries are plain menuentries, not BLS `.conf` files.)
+  Installed as the first step of Install All, and managed at any time from
+  Extras → "GRUB Recovery Entries". Two extra entries appear in the GRUB menu,
+  emitted by a `/etc/grub.d/42_bc250-recovery` script so grub-mkconfig
+  regenerates them on every `update-grub` — including the ones a SteamOS
+  update triggers — and they always track the current kernel: *"HDMI21-DSC
+  patch OFF"* boots with `amdgpu.bc250_hdmi21=0` for displays that stay dark
+  with the Combined Fix DSC/PCON patch; *"REVERT TOOLKIT"* boots with
+  `bc250.revert_all=1`, runs a full unattended toolkit revert (GRUB params,
+  services, patched amdgpu.ko override — falls back to a self-contained
+  emergency revert if the toolkit folder is gone) and reboots into stock
+  config. The same script emits `set timeout`/`timeout_style` so the menu is
+  shown for 1 s at boot by default — SteamOS hides the menu (`00_header`
+  hardcodes `timeout=0` and its `steamenv_init` ignores `GRUB_TIMEOUT`, so on
+  hardware without the Deck's "..." button the menu never appears). Menu
+  visibility and timeout are user prefs stored in
+  `~/.bc250-toolkit/recovery-menu.conf`, parsed by the grub.d script at
+  grub-mkconfig time; the Extras submenu toggles the menu on/off and changes
+  the timeout (1–30 s). (SteamOS uses GRUB, not BLS — `/boot/loader/entries`
+  does not exist and the module set ships no `blscfg` — so the entries are
+  plain menuentries, not BLS `.conf` files.)
 - **Fixed:** `GRUB_CFG` was hardcoded to `/boot/grub/grub.cfg`, which does not
   exist on SteamOS (its `update-grub` writes `/efi/EFI/steamos/grub.cfg`). The
   missing-module prune and the boot-hang repair read and patched the wrong file

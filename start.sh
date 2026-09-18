@@ -6680,7 +6680,7 @@ run_extras_menu() {
         print_item "O" "OpenLinkHub"                  "Install/revert Corsair iCUE LINK Hub control — status: $(openlinkhub_status_label)"
         print_item "Z" "Toolkit SteamOS Control"      "Install Decky fan profiles and LED bar controls"
         print_item "B" "Fix GRUB Boot Hang"           "efi_uga.mod not found → boot stuck at 'Press any key to continue'"
-        print_item "R" "GRUB Recovery Entries"         "Boot menu entries: HDMI21-DSC off + full toolkit revert"
+        print_item "R" "GRUB Recovery Entries"         "Boot entries: HDMI21-DSC off + full revert + menu toggle/timeout"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -6724,9 +6724,13 @@ run_extras_menu() {
 RECOVERY_GRUB_SCRIPT="/etc/grub.d/42_bc250-recovery"
 # SteamOS hardcodes timeout=0 and its steamenv_init ignores GRUB_TIMEOUT, so on
 # hardware without the Deck's "..." button the menu never shows. The recovery
-# grub.d script sets this timeout (after 00_header runs) so the entries are
-# reachable at boot. Seconds.
-RECOVERY_MENU_TIMEOUT=3
+# grub.d script emits `set timeout`/`timeout_style` (it runs after 00_header)
+# so the entries are reachable at boot. Visibility and timeout are user prefs
+# stored in RECOVERY_MENU_CONF — the generated script parses that file at
+# grub-mkconfig time, so toggling only needs an update-grub, and the prefs
+# survive SteamOS updates (they live in the user's home).
+RECOVERY_MENU_CONF="$PERSIST_STATE_DIR/recovery-menu.conf"
+RECOVERY_MENU_TIMEOUT_DEFAULT=1
 RECOVERY_CTL="$PERSIST_STATE_DIR/bc250-recovery-ctl.sh"
 RECOVERY_TOOLKIT_PATH_FILE="$PERSIST_STATE_DIR/toolkit-path"
 RECOVERY_REVERT_UNIT="/etc/systemd/system/bc250-recovery-revert.service"
@@ -6735,6 +6739,37 @@ RECOVERY_REVERT_WANTS="/etc/systemd/system/multi-user.target.wants/bc250-recover
 recovery_entries_installed() {
     [[ -f "$RECOVERY_GRUB_SCRIPT" && -f "$RECOVERY_REVERT_UNIT" ]]
 }
+
+# Loads the menu prefs into $RECOVERY_MENU ("on"/"off") and $RECOVERY_TIMEOUT
+# (seconds), applying defaults when the conf is missing or malformed. The conf
+# file uses BC250_MENU/BC250_TIMEOUT — the same names the generated grub.d
+# script parses at grub-mkconfig time. Values are parsed, not sourced, so a
+# malformed file can never execute code.
+recovery_menu_conf_load() {
+    RECOVERY_MENU="on"
+    RECOVERY_TIMEOUT="$RECOVERY_MENU_TIMEOUT_DEFAULT"
+    local BC250_MENU BC250_TIMEOUT
+    if [[ -f $RECOVERY_MENU_CONF ]]; then
+        BC250_MENU=$(sed -n 's/^BC250_MENU=//p' "$RECOVERY_MENU_CONF" | head -n1)
+        BC250_TIMEOUT=$(sed -n 's/^BC250_TIMEOUT=//p' "$RECOVERY_MENU_CONF" | head -n1)
+    fi
+    [[ ${BC250_TIMEOUT:-} =~ ^[0-9]+$ ]] && RECOVERY_TIMEOUT=$BC250_TIMEOUT
+    [[ ${BC250_MENU:-} == "off" ]] && RECOVERY_MENU="off"
+    return 0   # the && tests above fail for normal values — never propagate under set -e
+}
+
+recovery_menu_conf_write() {
+    mkdir -p "$PERSIST_STATE_DIR"
+    cat > "$RECOVERY_MENU_CONF" <<EOF
+# BC-250 recovery menu prefs — parsed by the grub.d script at grub-mkconfig time.
+BC250_MENU=$1
+BC250_TIMEOUT=$2
+EOF
+    chown "$REAL_USER":"$REAL_USER" "$RECOVERY_MENU_CONF" 2>/dev/null || true
+}
+
+recovery_menu_timeout() { recovery_menu_conf_load; echo "$RECOVERY_TIMEOUT"; }
+recovery_menu_visible() { recovery_menu_conf_load; [[ $RECOVERY_MENU == "on" ]]; }
 
 recovery_write_ctl() {
     mkdir -p "$PERSIST_STATE_DIR"
@@ -6973,12 +7008,28 @@ EOF
     # SteamOS's 00_header hardcodes timeout=0 and its steamenv_init ignores
     # GRUB_TIMEOUT, so the menu never appears on hardware without the Deck
     # button. Emit the timeout here — this script runs after 00_header — so the
-    # recovery entries are reachable at boot. Removing this script (and running
-    # update-grub) reverts the menu to hidden.
+    # recovery entries are reachable at boot. Visibility/timeout come from the
+    # toolkit's menu conf, parsed at grub-mkconfig time; removing this script
+    # (and running update-grub) reverts the menu to hidden.
     cat >> "$RECOVERY_GRUB_SCRIPT" <<EOF
 
-echo 'set timeout=$RECOVERY_MENU_TIMEOUT'
-echo 'set timeout_style=menu'
+BC250_MENU_CONF="$RECOVERY_MENU_CONF"
+BC250_MENU=on
+BC250_TIMEOUT=$RECOVERY_MENU_TIMEOUT_DEFAULT
+# Parse — do not source — the prefs file: it lives in a user-writable dir and
+# this script runs as root under grub-mkconfig.
+if [ -f "\$BC250_MENU_CONF" ]; then
+    BC250_MENU=\$(sed -n 's/^BC250_MENU=//p' "\$BC250_MENU_CONF" | head -n1)
+    BC250_TIMEOUT=\$(sed -n 's/^BC250_TIMEOUT=//p' "\$BC250_MENU_CONF" | head -n1)
+fi
+case "\$BC250_TIMEOUT" in ''|*[!0-9]*) BC250_TIMEOUT=$RECOVERY_MENU_TIMEOUT_DEFAULT ;; esac
+if [ "\$BC250_MENU" = "off" ]; then
+    echo 'set timeout=0'
+    echo 'set timeout_style=hidden'
+else
+    echo "set timeout=\$BC250_TIMEOUT"
+    echo 'set timeout_style=menu'
+fi
 EOF
     chmod 755 "$RECOVERY_GRUB_SCRIPT"
 }
@@ -6992,7 +7043,10 @@ install_recovery_entries() {
         return 1
     fi
 
-    if [[ "$auto" != "auto" ]] && ! confirm "This adds two entries to the GRUB menu and shows the menu for ${RECOVERY_MENU_TIMEOUT}s at boot (SteamOS hides it by default): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0) and 'REVERT TOOLKIT' (bc250.revert_all=1 — reverts everything and reboots). Proceed?"; then
+    recovery_menu_conf_load
+    [[ -f $RECOVERY_MENU_CONF ]] || recovery_menu_conf_write "$RECOVERY_MENU" "$RECOVERY_TIMEOUT"
+
+    if [[ "$auto" != "auto" ]] && ! confirm "This adds two entries to the GRUB menu and shows the menu for ${RECOVERY_TIMEOUT}s at boot (SteamOS hides it by default): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0) and 'REVERT TOOLKIT' (bc250.revert_all=1 — reverts everything and reboots). Proceed?"; then
         print_info "Cancelled."
         return 0
     fi
@@ -7032,7 +7086,11 @@ install_recovery_entries() {
     fi
 
     persist_state_add "recovery_entries"
-    print_info "They appear in the GRUB menu, shown for ${RECOVERY_MENU_TIMEOUT}s at boot. 'REVERT TOOLKIT' reverts everything and reboots automatically."
+    if [[ $RECOVERY_MENU == "on" ]]; then
+        print_info "They appear in the GRUB menu, shown for ${RECOVERY_TIMEOUT}s at boot. 'REVERT TOOLKIT' reverts everything and reboots automatically."
+    else
+        print_info "They are in the GRUB menu, but the menu is hidden at boot (toggle it back on via Extras → GRUB Recovery Entries)."
+    fi
 }
 
 uninstall_recovery_entries() {
@@ -7052,18 +7110,71 @@ uninstall_recovery_entries() {
     # NOTE: $RECOVERY_CTL is left behind on purpose — this function may be
     # invoked *by* that script (via --revert-all), and deleting a running bash
     # script can corrupt its incremental read. Without the unit it's inert.
-    rm -f "$RECOVERY_TOOLKIT_PATH_FILE"
+    rm -f "$RECOVERY_TOOLKIT_PATH_FILE" "$RECOVERY_MENU_CONF"
     persist_state_remove "recovery_entries"
     print_success "Recovery boot entries removed."
 }
 
+# Flips the GRUB menu visibility pref and regenerates grub.cfg so the change
+# takes effect at the next boot. When off, SteamOS boots straight into the
+# default entry (stock behavior); the recovery entries stay in the config but
+# are only reachable via grub-reboot.
+recovery_menu_toggle() {
+    recovery_menu_conf_load
+    if [[ $RECOVERY_MENU == "on" ]]; then RECOVERY_MENU=off; else RECOVERY_MENU=on; fi
+    recovery_menu_conf_write "$RECOVERY_MENU" "$RECOVERY_TIMEOUT"
+
+    if ! recovery_entries_installed; then
+        print_info "Preference saved — it takes effect when the recovery entries are installed."
+        return 0
+    fi
+    print_info "Regenerating GRUB config..."
+    if steamos_writable 'grub_regen'; then
+        if [[ $RECOVERY_MENU == "on" ]]; then
+            print_success "GRUB menu will be shown for ${RECOVERY_TIMEOUT}s at boot."
+        else
+            print_success "GRUB menu hidden — the system boots straight into SteamOS."
+        fi
+    else
+        print_error "GRUB regeneration failed — preference saved; it applies after the next update-grub."
+    fi
+}
+
+recovery_menu_set_timeout() {
+    recovery_menu_conf_load
+    local t
+    read -rp "$(echo -e "  ${BOLD}${WHITE}Menu timeout in seconds (1-30, current ${RECOVERY_TIMEOUT}s):${RESET} ")" t
+    if [[ ! $t =~ ^[0-9]+$ || $t -lt 1 || $t -gt 30 ]]; then
+        print_error "Invalid timeout '$t' — enter a number between 1 and 30."
+        return 1
+    fi
+    RECOVERY_TIMEOUT=$t
+    recovery_menu_conf_write "$RECOVERY_MENU" "$RECOVERY_TIMEOUT"
+
+    if ! recovery_entries_installed; then
+        print_info "Saved — it takes effect when the recovery entries are installed."
+        return 0
+    fi
+    if [[ $RECOVERY_MENU == "off" ]]; then
+        print_info "Saved — the menu is currently hidden; the new timeout applies when it is toggled back on."
+        return 0
+    fi
+    print_info "Regenerating GRUB config..."
+    if steamos_writable 'grub_regen'; then
+        print_success "GRUB menu timeout set to ${RECOVERY_TIMEOUT}s."
+    else
+        print_error "GRUB regeneration failed — preference saved; it applies after the next update-grub."
+    fi
+}
+
 run_recovery_menu() {
     while true; do
+        recovery_menu_conf_load
         print_banner
         print_section "GRUB Recovery Boot Entries"
         echo ""
-        echo -e "  ${DIM}Adds two extra entries to the GRUB menu, shown for ${RECOVERY_MENU_TIMEOUT}s at boot${RESET}"
-        echo -e "  ${DIM}(SteamOS hides the menu by default on hardware without the Deck button):${RESET}"
+        echo -e "  ${DIM}Adds two extra entries to the GRUB menu (SteamOS hides the menu${RESET}"
+        echo -e "  ${DIM}by default on hardware without the Deck button):${RESET}"
         echo -e "  ${DIM}  • 'HDMI21-DSC patch OFF' — boots with amdgpu.bc250_hdmi21=0 for${RESET}"
         echo -e "  ${DIM}    displays that stay dark with the Combined Fix DSC/PCON patch.${RESET}"
         echo -e "  ${DIM}  • 'REVERT TOOLKIT' — boots with bc250.revert_all=1, reverts the${RESET}"
@@ -7073,6 +7184,8 @@ run_recovery_menu() {
         echo ""
         print_item "I" "Install / Refresh Recovery Entries" "$(recovery_entries_installed && echo 'installed' || echo 'not installed')"
         print_item "R" "Remove Recovery Entries"          "Delete both entries, units and helper"
+        print_item "M" "GRUB Menu at Boot"                "$(recovery_menu_visible && echo "shown for ${RECOVERY_TIMEOUT}s" || echo 'hidden') — toggle"
+        print_item "T" "Menu Timeout"                     "${RECOVERY_TIMEOUT}s — change"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -7081,6 +7194,8 @@ run_recovery_menu() {
         case "${rec_choice^^}" in
             I) install_recovery_entries;   press_enter ;;
             R) uninstall_recovery_entries; press_enter ;;
+            M) recovery_menu_toggle;       press_enter ;;
+            T) recovery_menu_set_timeout;  press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$rec_choice'"
@@ -7088,31 +7203,6 @@ run_recovery_menu() {
                 ;;
         esac
     done
-}
-
-# Returns 0 when the toolkit already has components installed — used to offer
-# the recovery entries only to existing installs at startup.
-toolkit_has_installed_components() {
-    [[ -s $PERSIST_STATE_FILE ]] && return 0
-    compgen -G "/etc/systemd/system/bc250-*.service" >/dev/null && return 0
-    compgen -G "/etc/systemd/system/cyan-skillfish-*.service" >/dev/null && return 0
-    return 1
-}
-
-# One-shot offer shown on toolkit startup for existing installs that don't have
-# the recovery boot entries yet. Silent when they're already installed.
-maybe_prompt_recovery_entries() {
-    [[ "$AUTO" == "1" ]] && return 0
-    recovery_entries_installed && return 0
-    toolkit_has_installed_components || return 0
-    print_section "GRUB Recovery Boot Entries"
-    if confirm "Recovery boot entries are not installed. They add 'HDMI21-DSC OFF' and 'REVERT TOOLKIT' options to the GRUB menu (shown for ${RECOVERY_MENU_TIMEOUT}s at boot) — recommended as a safety net. Install now?"; then
-        install_recovery_entries auto
-        press_enter
-    else
-        print_info "Skipped — you can install them later via Extras → GRUB Recovery Entries."
-        sleep 1
-    fi
 }
 
 # ==============================================================================
@@ -7439,9 +7529,6 @@ validate_combined_fix_prerequisites() {
     print_success "All Combined Fix prerequisites met"
     return 0
 }
-
-# Offer recovery boot entries on startup to existing installs that lack them.
-maybe_prompt_recovery_entries
 
 while true; do
     show_menu

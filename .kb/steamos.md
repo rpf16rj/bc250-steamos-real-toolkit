@@ -47,8 +47,13 @@ EFI (nvme0n1p1) → steamcl.efi → GRUB → vmlinuz-linux-neptune-72
   request the menu; a BC-250 has no such button, so the menu never appears and
   pressing Esc/arrows does nothing (no countdown window). To show it, a later
   grub.d script must emit `set timeout=N` / `set timeout_style=menu` (it runs
-  after 00_header, so it overrides). The toolkit's recovery script sets a 3 s
-  timeout for this. Verified: the menu appeared after adding the override.
+  after 00_header, so it overrides). The toolkit's recovery script emits this
+  from user prefs in `~/.bc250-toolkit/recovery-menu.conf`
+  (`BC250_MENU=on|off`, `BC250_TIMEOUT=N`, default on/1 s — parsed at
+  grub-mkconfig time, so toggling only needs an `update-grub`; off emits
+  `timeout=0`/`timeout_style=hidden`). Managed via Extras → GRUB Recovery
+  Entries (toggle M, timeout T). Verified: the menu appeared after adding the
+  override.
 
 ## EFI Partitions
 - `/esp` (nvme0n1p1) — EFI System Partition (bootloader, steamcl.efi)
