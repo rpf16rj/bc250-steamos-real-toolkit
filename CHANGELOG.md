@@ -7,6 +7,50 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.9.4 — 2026-09-17
+
+- **Added:** GRUB recovery boot entries (Extras → "GRUB Recovery Entries").
+  Installed as the first step of Install All, and managed at any time from
+  Extras → "GRUB Recovery Entries". Two extra entries appear in the GRUB menu,
+  emitted by a `/etc/grub.d/42_bc250-recovery` script so grub-mkconfig
+  regenerates them on every `update-grub` — including the ones a SteamOS
+  update triggers — and they always track the current kernel: *"HDMI21-DSC
+  patch OFF"* boots with `amdgpu.bc250_hdmi21=0` for displays that stay dark
+  with the Combined Fix DSC/PCON patch; *"REVERT TOOLKIT"* boots with
+  `bc250.revert_all=1`, runs a full unattended toolkit revert (GRUB params,
+  services, patched amdgpu.ko override — falls back to a self-contained
+  emergency revert if the toolkit folder is gone) and reboots into stock
+  config. The same script emits `set timeout`/`timeout_style` so the menu is
+  shown for 1 s at boot by default — SteamOS hides the menu (`00_header`
+  hardcodes `timeout=0` and its `steamenv_init` ignores `GRUB_TIMEOUT`, so on
+  hardware without the Deck's "..." button the menu never appears). Menu
+  visibility and timeout are user prefs stored in
+  `~/.bc250-toolkit/recovery-menu.conf`, parsed by the grub.d script at
+  grub-mkconfig time; the Extras submenu toggles the menu on/off and changes
+  the timeout (1–30 s). (SteamOS uses GRUB, not BLS — `/boot/loader/entries`
+  does not exist and the module set ships no `blscfg` — so the entries are
+  plain menuentries, not BLS `.conf` files.)
+- **Fixed:** `GRUB_CFG` was hardcoded to `/boot/grub/grub.cfg`, which does not
+  exist on SteamOS (its `update-grub` writes `/efi/EFI/steamos/grub.cfg`). The
+  missing-module prune and the boot-hang repair read and patched the wrong file
+  and were silent no-ops. The path is now detected.
+- **Added:** `start.sh --revert-all` non-interactive flag (used by the recovery
+  entry; `AUTO=1`, errexit disabled so one failed component can't abort).
+- **Fixed:** `print_warning` was called in several places but never defined.
+
+- **Fixed:** GRUB boot hang on SteamOS 3.9.x — `error: file
+  '/boot/grub/x86_64-efi/efi_uga.mod' not found` followed by `Press any key to
+  continue...`, which on a keyboard-less console hangs boot forever. Newer GRUB
+  builds emit `insmod efi_uga` unconditionally for EFI, but Valve's pruned
+  module set doesn't ship `efi_uga.mod`. The toolkit now writes
+  `GRUB_VIDEO_BACKEND=efi_gop` to `/etc/default/grub` (persisted across SteamOS
+  updates) so every future `grub-mkconfig` only loads `efi_gop`, and comments
+  out any `insmod` line in `grub.cfg` that references a module missing from
+  `/boot/grub/*-efi` — repairs existing configs and covers modules
+  `GRUB_VIDEO_BACKEND` doesn't control. Applied automatically on Install All
+  and on the post-update re-apply pass; also available manually under
+  Extras → "Fix GRUB Boot Hang".
+
 ## v1.9.3 — 2026-09-15
 
 - **Changed:** Display DSC + HDMI 2.1 PCON patches replaced with the upstream
