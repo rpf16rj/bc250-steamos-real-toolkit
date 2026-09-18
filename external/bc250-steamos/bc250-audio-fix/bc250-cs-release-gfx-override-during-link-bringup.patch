@@ -27,6 +27,16 @@ PP_OD_RESTORE_DEFAULT_TABLE + PP_OD_COMMIT_DPM_TABLE does -- that exact
 sequence, issued by hand, is what was shown to fix a live failure -- and a
 delayed work restores the user's settings once the window closes.
 
+Local adaptation (toolkit): the release is gated on a valid user setting --
+sclk inside the hardware range -- as well as a forced voltage. Without that
+guard a zeroed cyan_skillfish_user_settings, which is the state whenever the
+governor drives the clock through the SMU path (that path never writes these
+fields), satisfied "vddc != MAGIC" and released on every commit: a real
+clock/voltage transition each time, and a restore that could only send
+RequestGfxclk(0) and fail ("Set sclk failed!"). The guard makes the release
+inert when there is no override to release, which is the only safe reading of
+"release the override".
+
 Restoring from a timer rather than a matching "link is up" callback because
 no such signal exists for a PCON: it trains its HDMI side autonomously and DC
 never learns when it finished. Every modeset re-arms the timer, so
@@ -153,7 +163,7 @@ avoid. Both call sites run in process context from the atomic commit tail.
  }
  
  static int cyan_skillfish_refresh_metrics_table(struct smu_context *smu)
-@@ -910,12 +987,144 @@
+@@ -910,12 +987,146 @@
  	return sizeof(struct gpu_metrics_v2_2);
  }
  
@@ -246,7 +256,9 @@ avoid. Both call sites run in process context from the atomic commit tail.
 +	if (cs_od_force_suspended) {
 +		/* Already released -- just hold it open a while longer. */
 +		armed = true;
-+	} else if (cyan_skillfish_user_settings.vddc != CYAN_SKILLFISH_VDDC_MAGIC) {
++	} else if (cyan_skillfish_user_settings.sclk >= CYAN_SKILLFISH_SCLK_MIN &&
++		   cyan_skillfish_user_settings.sclk <= CYAN_SKILLFISH_SCLK_MAX &&
++		   cyan_skillfish_user_settings.vddc != CYAN_SKILLFISH_VDDC_MAGIC) {
 +		if (!cs_od_send_gfx_state(smu, cyan_skillfish_sclk_default,
 +					  CYAN_SKILLFISH_VDDC_MAGIC)) {
 +			WRITE_ONCE(cs_od_force_suspended, true);

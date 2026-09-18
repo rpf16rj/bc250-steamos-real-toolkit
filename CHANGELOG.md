@@ -25,18 +25,21 @@ before the toolkit adopted numbered releases.
   override release), `amdgpu.cs_od_unforce_settle_ms` (default 0 — extra
   settle delay after release), `amdgpu.cs_od_defer_debug=1` (dmesg
   diagnostics). The 8-core telemetry patches are unchanged.
-- **Changed:** the GPU governor profiles now use `set-method = "kernel"`
-  instead of `"smu"`. The `smu` method writes to the SMU directly over PCI
-  config space, bypassing the amdgpu driver — the kernel logs
-  `cyan-skillfish-: Unexpected write to kernel-exclusive config offset b8`.
-  That bypasses the defer-OD interlock entirely, and it also breaks the
-  override release/restore: `cyan_skillfish_user_settings` is only ever
-  updated through the kernel OD path, so with `smu` it stays `{0,0}` — the
-  release then triggers on every link bring-up, drops the governor's forced
-  clock, and the restore fails with `Set sclk failed!`. `kernel` writes via
-  `pp_od_clk_voltage`, so the commits go through the driver, the interlock
-  catches them, and the restore works. (Per MastaG's recommendation on the
-  BC-250 Discord — this is the "protected path".)
+- **Fixed:** the defer-OD release fired on *every* display commit even when no
+  override was held. `cs_od_force_suspend()` only checked
+  `cyan_skillfish_user_settings.vddc != MAGIC`, but with the governor on the
+  `smu` method those fields stay `{0,0}` — so each commit released a
+  clock/voltage override that was not there (a real transition, the exact
+  class of event that breaks the link) and the restore could only send
+  `RequestGfxclk(0)` and fail (`Set sclk failed!`). The release is now gated
+  on a valid `sclk` as well.
+- **Changed:** investigated switching the governor to `set-method = "kernel"`
+  (MastaG's "protected path": commits go through `pp_od_clk_voltage`, so the
+  interlock catches them, instead of writing the SMU directly over PCI config
+  space). Reverted — on this board the `kernel` method does not scale at all
+  (the clock stays pinned at 500 MHz under 100% load), so `smu` remains the
+  only method that actually scales. Revisit once MastaG publishes the reworked
+  patch.
 - **Changed:** "AC-3 Surround" now installs its own tuned ACP profile set
   (`bc250-hdmi-ac3.conf`) instead of relying on the stock `hdmi-ac3.conf`.
   The profile set is the proven stock transport with the bitrate added:

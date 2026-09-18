@@ -26,18 +26,20 @@ como histórico datado de antes da adoção de versões numeradas.
   `amdgpu.cs_od_unforce_settle_ms` (padrão 0 — pausa extra após a
   liberação), `amdgpu.cs_od_defer_debug=1` (diagnóstico no dmesg). Os
   patches de telemetria 8-core estão inalterados.
-- **Alterado:** os perfis do governor de GPU agora usam
-  `set-method = "kernel"` em vez de `"smu"`. O método `smu` escreve direto no
-  SMU via PCI config space, bypassando o driver amdgpu — o kernel registra
-  `cyan-skillfish-: Unexpected write to kernel-exclusive config offset b8`.
-  Isso escapa completamente do interlock defer-OD, e também quebra o
-  release/restore do override: `cyan_skillfish_user_settings` só é atualizado
-  pelo caminho OD do kernel, então com `smu` ele fica `{0,0}` — o release
-  dispara a cada bring-up de link, derruba o clock forçado do governor, e o
-  restore falha com `Set sclk failed!`. O método `kernel` escreve via
-  `pp_od_clk_voltage`, então os commits passam pelo driver, o interlock os
-  captura, e o restore funciona. (Recomendação do MastaG no Discord do BC-250
-  — é o "protected path".)
+- **Corrigido:** o release do defer-OD disparava em *todo* commit de display
+  mesmo sem override ativo. O `cs_od_force_suspend()` só checava
+  `cyan_skillfish_user_settings.vddc != MAGIC`, mas com o governor no método
+  `smu` esses campos ficam `{0,0}` — então cada commit soltava um
+  clock/voltagem que não estava lá (uma transição real, exatamente a classe de
+  evento que quebra o link) e o restore só podia mandar `RequestGfxclk(0)` e
+  falhar (`Set sclk failed!`). O release agora exige também um `sclk` válido.
+- **Alterado:** investigada a troca do governor para `set-method = "kernel"`
+  (o "protected path" do MastaG: commits passam por `pp_od_clk_voltage`, o
+  interlock os captura, em vez de escrever direto no SMU via PCI config
+  space). Revertido — nesta placa o método `kernel` não escala de jeito nenhum
+  (o clock fica travado em 500 MHz com 100% de carga), então `smu` segue sendo
+  o único que realmente escala. Revisitar quando o MastaG publicar o patch
+  reworkado.
 - **Alterado:** O "AC-3 Surround" agora instala seu próprio profile set ACP
   tunado (`bc250-hdmi-ac3.conf`) em vez de depender do `hdmi-ac3.conf` stock.
   O profile set é o transporte stock comprovado com o bitrate adicionado: o

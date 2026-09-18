@@ -5133,7 +5133,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 1500
@@ -5177,7 +5177,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 1600
@@ -5224,7 +5224,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 1600
@@ -5271,7 +5271,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 1750
@@ -5324,7 +5324,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 1850
@@ -5377,7 +5377,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 2000
@@ -5433,7 +5433,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 2100
@@ -5495,7 +5495,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 2300
@@ -5572,7 +5572,7 @@ fix-metrics = true
 method = "busy-flag"
 flush-every = 10
 [gpu]
-set-method = "kernel"
+set-method = "smu"
 [frequency-range]
 min = 500
 max = 2350
