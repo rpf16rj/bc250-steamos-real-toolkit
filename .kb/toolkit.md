@@ -37,6 +37,10 @@ external/
   bc250-core-unlock/              # CPU core unlock
   bc250_memcfg/                   # Memory config tool
   bc250_smu_oc/                   # SMU overclock tool
+extras/                           # Optional add-ons (not in start.sh)
+  bc250-fsr4-launch-options/      # Decky plugin: FSR4 launch-option presets
+  bc250-display-capture/          # Decky plugin: persistent display diagnostics
+  toolkit-steamos-control/        # Decky plugin: toolkit control panel
 .kb/                              # Local knowledge base (not committed)
 .devin/workflows/                 # Cascade skills/workflows
   toolkit.md                      # General toolkit skill

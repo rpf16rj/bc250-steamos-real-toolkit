@@ -114,3 +114,17 @@ without scrambling), then may or may not fall back to FRL correctly.
 Fix: EDID override makes the kernel aware of HDMI 2.1 capabilities from the start,
 so FRL is negotiated properly for all high-bandwidth modes.
 
+## Diagnostics — Display Capture Decky Plugin
+`extras/bc250-display-capture/` — Decky plugin with **Start collection** /
+**Stop and package** buttons. The backend launches the collector via
+`systemd-run` (system scope) so it survives the KDE→gamescope session
+teardown — the reason an in-terminal capture is impossible mid-test: KDE is
+killed and a new session starts. Collects `journalctl -k -b -f`, per-second
+DRM connector status/modes/gpu_busy/sclk, and periodic `drm_info`/`modetest`
+snapshots into `/home/deck/bc250-display-captures/<timestamp>/`, then packages
+a `.tar.gz` on stop. Install with `extras/bc250-display-capture/install.sh`
+(copies to `~/homebrew/plugins/` and restarts the plugin loader). The
+`dist/index.js` frontend bundle is hand-written — the Deck has no node, so
+it follows the same `SP_REACT`/`DFL` global pattern as
+`extras/bc250-fsr4-launch-options/` instead of a rollup build.
+

@@ -9,6 +9,14 @@ before the toolkit adopted numbered releases.
 
 ## Unreleased
 
+- **Added:** "BC-250 Display Capture" Decky plugin
+  (`extras/bc250-display-capture/`). A Quick Access panel with **Start
+  collection** / **Stop and package** that launches a persistent
+  `systemd-run` collector which survives the KDE→gamescope session switch:
+  it follows the kernel journal and snapshots the DRM connector state,
+  VRR/DSC/HDR/bpc properties, connector modes and GPU clocks every second,
+  then packages a timestamped `.tar.gz` under `~/bc250-display-captures/`.
+  Install with `extras/bc250-display-capture/install.sh`.
 - **Changed:** "AC-3 Surround" now installs its own tuned ACP profile set
   (`bc250-hdmi-ac3.conf`) instead of relying on the stock `hdmi-ac3.conf`.
   The profile set is the proven stock transport with the bitrate added:

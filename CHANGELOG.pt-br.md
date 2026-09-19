@@ -9,6 +9,15 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## Unreleased
 
+- **Adicionado:** Plugin Decky "BC-250 Display Capture"
+  (`extras/bc250-display-capture/`). Um painel no Quick Access com **Start
+  collection** / **Stop and package** que dispara um coletor persistente via
+  `systemd-run`, que sobrevive à troca de sessão KDE→gamescope: ele acompanha
+  o journal do kernel e tira snapshots do estado do conector DRM, das
+  propriedades VRR/DSC/HDR/bpc, dos modos do conector e dos clocks da GPU a
+  cada segundo, e ao parar empacota um `.tar.gz` com timestamp em
+  `~/bc250-display-captures/`. Instalação com
+  `extras/bc250-display-capture/install.sh`.
 - **Alterado:** O "AC-3 Surround" agora instala seu próprio profile set ACP
   tunado (`bc250-hdmi-ac3.conf`) em vez de depender do `hdmi-ac3.conf` stock.
   O profile set é o transporte stock comprovado com o bitrate adicionado: o
