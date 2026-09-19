@@ -114,33 +114,3 @@ without scrambling), then may or may not fall back to FRL correctly.
 Fix: EDID override makes the kernel aware of HDMI 2.1 capabilities from the start,
 so FRL is negotiated properly for all high-bandwidth modes.
 
-## Defer-OD (link bring-up interlock)
-
-Ported from MastaG's cs-defer-od stack (his patches 0011–0016) to Valve 7.2.4;
-applied by the Combined Fix right after PCON/DSC.
-
-Problem: the Cyan Skillfish governor commits ForceGfxclk/ForceGfxVid in the
-background, and a forced override can stay held for the whole session. If a
-commit — or the held override itself — lands inside a link-training window the
-link desyncs (black screen / lost signal until hotplug). Three windows:
-- native HDMI FRL training (`cs_hdmi_frl_training_active`, link_hdmi_frl.c)
-- DP link training itself (wrapper around perform_link_training_with_retries —
-  the decisive one on a DP-out board: covers the KDE ↔ gamescope mode switch)
-- the PCON's own HDMI-side training after a modeset, which DC can only observe
-  via a deadline (`cs_pcon_frl_defer_until`, armed in link_dpms.c; polls of
-  DP_PCON_HDMI_POST_FRL_STATUS never succeed)
-
-While a window is open `cyan_skillfish_od_edit_dpm_table()` returns -EBUSY for
-commits. A held override is released (UnForceGfxFreq + UnforceGfxVid, the
-former newly mapped by cs-map-unforce-gfxfreq) at atomic-commit start and
-re-applied by delayed work after the window.
-
-Module params (modprobe.d or amdgpu.* on the kernel cmdline — NOT GRUB-visible
-to userspace tools):
-- amdgpu.cs_pcon_frl_defer_ms — PCON defer window, default 2000, 0 = off
-- amdgpu.cs_od_unforce_ms — override release duration, default 3000, 0 = off
-- amdgpu.cs_od_unforce_settle_ms — extra settle delay after release, default 0
-- amdgpu.cs_od_defer_debug — dmesg diagnostics, default 0
-
-Teardown: cyan_skillfish_fini_smc_tables() clears the published smu pointer
-and cancels the restore work under cs_od_force_lock.

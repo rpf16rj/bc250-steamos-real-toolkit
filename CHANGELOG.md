@@ -9,37 +9,6 @@ before the toolkit adopted numbered releases.
 
 ## Unreleased
 
-- **Added:** Cyan Skillfish defer-OD link-bringup patches (ported from
-  MastaG's cs-defer-od stack to the Valve 7.2.4 kernel; applied by the
-  Combined Fix right after the PCON/DSC pair). GPU clock/voltage commits are
-  now refused while a display link is being brought up — native HDMI FRL
-  training, DP link training, and the PCON's own autonomous HDMI-side
-  training after a modeset (deadline `amdgpu.cs_pcon_frl_defer_ms`, default
-  2000 ms) — and a held ForceGfxclk/ForceGfxVid override is briefly released
-  across the bring-up (`amdgpu.cs_od_unforce_ms`, default 3000 ms) and
-  restored afterwards, using the newly mapped `SMU_MSG_UnForceGfxFreq`.
-  Targets the signal loss on KDE ↔ gamescope mode switches (4K120, DSC,
-  HBR2) that happened when a governor commit or a held override landed
-  inside the training window. Tunables: `amdgpu.cs_pcon_frl_defer_ms` (0
-  disables the PCON defer), `amdgpu.cs_od_unforce_ms` (0 disables the
-  override release), `amdgpu.cs_od_unforce_settle_ms` (default 0 — extra
-  settle delay after release), `amdgpu.cs_od_defer_debug=1` (dmesg
-  diagnostics). The 8-core telemetry patches are unchanged.
-- **Fixed:** the defer-OD release fired on *every* display commit even when no
-  override was held. `cs_od_force_suspend()` only checked
-  `cyan_skillfish_user_settings.vddc != MAGIC`, but with the governor on the
-  `smu` method those fields stay `{0,0}` — so each commit released a
-  clock/voltage override that was not there (a real transition, the exact
-  class of event that breaks the link) and the restore could only send
-  `RequestGfxclk(0)` and fail (`Set sclk failed!`). The release is now gated
-  on a valid `sclk` as well.
-- **Changed:** investigated switching the governor to `set-method = "kernel"`
-  (MastaG's "protected path": commits go through `pp_od_clk_voltage`, so the
-  interlock catches them, instead of writing the SMU directly over PCI config
-  space). Reverted — on this board the `kernel` method does not scale at all
-  (the clock stays pinned at 500 MHz under 100% load), so `smu` remains the
-  only method that actually scales. Revisit once MastaG publishes the reworked
-  patch.
 - **Changed:** "AC-3 Surround" now installs its own tuned ACP profile set
   (`bc250-hdmi-ac3.conf`) instead of relying on the stock `hdmi-ac3.conf`.
   The profile set is the proven stock transport with the bitrate added:

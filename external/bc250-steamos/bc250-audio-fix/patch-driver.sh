@@ -12,9 +12,7 @@
 # patches are NOT applied. Use --gfx1013 --audio to apply both sets of patches.
 # --dsc applies the DCN201 DSC + PCON HDMI 2.1 patch pair (Display Stream
 # Compression and HDMI 2.1 FRL PCON, both gated at runtime by
-# amdgpu.bc250_hdmi21, on by default; amdgpu.bc250_hdmi21=0 disables them)
-# plus the cs-defer-OD link-bringup stack (defers GPU clock/voltage commits
-# and releases a held override while a display link trains).
+# amdgpu.bc250_hdmi21, on by default; amdgpu.bc250_hdmi21=0 disables them).
 # --dsc-pcon is accepted as an alias for --dsc.
 # --no-ss skips the DP spread spectrum disable patch (within --audio).
 # --no-telemetry skips the Cyan Skillfish telemetry+cache patch (within --audio).
