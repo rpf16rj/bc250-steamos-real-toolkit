@@ -7,7 +7,7 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
-## Unreleased
+## v1.9.5 — 2026-09-19
 
 - **Added:** "BC-250 Display Capture" Decky plugin
   (`extras/bc250-display-capture/`). A Quick Access panel with **Start

@@ -7,7 +7,7 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
-## Unreleased
+## v1.9.5 — 2026-09-19
 
 - **Adicionado:** Plugin Decky "BC-250 Display Capture"
   (`extras/bc250-display-capture/`). Um painel no Quick Access com **Start
