@@ -312,15 +312,22 @@ fi
 # 0007 TTM NULL-page guard, 0008 SCLK range are always applied
 git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c \
+    drivers/gpu/drm/amd/amdgpu/amdgpu.h \
+    drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c \
     drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c \
     drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu11_driver_if_cyan_skillfish.h \
+    drivers/gpu/drm/amd/pm/swsmu/inc/smu_types.h \
     drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c \
     drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_helpers.c \
     drivers/gpu/drm/amd/display/dc/core/dc_resource.c \
+    drivers/gpu/drm/amd/display/dc/dc.h \
     drivers/gpu/drm/amd/display/dc/dio/dcn10/dcn10_stream_encoder.c \
     drivers/gpu/drm/amd/display/dc/dio/dcn20/dcn20_stream_encoder.h \
     drivers/gpu/drm/amd/display/dc/resource/dcn201/dcn201_resource.c \
+    drivers/gpu/drm/amd/display/dc/link/link_dpms.c \
     drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c \
+    drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_training.c \
+    drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c \
     drivers/gpu/drm/amd/display/dc/link/link_detection.c \
     drivers/gpu/drm/amd/display/dc/link/link_validation.c
 
@@ -485,6 +492,7 @@ fi
 # adds, so PCON is applied first and reversed last.
 PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
 DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
+
 if [ "$WITH_DSC_HDMI21" = 1 ]; then
     step "apply DCN201 PCON HDMI 2.1 patch (dp_hdmi21_pcon_support)"
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
@@ -505,9 +513,9 @@ if [ "$WITH_DSC_HDMI21" = 1 ]; then
     else
         die "DCN201 DSC enable patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
+
 else
     step "skipping DCN201 DSC + PCON HDMI 2.1 patches (not requested)"
-    # Reverse in the opposite order they were applied: DSC first, then PCON.
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$DSC_PATCH"
         echo "DCN201 DSC enable patch REVERSED (leftover from a previous build)"

@@ -3204,8 +3204,9 @@ run_revert_ds5_bridge_fix() {
 # --- HDMI AC-3 Surround Encoding (Dolby Digital via eARC) --------------------
 # The BC-250's DMI identifies as "AMD BC-250" instead of "OEM F7F", so
 # SteamOS's valve-fremont hardware profile (which enables AC3 profiles) is
-# never loaded. This installs a udev rule + WirePlumber config to enable the
-# hdmi-ac3.conf profile set, giving a 5.1 sink that encodes to AC-3 via the
+# never loaded. This installs a udev rule + WirePlumber config to enable our
+# tuned bc250-hdmi-ac3.conf profile set (640 kbps + IEC61937 AES channel
+# status, vs stock 448 kbps/no AES), giving a 5.1 sink that encodes to AC-3 via the
 # a52 ALSA plugin. Zero latency, minimal CPU overhead (libavcodec a52enc).
 # Requires: alsa-plugins (a52 plugin), ffmpeg (libavcodec for encoding).
 AC3_UDEV_RULE="/etc/udev/rules.d/91-ac3-audio.rules"
@@ -3298,14 +3299,24 @@ install_ac3_surround() {
         fi
     fi
 
-    # 1. Install udev rule to set ACP_PROFILE_SET for the HDMI audio card
-    print_info "Installing udev rule for ACP_PROFILE_SET=hdmi-ac3.conf..."
+    # 1. Install tuned ACP profile set + udev rule
+    print_info "Installing ACP profile set bc250-hdmi-ac3.conf (640 kbps)..."
     local was_steamos=0
     if is_steamos; then
         was_steamos=1
         steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }
     fi
-    echo 'SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="hdmi-ac3.conf"' > "$AC3_UDEV_RULE"
+    install -m 0644 "$SCRIPT_DIR/extras/hdmi-ac3-encoding/bc250-hdmi-ac3.conf" \
+        /usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf || {
+        print_error "Failed to install ACP profile set."
+        (( was_steamos )) && steamos-readonly enable || true
+        return 1
+    }
+    # Drop the obsolete named-PCM encoder from earlier builds (the profile set
+    # now uses the stock a52+hw: transport directly).
+    rm -f /etc/alsa/conf.d/62-bc250-ac3.conf 2>/dev/null || true
+    print_info "Installing udev rule for ACP_PROFILE_SET=bc250-hdmi-ac3.conf..."
+    echo 'SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="bc250-hdmi-ac3.conf"' > "$AC3_UDEV_RULE"
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger /sys/class/sound/card0 2>/dev/null || true
     if (( was_steamos )); then
@@ -3430,9 +3441,9 @@ ac3_auto_diagnose() {
         issues+=("WirePlumber config $AC3_WP_CONF not found")
     fi
 
-    # Check 9: Is the hdmi-ac3.conf profile set present?
-    if ! [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]]; then
-        issues+=("hdmi-ac3.conf profile set not found in /usr/share/alsa-card-profile/mixer/profile-sets/")
+    # Check 9: Is the bc250-hdmi-ac3.conf profile set present?
+    if ! [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf ]]; then
+        issues+=("bc250-hdmi-ac3.conf profile set not found in /usr/share/alsa-card-profile/mixer/profile-sets/")
     fi
 
     # Check 10: Check receiver connection
@@ -3522,9 +3533,9 @@ ac3_generate_diagnostic_log() {
         echo "== WirePlumber AC-3 Config =="
         [[ -f "$AC3_WP_CONF" ]] && cat "$AC3_WP_CONF" || echo "Not installed"
         echo ""
-        echo "== hdmi-ac3.conf Profile Set =="
-        [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]] && \
-            head -30 /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf || \
+        echo "== bc250-hdmi-ac3.conf Profile Set =="
+        [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf ]] && \
+            head -30 /usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf || \
             echo "Not found"
         echo ""
         echo "== a52 Plugin =="
@@ -3598,8 +3609,9 @@ run_revert_ac3_surround() {
     rm -f "$AC3_UDEV_RULE"
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger /sys/class/sound/card0 2>/dev/null || true
-    # Remove old AC-3 profile set and user config leftovers
-    rm -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf 2>/dev/null || true
+    # Remove our tuned AC-3 profile set and user config leftovers
+    rm -f /usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf 2>/dev/null || true
+    rm -f /etc/alsa/conf.d/62-bc250-ac3.conf 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/surround-profile.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
     if (( was_steamos )); then
@@ -3700,10 +3712,12 @@ install_dual_audio() {
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/surround-profile.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/ac3-sink.conf" 2>/dev/null || true
-    # Remove old AC-3 profile set (was in /usr/share, needs RO disable)
-    if [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]]; then
+    # Remove AC-3 profile sets (stock hdmi-ac3.conf + our bc250-hdmi-ac3.conf)
+    if [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]] || \
+       [[ -f /usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf ]]; then
         local was2=0; is_steamos && { was2=1; steamos-readonly disable || true; }
-        sudo rm -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf
+        sudo rm -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf \
+                  /usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf
         (( was2 )) && steamos-readonly enable || true
     fi
     local uid=$(id -u "$REAL_USER")
@@ -4018,8 +4032,11 @@ install_fsr4_proton() {
     echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%            # disable FSR4 upgrade${RESET}"
     echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%               # FSR4 watermark + OptiScaler log${RESET}"
     echo -e "  ${DIM}  RADV_GFX103=1 %command%                    # enable mesh/task shaders${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=signed %command%     # use AMD's signed FSR4 build (default: fsr411f RC10)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411f %command%   # default bridge: BC-250 fork RC11 (no need to set)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=signed %command%     # AMD's signed 4.0.2 bridge${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411b %command%     # third-party 4.1.1b, RDNA2 ghosting fix${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411rc9 %command%   # older fork bridge RC9${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411rc10 %command%  # older fork bridge RC10${RESET}"
     echo -e "  ${DIM}  PROTON_OPTISCALER_NAME=dxgi.dll %command%  # fix for games shipping own winmm.dll${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true\" %command%  # enable DLSS+Reflex via OptiScaler${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true;Spoofing.Registry=true\" %command%${RESET}"

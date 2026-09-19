@@ -12,12 +12,13 @@
 #   - An HDMI audio device (HDA ATI HDMI or similar)
 #   - alsa-plugins (provides the a52 PCM plugin)
 #   - ffmpeg (provides libavcodec used by the a52 plugin)
-#   - alsa-card-profile (provides hdmi-ac3.conf profile set)
+#   - alsa-card-profile (provides the profile set framework)
 #
 # On SteamOS (BC-250), the hdmi-ac3.conf profile set ships with the OS but is
 # never loaded because the DMI identifies as "AMD BC-250" instead of Valve's
-# "OEM F7F". On other distros, you may need to create the profile set manually
-# (see create_hdmi_ac3_conf below) or install a package that provides it.
+# "OEM F7F". This script installs its own tuned profile set
+# (bc250-hdmi-ac3.conf — 640 kbps bitrate + IEC61937 AES channel status,
+# vs stock 448 kbps with no channel status) so it works the same on any distro.
 #
 # Usage:
 #   sudo ./ac3-surround.sh install    — enable AC-3 surround encoding
@@ -40,7 +41,7 @@ UDEV_RULE="/etc/udev/rules.d/91-ac3-audio.rules"
 WP_CONF_DIR="${SUDO_USER:+$(getent passwd "$SUDO_USER" | cut -d: -f6)}${HOME:-/root}/.config/wireplumber/wireplumber.conf.d"
 WP_CONF="$WP_CONF_DIR/ac3-profile.conf"
 ACP_PROFILE_DIR="/usr/share/alsa-card-profile/mixer/profile-sets"
-ACP_PROFILE_FILE="$ACP_PROFILE_DIR/hdmi-ac3.conf"
+ACP_PROFILE_FILE="$ACP_PROFILE_DIR/bc250-hdmi-ac3.conf"
 
 # Resolve real home directory when running under sudo
 if [[ -n "${SUDO_USER:-}" ]] && [[ "${SUDO_USER}" != "root" ]]; then
@@ -79,29 +80,44 @@ steamos_ro() {
     fi
 }
 
-# --- Create hdmi-ac3.conf if it doesn't exist ---------------------------------
-# On SteamOS this file ships with the OS. On other distros (CachyOS, Arch, etc.)
-# it may not exist, so we create it with the standard AC-3 profile mappings.
-create_hdmi_ac3_conf() {
-    if [[ -f "$ACP_PROFILE_FILE" ]]; then
-        return 0
-    fi
-
-    print_info "Creating $ACP_PROFILE_FILE (not found on this system)..."
+# --- Install the tuned bc250-hdmi-ac3.conf profile set --------------------------
+# We ship our own profile set (640 kbps + IEC61937 AES channel status) instead
+# of the stock hdmi-ac3.conf (448 kbps, no channel status). The stock file is
+# left untouched. Prefer the sibling .conf when running from the repo; fall
+# back to the embedded copy so the script stays self-contained.
+install_ac3_profile_set() {
+    local dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     steamos_rw
     mkdir -p "$ACP_PROFILE_DIR"
 
-    cat > "$ACP_PROFILE_FILE" << 'ACPEOF'
-; Profile set with HDMI/AC3 profiles.
-; Enables AC-3 (Dolby Digital) encoding via the ALSA a52 plugin.
-; The a52 plugin encodes 6-channel PCM to AC-3 in real-time using libavcodec.
+    if [[ -f "$dir/bc250-hdmi-ac3.conf" ]]; then
+        install -m 0644 "$dir/bc250-hdmi-ac3.conf" "$ACP_PROFILE_FILE"
+    else
+        cat > "$ACP_PROFILE_FILE" << 'ACPEOF'
+; BC-250 tuned HDMI/AC3 profile set — replaces the stock hdmi-ac3.conf.
+;
+; Single difference vs stock: the a52 invocation passes RATE and BITRATE
+; positionally (a52:<card>,'hw:<card>,<dev>',48000,640), so the encoder runs
+; at 640 kbps — the AC-3 maximum. The stock profile leaves BITRATE unset, so
+; the a52 plugin uses its 448 kbps default, which produces audible
+; quantization harshness in the high frequencies.
+;
+; Everything else is the proven stock transport, unchanged: the a52 plugin
+; (with its `card` parameter) wraps the bare hw: slave itself and sets the
+; IEC958 channel status, and the receiver locks Dolby Digital from the AC3
+; sync word. No hdmi:/AES wrapper is used — that path was never validated on
+; BC-250 hardware and produced a PCM-locked, silent stream.
+;
+; dev N maps to the card's Nth HDMI PCM (HDA-Intel: 0=hw3, 1=hw7, 2=hw8, ...
+; 10=hw16), matching the stock mapping table exactly so the ACP profile names
+; (output:hdmi-ac3-surround etc.) are unchanged.
 
 .include default.conf
 
 [Mapping hdmi-ac3-surround]
 description = Digital Surround 5.1 (HDMI/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,3'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,3',48000,640"}
 paths-output = hdmi-output-0
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -109,7 +125,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra1]
 description = Digital Surround 5.1 (HDMI 2/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,7'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,7',48000,640"}
 paths-output = hdmi-output-1
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -117,7 +133,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra2]
 description = Digital Surround 5.1 (HDMI 3/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,8'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,8',48000,640"}
 paths-output = hdmi-output-2
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -125,7 +141,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra3]
 description = Digital Surround 5.1 (HDMI 4/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,9'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,9',48000,640"}
 paths-output = hdmi-output-3
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -133,7 +149,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra4]
 description = Digital Surround 5.1 (HDMI 5/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,10'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,10',48000,640"}
 paths-output = hdmi-output-4
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -141,7 +157,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra5]
 description = Digital Surround 5.1 (HDMI 6/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,11'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,11',48000,640"}
 paths-output = hdmi-output-5
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -149,7 +165,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra6]
 description = Digital Surround 5.1 (HDMI 7/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,12'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,12',48000,640"}
 paths-output = hdmi-output-6
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -157,7 +173,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra7]
 description = Digital Surround 5.1 (HDMI 8/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,13'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,13',48000,640"}
 paths-output = hdmi-output-7
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -165,7 +181,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra8]
 description = Digital Surround 5.1 (HDMI 9/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,14'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,14',48000,640"}
 paths-output = hdmi-output-8
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -173,7 +189,7 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra9]
 description = Digital Surround 5.1 (HDMI 10/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,15'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,15',48000,640"}
 paths-output = hdmi-output-9
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
@@ -181,39 +197,15 @@ direction = output
 
 [Mapping hdmi-ac3-surround-extra10]
 description = Digital Surround 5.1 (HDMI 11/AC3)
-device-strings = plug:{SLAVE="a52:%f,'hw:%f,16'"}
+device-strings = plug:{SLAVE="a52:%f,'hw:%f,16',48000,640"}
 paths-output = hdmi-output-10
 channel-map = front-left,front-right,rear-left,rear-right,front-center,lfe
 priority = 1
 direction = output
-
-[Profile output:hdmi-ac3-surround]
-description = Digital Surround 5.1 (HDMI/AC3) Output
-output-mappings = hdmi-ac3-surround
-priority = 100
-skip-probe = no
-
-[Profile output:hdmi-ac3-surround-extra1]
-description = Digital Surround 5.1 (HDMI 2/AC3) Output
-output-mappings = hdmi-ac3-surround-extra1
-priority = 100
-skip-probe = no
-
-[Profile output:hdmi-ac3-surround-extra2]
-description = Digital Surround 5.1 (HDMI 3/AC3) Output
-output-mappings = hdmi-ac3-surround-extra2
-priority = 100
-skip-probe = no
-
-[Profile output:hdmi-ac3-surround-extra3]
-description = Digital Surround 5.1 (HDMI 4/AC3) Output
-output-mappings = hdmi-ac3-surround-extra3
-priority = 100
-skip-probe = no
 ACPEOF
-
+    fi
     steamos_ro
-    print_ok "Created hdmi-ac3.conf profile set."
+    print_ok "Installed $ACP_PROFILE_FILE (640 kbps, proven hw: transport)."
 }
 
 # --- Install ------------------------------------------------------------------
@@ -273,13 +265,13 @@ do_install() {
         return 0
     fi
 
-    # 0. Create hdmi-ac3.conf if missing (non-SteamOS systems)
-    create_hdmi_ac3_conf
+    # 0. Install our tuned profile set + encoder PCM (640 kbps + AES)
+    install_ac3_profile_set
 
     # 1. Install udev rule to set ACP_PROFILE_SET for the HDMI audio card
-    print_info "Installing udev rule for ACP_PROFILE_SET=hdmi-ac3.conf..."
+    print_info "Installing udev rule for ACP_PROFILE_SET=bc250-hdmi-ac3.conf..."
     steamos_rw
-    echo 'SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="hdmi-ac3.conf"' > "$UDEV_RULE"
+    echo 'SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="bc250-hdmi-ac3.conf"' > "$UDEV_RULE"
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger /sys/class/sound/card0 2>/dev/null || true
     steamos_ro
@@ -289,8 +281,9 @@ do_install() {
     mkdir -p "$WP_CONF_DIR"
     cat > "$WP_CONF" << 'WPEOF'
 # Enable AC-3 (Dolby Digital) encoding profiles for HDMI/DP audio.
-# This config activates the hdmi-ac3.conf profile set, which uses the ALSA
-# a52 plugin to encode 6-channel PCM to AC-3 in real-time.
+# This config activates the bc250-hdmi-ac3.conf profile set (tuned: 640 kbps
+# bitrate + IEC61937 AES channel status), which uses the ALSA a52 plugin to
+# encode 6-channel PCM to AC-3 in real-time.
 #
 # On SteamOS (BC-250), the DMI identifies as "AMD BC-250" instead of "OEM F7F",
 # so the valve-fremont hardware profile that normally loads this is skipped.
@@ -307,7 +300,7 @@ monitor.alsa.rules = [
       update-props = {
         device.description = "HDMI / DisplayPort"
         api.acp.disable-pro-audio = true
-        device.profile-set = "hdmi-ac3.conf"
+        device.profile-set = "bc250-hdmi-ac3.conf"
         device.routes.default-sink-volume = 1.0
       }
     }
@@ -329,8 +322,9 @@ monitor.alsa.rules = [
   {
     matches = [
       {
-        node.name = "~alsa_output.pci-.*hdmi.*"
-        alsa.name = "~a52.*"
+        # Match the AC-3 sinks by node name — backend-agnostic (the a52
+        # plugin reports an empty alsa.name when reached via a named PCM)
+        node.name = "~alsa_output.*ac3.*"
       }
     ]
     actions = {
@@ -405,9 +399,10 @@ do_revert() {
         return 0
     fi
 
-    # Remove udev rule
+    # Remove udev rule and our tuned profile set
     steamos_rw
     rm -f "$UDEV_RULE"
+    rm -f "$ACP_PROFILE_FILE"
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger /sys/class/sound/card0 2>/dev/null || true
     steamos_ro
@@ -509,7 +504,7 @@ case "${1:-}" in
         echo "  - PipeWire + WirePlumber"
         echo "  - alsa-plugins (a52 PCM plugin)"
         echo "  - ffmpeg (libavcodec, used by a52)"
-        echo "  - alsa-card-profile (hdmi-ac3.conf — auto-created if missing)"
+        echo "  - alsa-card-profile (bc250-hdmi-ac3.conf is installed by this script)"
         echo ""
         echo "After install, select the AC-3 sink in your desktop audio settings."
         exit 1

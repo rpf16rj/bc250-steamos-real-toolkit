@@ -14,8 +14,9 @@ case "$ACTION" in
         cat > "$WP_CONF" << 'WPEOF'
 # Enable AC-3 (Dolby Digital) encoding profiles for HDMI/DP audio.
 # The BC-250 DMI identifies as "AMD BC-250" instead of "OEM F7F", so
-# SteamOS's valve-fremont hardware profile (which sets device.profile-set
-# to hdmi-ac3.conf) is never loaded. This config replicates those rules.
+# SteamOS's valve-fremont hardware profile (which sets device.profile-set)
+# is never loaded. This config points the card at our tuned profile set
+# (bc250-hdmi-ac3.conf — 640 kbps + IEC61937 AES, vs stock 448 kbps/no AES).
 monitor.alsa.rules = [
   {
     matches = [
@@ -28,7 +29,7 @@ monitor.alsa.rules = [
       update-props = {
         device.description = "HDMI / DisplayPort"
         api.acp.disable-pro-audio = true
-        device.profile-set = "hdmi-ac3.conf"
+        device.profile-set = "bc250-hdmi-ac3.conf"
         device.routes.default-sink-volume = 1.0
       }
     }
@@ -50,8 +51,9 @@ monitor.alsa.rules = [
   {
     matches = [
       {
-        node.name = "~alsa_output.pci-.*hdmi.*"
-        alsa.name = "~a52.*"
+        # Match the AC-3 sinks by node name — backend-agnostic (the a52
+        # plugin reports an empty alsa.name when reached via a named PCM)
+        node.name = "~alsa_output.*ac3.*"
       }
     ]
     actions = {

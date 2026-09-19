@@ -7,6 +7,45 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.9.5 — 2026-09-19
+
+- **Adicionado:** Plugin Decky "BC-250 Display Capture"
+  (`extras/bc250-display-capture/`). Um painel no Quick Access com **Start
+  collection** / **Stop and package** que dispara um coletor persistente via
+  `systemd-run`, que sobrevive à troca de sessão KDE→gamescope: ele acompanha
+  o journal do kernel e tira snapshots do estado do conector DRM, das
+  propriedades VRR/DSC/HDR/bpc, dos modos do conector e dos clocks da GPU a
+  cada segundo, e ao parar empacota um `.tar.gz` com timestamp em
+  `~/bc250-display-captures/`. Instalação com
+  `extras/bc250-display-capture/install.sh`.
+- **Alterado:** O "AC-3 Surround" agora instala seu próprio profile set ACP
+  tunado (`bc250-hdmi-ac3.conf`) em vez de depender do `hdmi-ac3.conf` stock.
+  O profile set é o transporte stock comprovado com o bitrate adicionado: o
+  plugin a52 aceita RATE e BITRATE posicionais, então
+  `plug:{SLAVE="a52:%f,'hw:%f,3',48000,640"}` eleva o encoder do default de
+  448 kbps — que produzia aspereza audível nos agudos — ao máximo do AC-3,
+  640 kbps. O slave continua o `hw:` puro e nenhum wrapper IEC61937/AES é
+  usado; o receiver trava Dolby Digital pelo sync word do AC3. Os nomes de
+  perfil ACP não mudam (`output:hdmi-ac3-surround`), e o arquivo stock não é
+  tocado.
+- **Corrigido:** A regra do WirePlumber que define
+  `api.alsa.start-delay = 1536` (sem a qual o plugin a52 dá EPIPE em todo
+  início de playback) nunca casava: ela casava por `alsa.name`, que o plugin
+  a52 reporta vazio. Agora casa por `node.name = "~alsa_output.*ac3.*"`,
+  independente do nome do backend.
+- **Alterado:** Texto de ajuda do FSR4 atualizado para os pacotes atuais do
+  MastaG — a bridge padrão agora é a RC11 do fork BC-250; RC9 e RC10 continuam
+  selecionáveis por jogo via `PROTON_USE_OPTISCALER=fsr411rc9` /
+  `fsr411rc10`. Os pacotes Proton já trazem esse payload; só a documentação
+  ainda dizia que o padrão era RC10. O plugin Decky "BC-250 FSR4 Launch
+  Options" foi atualizado junto — agora lista o padrão fsr411f RC11,
+  `signed`, `fsr411b`, `fsr411rc9` e `fsr411rc10`.
+- **Corrigido:** A lista de reset-para-pristine do `build.sh` agora cobre
+  todos os arquivos que o stack de patches toca — `amdgpu.h`,
+  `amdgpu_drv.c`, `dc.h`, `link_dpms.c`, `link_dp_training.c`,
+  `link_hdmi_frl.c` e `smu_types.h` estavam faltando, então uma árvore
+  parcialmente patchada podia deixar o próximo build em estado misto.
+
 ## v1.9.4 — 2026-09-17
 
 - **Adicionado:** Entradas de recovery no GRUB (Extras → "GRUB Recovery
