@@ -11,6 +11,21 @@ before the toolkit adopted numbered releases.
 
 ## v1.9.6 — 2026-09-20
 
+**What's new:**
+
+- **Hardware-accelerated video encode** — new VA-API driver option
+  (menu option 14 + Install All) enables H.264/HEVC recording and
+  streaming for Sunshine, Steam Link and FFmpeg, even though the
+  BC-250's hardware encoder is fused off.
+- **4K120 over DP→HDMI 2.1 adapters fixed** — no more black screen or
+  artifacts at cold boot or when booting straight into Game Mode; the
+  toolkit now automatically limits color depth to what your TV/adapter
+  can actually carry.
+- **DSC experiments more reliable** — the debugfs `dsc_bits_per_pixel`
+  override now sticks even with the display off or mid-transition.
+
+**Technical details:**
+
 - **Added:** VA-API encode driver install (manual option 14 + Install All
   step). Downloads simpmix/bc250-encoding-decoding-fix `releases/latest` —
   a VA-API driver that encodes H.264/HEVC with Vulkan compute shaders + CPU
