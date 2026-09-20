@@ -27,6 +27,12 @@ Local knowledge base for Cascade. Not committed to git.
 9. **NEVER commit, push to main, or release a version unless the user explicitly asks in that
    moment. The user always wants to test changes first. Do the work, then stop and let them
    test — never release on your own initiative.**
+10. **Changelog format:** every version section leads with a simplified
+    user-facing part (`**What's new:**` / `**Novidades:**` in pt-br) —
+    plain-language bullets describing only what the user gains or what
+    was fixed for them, no patch filenames or internals. The technical
+    part (`**Technical details:**` / `**Detalhes técnicos:**`) comes
+    after, with patch names, mechanisms, and investigation notes.
 
 ## Tags
 Each file starts with `<!-- tags: ... -->` listing keywords for fast grep-based lookup.

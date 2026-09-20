@@ -11,6 +11,22 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## v1.9.6 — 2026-09-20
 
+**Novidades:**
+
+- **Encode de vídeo acelerado por hardware** — nova opção de driver
+  VA-API (opção 14 do menu + Install All) habilita gravação e streaming
+  em H.264/HEVC no Sunshine, Steam Link e FFmpeg, mesmo com o encoder de
+  hardware do BC-250 desativado de fábrica.
+- **4K120 via adaptadores DP→HDMI 2.1 corrigido** — acabou a tela preta
+  e os artefatos no cold boot ou ao iniciar direto no Game Mode; o
+  toolkit agora limita automaticamente a profundidade de cor ao que a
+  sua TV/adaptador realmente suporta.
+- **Experimentos de DSC mais confiáveis** — o override de
+  `dsc_bits_per_pixel` no debugfs agora persiste mesmo com a tela
+  desligada ou em transição.
+
+**Detalhes técnicos:**
+
 - **Adicionado:** Instalação do driver VA-API de encode (opção manual 14 +
   etapa do Install All). Baixa o `releases/latest` do
   simpmix/bc250-encoding-decoding-fix — um driver VA-API que encoda
