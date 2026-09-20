@@ -7,6 +7,34 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## Unreleased
+
+- **Added:** VA-API encode driver install (manual option 14 + Install All
+  step). Downloads simpmix/bc250-encoding-decoding-fix `releases/latest` —
+  a VA-API driver that encodes H.264/HEVC with Vulkan compute shaders + CPU
+  SIMD, since the BC-250's VCN block is fused off. Driver and shaders land in
+  `/var/lib/bc250` (survives SteamOS updates) with `LIBVA_DRIVER_NAME=bc250`
+  set via `/etc/environment.d` — encode-only, for Sunshine/Steam Link/FFmpeg.
+  The bundled DKMS audio module is intentionally not installed.
+- **Added:** `bc250-dsc-debugfs-bpp-sticky.patch` — the
+  `dsc_bits_per_pixel` debugfs write is now stored in `dsc_settings`
+  even when no stream is active on the connector, so the override knob
+  is reliable with the display off or mid-transition for DSC experiments.
+- **Added:** `bc250-pcon-frl-bpc-cap.patch` — fixes cold-boot 4K120
+  failure over the CH7218 PCON. The PCON decodes DSC and re-encodes
+  uncompressed FRL to the TV; DC validation only checks the DP link
+  budget, so 4K120 RGB at 16 bpc (the driver default when nothing sets
+  `max_bpc`, e.g. booting straight into gamescope) passes validation at
+  ~57 Gbps against the Q80A's 40 Gbps FRL5 and loses the picture. The
+  patch clamps `requested_bpc` on DP→HDMI-converter links to what fits
+  the sink's advertised FRL budget. KDE→gamescope worked because kwin
+  persists `max_bpc=10` on the connector and gamescope inherits it.
+- **Investigation:** gamescope 4K120 over the CH7218 PCON — captured logs
+  show DSC engages correctly at 3840x2160@120 (12 bpp, link Good) in both
+  the failing and working paths; the discriminating variable was output
+  color depth (bpc=16 fail vs bpc=10 work), not DSC bpp. See
+  `.kb/display.md`.
+
 ## v1.9.5 — 2026-09-19
 
 - **Changed:** "AC-3 Surround" now installs its own tuned ACP profile set

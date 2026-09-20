@@ -132,6 +132,7 @@ persist_detect_and_record_installed() {
         persist_state_add "audio"
     fi
     ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
+    vaapi_driver_installed 2>/dev/null && persist_state_add "vaapi"
     dual_audio_installed 2>/dev/null && persist_state_add "dual_audio"
     ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
     ds5_chord_vdf_patched 2>/dev/null && persist_state_add "ds5_chord_vdf"
@@ -3228,6 +3229,142 @@ ac3_pactl() {
 }
 
 AC3_USER_SCRIPT="$SCRIPT_DIR/extras/hdmi-ac3-encoding/ac3-user-setup.sh"
+
+# --- VA-API encode driver (simpmix/bc250-encoding-decoding-fix) ---------------
+# The BC-250's VCN block is fused off at the factory; this driver exposes VA-API
+# H.264/HEVC *encode* implemented with Vulkan compute shaders + CPU SIMD.
+# Driver + shaders live in /var/lib/bc250 (survives SteamOS A/B updates); only
+# the env files live in /etc and are rewritten by the persistence re-apply.
+# NOTE: the upstream bundle also ships a DKMS audio module (bc250_audio_fix) —
+# we deliberately do NOT install it; audio is handled by the toolkit's own fixes.
+VAAPI_STATE_DIR="/var/lib/bc250"
+VAAPI_ENV_CONF="/etc/environment.d/99-bc250-vaapi.conf"
+VAAPI_ENV_PROFILE="/etc/profile.d/zz-bc250-vaapi.sh"
+VAAPI_URL_64="https://github.com/simpmix/bc250-encoding-decoding-fix/releases/latest/download/bc250-driver-linux-x86_64.tar.gz"
+VAAPI_URL_32="https://github.com/simpmix/bc250-encoding-decoding-fix/releases/latest/download/bc250-driver-linux-i386.tar.gz"
+
+vaapi_driver_installed() {
+    [[ -f "$VAAPI_STATE_DIR/dri/bc250_drv_video.so" && -f "$VAAPI_ENV_CONF" ]]
+}
+
+vaapi_write_env() {
+    local drv_path="/var/lib/bc250/dri:/var/lib/bc250/dri32:/usr/local/lib/dri:/usr/local/lib64/dri:/usr/lib/dri:/usr/lib64/dri:/usr/lib32/dri"
+    install -d -m 0755 /etc/environment.d /etc/profile.d
+    cat > "$VAAPI_ENV_CONF" <<EOF
+LIBVA_DRIVER_NAME=bc250
+LIBVA_DRIVERS_PATH=$drv_path
+BC250_SHADER_DIR=/var/lib/bc250/shaders
+EOF
+    cat > "$VAAPI_ENV_PROFILE" <<EOF
+export LIBVA_DRIVER_NAME=bc250
+export LIBVA_DRIVERS_PATH=$drv_path
+export BC250_SHADER_DIR=/var/lib/bc250/shaders
+EOF
+    rm -f /etc/profile.d/bc250-vaapi.sh
+    chmod 644 "$VAAPI_ENV_CONF" "$VAAPI_ENV_PROFILE"
+}
+
+vaapi_reapply_env() {
+    if [[ -f "$VAAPI_STATE_DIR/dri/bc250_drv_video.so" ]]; then
+        vaapi_write_env
+        print_success "VA-API driver env restored (driver files in /var/lib survived the update)."
+    else
+        install_vaapi_driver auto
+    fi
+}
+
+install_vaapi_driver() {
+    local auto="${1:-}"
+    print_step "VAAPI" "Install VA-API Encode Driver (H.264/HEVC via Vulkan compute)"
+
+    echo -e "  ${DIM}  simpmix/bc250-encoding-decoding-fix — the VCN block is fused off on${RESET}"
+    echo -e "  ${DIM}  the BC-250; this driver exposes VA-API encode (h264_vaapi/hevc_vaapi)${RESET}"
+    echo -e "  ${DIM}  implemented with Vulkan compute shaders + CPU SIMD instead.${RESET}"
+    echo -e "  ${DIM}  Used by Sunshine/Moonlight, Steam Link, OBS and FFmpeg. Encode-only.${RESET}"
+    echo -e "  ${DIM}  Sets LIBVA_DRIVER_NAME=bc250 system-wide — hardware decode stays${RESET}"
+    echo -e "  ${DIM}  unavailable either way (VCN is fused off).${RESET}"
+    echo ""
+
+    if vaapi_driver_installed; then
+        if [[ "$auto" == "auto" ]]; then
+            print_info "VA-API driver already installed — skipping."
+            return 0
+        fi
+        confirm "VA-API driver already installed. Reinstall/upgrade to latest release?" || return 0
+    fi
+
+    command -v curl >/dev/null 2>&1 || { print_error "curl is required."; return 1; }
+
+    local work
+    work=$(mktemp -d)
+
+    print_info "Downloading latest bc250 VA-API driver release..."
+    if ! run_with_retry "curl -fL -o \"$work/vaapi-x86_64.tar.gz\" \"$VAAPI_URL_64\"" "VA-API driver download"; then
+        rm -rf "$work"
+        fail_with_log "Failed to download the VA-API driver package." "VA-API driver — download"
+        return 1
+    fi
+    if ! curl -fsSL -o "$work/vaapi-i386.tar.gz" "$VAAPI_URL_32" 2>/dev/null; then
+        print_info "32-bit asset not found in this release — Steam Link support skipped."
+    fi
+
+    tar -xzf "$work/vaapi-x86_64.tar.gz" -C "$work" || { rm -rf "$work"; print_error "Failed to extract driver package."; return 1; }
+    [[ -f "$work/vaapi-i386.tar.gz" ]] && tar -xzf "$work/vaapi-i386.tar.gz" -C "$work" 2>/dev/null || true
+
+    if [[ ! -f "$work/bc250-driver/bc250_drv_video.so" ]]; then
+        rm -rf "$work"; print_error "bc250_drv_video.so not found in the package."; return 1
+    fi
+    if ! compgen -G "$work/bc250-driver/shaders/*.spv" > /dev/null; then
+        rm -rf "$work"; print_error "No compiled .spv shaders in the package — driver would fail at runtime."; return 1
+    fi
+
+    install -d -m 0755 "$VAAPI_STATE_DIR/dri" "$VAAPI_STATE_DIR/dri32" "$VAAPI_STATE_DIR/shaders"
+    install -m 0755 "$work/bc250-driver/bc250_drv_video.so" "$VAAPI_STATE_DIR/dri/bc250_drv_video.so"
+    install -m 0644 "$work/bc250-driver/shaders"/*.spv "$VAAPI_STATE_DIR/shaders/"
+    if [[ -f "$work/bc250-driver-i386/bc250_drv_video.so" ]]; then
+        install -m 0755 "$work/bc250-driver-i386/bc250_drv_video.so" "$VAAPI_STATE_DIR/dri32/bc250_drv_video.so"
+        print_info "32-bit driver installed (Steam Link runtime)."
+    fi
+
+    # Mirrors for libva builds that only search /usr/local — tolerated if read-only
+    install -d -m 0755 /usr/local/lib/dri /usr/local/share/bc250/shaders 2>/dev/null || true
+    install -m 0755 "$work/bc250-driver/bc250_drv_video.so" /usr/local/lib/dri/bc250_drv_video.so 2>/dev/null || true
+    install -m 0644 "$work/bc250-driver/shaders"/*.spv /usr/local/share/bc250/shaders/ 2>/dev/null || true
+
+    vaapi_write_env
+    persist_state_add "vaapi"
+    rm -rf "$work"
+
+    print_success "VA-API encode driver installed (driver + shaders in $VAAPI_STATE_DIR)."
+    print_info "Start a new session (or reboot) for LIBVA_DRIVER_NAME=bc250 to apply."
+    print_info "Test: LIBVA_DRIVER_NAME=bc250 ffmpeg -init_hw_device vaapi=va:/dev/dri/renderD128 -f lavfi -i testsrc=duration=2:size=1920x1080:rate=60 -vf 'format=nv12,hwupload' -c:v hevc_vaapi -f null -"
+    print_info "Sunshine note: its cap_sys_admin binary can't see env vars — use upstream's"
+    print_info "tools/install_vaapi_boot_redirect.sh if you stream with Sunshine."
+}
+
+run_revert_vaapi_driver() {
+    print_step "R-VAAPI" "Revert VA-API Encode Driver"
+
+    if ! vaapi_driver_installed && [[ ! -d "$VAAPI_STATE_DIR" ]]; then
+        print_info "VA-API driver is not installed — nothing to revert."
+        return 0
+    fi
+
+    if ! confirm "Remove the VA-API encode driver and its environment config?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+
+    rm -rf "$VAAPI_STATE_DIR/dri" "$VAAPI_STATE_DIR/dri32" "$VAAPI_STATE_DIR/shaders"
+    rmdir "$VAAPI_STATE_DIR" 2>/dev/null || true
+    rm -f "$VAAPI_ENV_CONF" "$VAAPI_ENV_PROFILE" /etc/profile.d/bc250-vaapi.sh
+    rm -f /usr/local/lib/dri/bc250_drv_video.so 2>/dev/null || true
+    rm -rf /usr/local/share/bc250 2>/dev/null || true
+    persist_state_remove "vaapi"
+
+    print_success "VA-API encode driver removed."
+    print_info "Start a new session (or reboot) to clear LIBVA_DRIVER_NAME from the environment."
+}
 
 install_ac3_surround() {
     local auto="${1:-}"
@@ -6342,7 +6479,7 @@ run_install_all_step() {
 }
 
 run_install_all() {
-    print_step "00" "Install All — Recovery Entries + Swap/ZSWAP + Mitigations + ACPI + RAM/VRAM + Sensor PWM + CoolerControl + Core Unlock + Validation + CPU/GPU Governor + CU Live Manager + Combined Fix + AC-3 Surround"
+    print_step "00" "Install All — Recovery Entries + Swap/ZSWAP + Mitigations + ACPI + RAM/VRAM + Sensor PWM + CoolerControl + Core Unlock + Validation + CPU/GPU Governor + CU Live Manager + Combined Fix + AC-3 Surround + VA-API Encode"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -6355,21 +6492,22 @@ run_install_all() {
     fi
 
     run_grub_boot_fix
-    run_install_all_step 1 15 "Installing GRUB Recovery Entries" install_recovery_entries auto || true
-    run_install_all_step 2 15 "Configuring Swap" run_configure_swap auto || return 1
-    run_install_all_step 3 15 "Enabling ZSWAP/Disabling ZRAM" run_zram_zswap_toggle auto || return 1
-    run_install_all_step 4 15 "Disabling CPU Mitigations" run_disable_mitigations auto || return 1
-    run_install_all_step 5 15 "Installing ACPI Fix" install_acpi_fix || return 1
-    run_install_all_step 6 15 "Installing RAM/VRAM Split" install_ram_split auto || return 1
-    run_install_all_step 7 15 "Ensuring Sensor PWM Driver" ensure_sensors_pwm_installed || return 1
-    run_install_all_step 8 15 "Ensuring CoolerControl Installation" ensure_coolercontrol_installed || return 1
-    run_install_all_step 9 15 "Installing Core Unlock" install_core_unlock auto || true
-    run_install_all_step 10 15 "Validating Core Unlock" validate_core_unlock || true
-    run_install_all_step 11 15 "Installing CPU Governor" run_cpu_governor || true
-    run_install_all_step 12 15 "Installing GPU Governor" run_gpu_governor || true
-    run_install_all_step 13 15 "Installing CU Live Manager" run_cu_live_manager || return 1
-    run_install_all_step 14 15 "Installing Combined Fix" install_combined_fix || return 1
-    run_install_all_step 15 15 "Installing AC-3 Surround" install_ac3_surround auto || return 1
+    run_install_all_step 1 16 "Installing GRUB Recovery Entries" install_recovery_entries auto || true
+    run_install_all_step 2 16 "Configuring Swap" run_configure_swap auto || return 1
+    run_install_all_step 3 16 "Enabling ZSWAP/Disabling ZRAM" run_zram_zswap_toggle auto || return 1
+    run_install_all_step 4 16 "Disabling CPU Mitigations" run_disable_mitigations auto || return 1
+    run_install_all_step 5 16 "Installing ACPI Fix" install_acpi_fix || return 1
+    run_install_all_step 6 16 "Installing RAM/VRAM Split" install_ram_split auto || return 1
+    run_install_all_step 7 16 "Ensuring Sensor PWM Driver" ensure_sensors_pwm_installed || return 1
+    run_install_all_step 8 16 "Ensuring CoolerControl Installation" ensure_coolercontrol_installed || return 1
+    run_install_all_step 9 16 "Installing Core Unlock" install_core_unlock auto || true
+    run_install_all_step 10 16 "Validating Core Unlock" validate_core_unlock || true
+    run_install_all_step 11 16 "Installing CPU Governor" run_cpu_governor || true
+    run_install_all_step 12 16 "Installing GPU Governor" run_gpu_governor || true
+    run_install_all_step 13 16 "Installing CU Live Manager" run_cu_live_manager || return 1
+    run_install_all_step 14 16 "Installing Combined Fix" install_combined_fix || return 1
+    run_install_all_step 15 16 "Installing AC-3 Surround" install_ac3_surround auto || return 1
+    run_install_all_step 16 16 "Installing VA-API Encode Driver" install_vaapi_driver auto || true
 
     install_all_progress_clear
     print_success "Install All completed!"
@@ -6390,6 +6528,8 @@ run_revert_all() {
     run_revert_acpi_fix
     echo ""
     run_revert_ac3_surround
+    echo ""
+    run_revert_vaapi_driver
     echo ""
     run_revert_dual_audio
     echo ""
@@ -6439,6 +6579,8 @@ run_install_manual() {
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "13"  "Install FSR4 Proton (MastaG)"     "Pre-built Proton + OptiScaler + FSR4 + fakenvapi — 3 variants (GE/Native/SLR)"
         print_item "13R" "Revert FSR4 Proton"              "Remove FSR4 Proton compatibility tool"
+        print_item "14"  "Install VA-API Encode Driver"    "H.264/HEVC encode via Vulkan compute (VCN fused off) — Sunshine/Steam Link/FFmpeg"
+        print_item "14R" "Revert VA-API Encode Driver"     "Remove bc250 VA-API driver + env config"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -6470,6 +6612,8 @@ run_install_manual() {
             12R) run_revert_dual_audio;   press_enter ;;
             13) install_fsr4_proton;      press_enter ;;
             13R) revert_fsr4_proton;     press_enter ;;
+            14) install_vaapi_driver;     press_enter ;;
+            14R) run_revert_vaapi_driver; press_enter ;;
             0)  return 0 ;;
             *)
                 print_error "Invalid selection: '$manual_choice'"
@@ -7248,6 +7392,7 @@ reapply_installed_components() {
             acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
             audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
             ac3)        install_ac3_surround || print_error "AC-3 surround reapply failed" ;;
+            vaapi)      vaapi_reapply_env || print_error "VA-API driver reapply failed" ;;
             dual_audio) install_dual_audio || print_error "Dual-output audio reapply failed" ;;
             ds5_bridge) install_ds5_bridge_fix || print_error "DS5 Bridge fix reapply failed" ;;
             ds5_chord_vdf) run_install_ds5_chord_vdf || print_error "DS5 Chord VDF reapply failed" ;;

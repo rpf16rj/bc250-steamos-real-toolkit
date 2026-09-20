@@ -492,6 +492,8 @@ fi
 # adds, so PCON is applied first and reversed last.
 PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
 DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
+DSC_BPP_PATCH=$HERE/bc250-dsc-debugfs-bpp-sticky.patch
+FRL_BPC_PATCH=$HERE/bc250-pcon-frl-bpc-cap.patch
 
 if [ "$WITH_DSC_HDMI21" = 1 ]; then
     step "apply DCN201 PCON HDMI 2.1 patch (dp_hdmi21_pcon_support)"
@@ -514,8 +516,36 @@ if [ "$WITH_DSC_HDMI21" = 1 ]; then
         die "DCN201 DSC enable patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
+    step "apply DSC debugfs sticky-bpp patch (reliable dsc_bits_per_pixel writes)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_BPP_PATCH" >/dev/null 2>&1; then
+        echo "DSC debugfs sticky-bpp patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$DSC_BPP_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$DSC_BPP_PATCH"
+        echo "DSC debugfs sticky-bpp patch applied"
+    else
+        die "DSC debugfs sticky-bpp patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
+    step "apply PCON FRL bpc cap patch (fix cold-boot 4K120 deep-color overshoot)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_BPC_PATCH" >/dev/null 2>&1; then
+        echo "PCON FRL bpc cap patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$FRL_BPC_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$FRL_BPC_PATCH"
+        echo "PCON FRL bpc cap patch applied"
+    else
+        die "PCON FRL bpc cap patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
 else
     step "skipping DCN201 DSC + PCON HDMI 2.1 patches (not requested)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_BPC_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$FRL_BPC_PATCH"
+        echo "PCON FRL bpc cap patch REVERSED (leftover from a previous build)"
+    fi
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_BPP_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$DSC_BPP_PATCH"
+        echo "DSC debugfs sticky-bpp patch REVERSED (leftover from a previous build)"
+    fi
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$DSC_PATCH"
         echo "DCN201 DSC enable patch REVERSED (leftover from a previous build)"

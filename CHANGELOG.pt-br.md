@@ -7,6 +7,36 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## Unreleased
+
+- **Adicionado:** Instalação do driver VA-API de encode (opção manual 14 +
+  etapa do Install All). Baixa o `releases/latest` do
+  simpmix/bc250-encoding-decoding-fix — um driver VA-API que encoda
+  H.264/HEVC com compute shaders Vulkan + SIMD de CPU, já que o bloco VCN do
+  BC-250 vem desativado de fábrica. Driver e shaders ficam em
+  `/var/lib/bc250` (sobrevive a updates do SteamOS) com
+  `LIBVA_DRIVER_NAME=bc250` definido via `/etc/environment.d` — só encode,
+  para Sunshine/Steam Link/FFmpeg. O módulo de áudio DKMS do pacote não é
+  instalado de propósito.
+- **Adicionado:** `bc250-dsc-debugfs-bpp-sticky.patch` — o write do
+  `dsc_bits_per_pixel` no debugfs agora é gravado em `dsc_settings` mesmo
+  sem stream ativa no conector, tornando o override confiável com a tela
+  desligada ou em transição para experimentos de DSC.
+- **Adicionado:** `bc250-pcon-frl-bpc-cap.patch` — corrige a falha de
+  4K120 em cold boot via PCON CH7218. O PCON decodifica o DSC e re-encoda
+  FRL descomprimido para a TV; a validação do DC só checa o orçamento do
+  link DP, então 4K120 RGB a 16 bpc (default do driver quando nada define
+  `max_bpc`, ex.: boot direto no gamescope) valida a ~57 Gbps contra os
+  40 Gbps do FRL5 da Q80A e a imagem morre. O patch limita o
+  `requested_bpc` em links DP→HDMI-converter ao que cabe no orçamento FRL
+  anunciado pelo sink. O caminho KDE→gamescope funcionava porque o kwin
+  persiste `max_bpc=10` no conector e o gamescope herda.
+- **Investigação:** 4K120 no gamescope via PCON CH7218 — logs capturados
+  mostram DSC engatando corretamente em 3840x2160@120 (12 bpp, link Good)
+  nos caminhos que falham e que funcionam; a variável discriminante era a
+  profundidade de cor de saída (bpc=16 falha vs bpc=10 funciona), não o
+  bpp do DSC. Ver `.kb/display.md`.
+
 ## v1.9.5 — 2026-09-19
 
 - **Alterado:** O "AC-3 Surround" agora instala seu próprio profile set ACP
