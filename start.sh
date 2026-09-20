@@ -4500,7 +4500,7 @@ install_combined_fix() {
     echo -e "  ${DIM}Select which components to include in this build:${RESET}"
     echo ""
 
-    local do_audio=0 do_gfx=0 do_dsc=0
+    local do_audio=0 do_gfx=0 do_dsc=0 do_vcn=0
     local patch_flags=()
 
     # Detect kernel major and minor version for version-specific skip logic
@@ -4527,6 +4527,10 @@ install_combined_fix() {
     if [[ "$kver_major" -lt 7 ]] || { [[ "$kver_major" -eq 7 ]] && [[ "$kver_minor" -lt 2 ]]; }; then
         checklist_items+=("+DP Spread Spectrum:Cleaner audio via DP/HDMI (disable spread spectrum)")
     fi
+
+    # VCN 2.0.3 ungate intentionally NOT in the checklist: it wedged boot on
+    # real hardware and is runtime-gated behind amdgpu.bc250_vcn_ungate=1.
+    # Test only via patch-driver.sh --vcn (see .kb/vcn.md).
 
     echo -e "  ${DIM}Groups: Performance/Graphics | Hardware | Experimental (DP/HDMI Port)${RESET}"
     pick_items "Select patches to include:" "${checklist_items[@]}"
@@ -4561,13 +4565,13 @@ install_combined_fix() {
         patch_flags+=(--dsc)
     fi
 
-    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_dsc -eq 0 ]]; then
+    if [[ $do_audio -eq 0 && $do_gfx -eq 0 && $do_dsc -eq 0 && $do_vcn -eq 0 ]]; then
         print_info "No patches selected. Nothing to do."
         return 0
     fi
 
     # Only validate build prerequisites if actual kernel/Mesa patches are selected
-    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 ]]; then
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 || $do_vcn -eq 1 ]]; then
         validate_combined_fix_prerequisites "$do_gfx" || return 1
     fi
 
@@ -4594,7 +4598,7 @@ install_combined_fix() {
     fi
 
     # Apply kernel/Mesa patches if any are selected
-    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 ]]; then
+    if [[ $do_audio -eq 1 || $do_gfx -eq 1 || $do_dsc -eq 1 || $do_vcn -eq 1 ]]; then
         fixes_repo_sync || return 1
 
         local fix_dir="$FIXES_REPO_DIR/bc250-audio-fix"
@@ -4653,6 +4657,12 @@ install_combined_fix() {
         [[ $do_audio -eq 1 ]] && persist_state_add "audio"
         [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
         [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
+        if [[ $do_vcn -eq 1 ]]; then
+            echo ""
+            echo -e "  ${YELLOW}VCN ungate is experimental.${RESET} ${DIM}After reboot check:${RESET}"
+            echo -e "  ${DIM}  dmesg | grep -iE 'vcn|uvd' — look for 'detected ip block <vcn_v2_0_0>'${RESET}"
+            echo -e "  ${DIM}  ring test pass = VCN alive; stuck/zero regs = PSP hardware clamp confirmed${RESET}"
+        fi
         if [[ $do_dsc -eq 1 ]]; then
             echo ""
             echo -e "  ${DIM}DSC + HDMI 2.1 PCON is on by default (amdgpu.bc250_hdmi21=1).${RESET}"

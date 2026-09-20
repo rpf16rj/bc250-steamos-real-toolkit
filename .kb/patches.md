@@ -1,4 +1,4 @@
-<!-- tags: patches, audio-clock, spread-spectrum, telemetry, ttm, sclk, kfd, gfx1013, vrr, allm, frl, ycbcr444, build-flags -->
+<!-- tags: patches, audio-clock, spread-spectrum, telemetry, ttm, sclk, kfd, gfx1013, vrr, allm, frl, ycbcr444, vcn, build-flags -->
 # Kernel Patches
 
 All patches live in `external/bc250-steamos/bc250-audio-fix/`.
@@ -79,6 +79,18 @@ All patches live in `external/bc250-steamos/bc250-audio-fix/`.
 - **Optional**: User selects in combined fix
 - **Mesa**: Requires patched Mesa/RADV build (build-mesa.sh)
 
+### bc250-vcn-ungate.patch (EXPERIMENTAL — hidden from menu)
+- **Purpose**: Ungate VCN 2.0.3 on Cyan Skillfish 2 for a direct MMIO
+  bring-up test (navi10_vcn ucode, AMDGPU_FW_LOAD_DIRECT, no PSP)
+- **Runtime gate**: `amdgpu.bc250_vcn_ungate=1` cmdline param, default 0 —
+  patched kernel boots normally, ungate is opt-in per boot
+- **NOT in combined-fix checklist**: unconditional version wedged boot;
+  enable only via `patch-driver.sh --vcn` for testing
+- **Ordering**: independent of the PCON patch — all hunks anchored on
+  pristine lines (never regenerate with `git diff` while PCON hunks are
+  uncommitted in the tree)
+- **Full notes**: `.kb/vcn.md`
+
 ## Patch Application Order
 The `patch-driver.sh` script handles patch selection via flags.
 ALL patches are now individually excludable with `--no-*` flags:
@@ -100,6 +112,12 @@ ALL patches are now individually excludable with `--no-*` flags:
 - `--gfx1013` — GFX1013 compute patches + Mesa build
 - `--vrr` — VRR PCON FreeSync (skipped on kernel ≥7)
 - `--allm` — ALLM via DP (skipped on kernel ≥7)
+- `--dsc` / `--dsc-pcon` — DCN201 DSC + PCON HDMI 2.1 pair
+- `--vcn` — EXPERIMENTAL VCN 2.0.3 ungate, **hidden from the combined-fix
+  menu** (manual flag only). Runtime-gated: all three driver gates open
+  only with `amdgpu.bc250_vcn_ungate=1` on the kernel cmdline (default 0,
+  boots normally). Unconditional version wedged boot — see `.kb/vcn.md`
+  for the full investigation (PSP GPCOM closed, patch pitfalls).
 
 In `start.sh`, both `install_audio_fix` and `install_combined_fix` use
 `pick_items` (whiptail --checklist) to show all patches in a single

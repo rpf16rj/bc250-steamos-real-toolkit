@@ -59,6 +59,7 @@ NO_TELEMETRY=0
 NO_TTM=0
 NO_SCLK=0
 NO_KFD=0
+WITH_VCN=0
 PREPARE_ONLY=0
 ALLOW_MISSING_SYMVERS=0
 ARGS=()
@@ -73,6 +74,7 @@ for a in "$@"; do
         --no-ttm)         NO_TTM=1 ;;
         --no-sclk)        NO_SCLK=1 ;;
         --no-kfd)         NO_KFD=1 ;;
+        --vcn)            WITH_VCN=1 ;;
         --prepare-only)   PREPARE_ONLY=1 ;;
         --allow-missing-symvers) ALLOW_MISSING_SYMVERS=1 ;;
         *)                ARGS+=("$a") ;;
@@ -553,6 +555,29 @@ else
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$PCON_PATCH"
         echo "DCN201 PCON HDMI 2.1 patch REVERSED (leftover from a previous build)"
+    fi
+fi
+
+VCN_PATCH=$HERE/bc250-vcn-ungate.patch
+VCN_MARK=$TREE/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c
+if [ "$WITH_VCN" = 1 ]; then
+    step "apply VCN 2.0.3 ungate patch (experimental direct bring-up)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VCN_PATCH" >/dev/null 2>&1; then
+        echo "VCN ungate patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$VCN_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$VCN_PATCH" \
+            || die "VCN ungate patch apply FAILED mid-way — tree may be inconsistent; inspect by hand"
+        echo "VCN ungate patch applied"
+    else
+        die "VCN ungate patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+else
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VCN_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$VCN_PATCH" \
+            || die "VCN ungate patch reverse FAILED mid-way — tree may be inconsistent; inspect by hand"
+        echo "VCN ungate patch REVERSED (leftover from a previous build)"
+    elif grep -q "bc250_vcn_ungate" "$VCN_MARK" 2>/dev/null; then
+        die "VCN ungate is PARTIALLY applied in the tree (marker present, patch -R does not match) — reverse it by hand or restore the tree before building"
     fi
 fi
 

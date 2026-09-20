@@ -19,6 +19,8 @@
 # --no-ttm skips the TTM NULL-page guard patch.
 # --no-sclk skips the SCLK range patch.
 # --no-kfd skips the KFD flush-TLB-by-runlist patch.
+# --vcn applies the experimental VCN 2.0.3 ungate patch (direct MMIO bring-up;
+# for ACL/clamp investigation only — not part of the stable feature set).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -161,6 +163,7 @@ NO_TELEMETRY=()
 NO_TTM=()
 NO_SCLK=()
 NO_KFD=()
+WITH_VCN=()
 ARGS=()
 for a in "$@"; do
     case "$a" in
@@ -173,10 +176,11 @@ for a in "$@"; do
         --no-ttm)         NO_TTM=(--no-ttm) ;;
         --no-sclk)        NO_SCLK=(--no-sclk) ;;
         --no-kfd)         NO_KFD=(--no-kfd) ;;
+        --vcn)            WITH_VCN=(--vcn) ;;
         *)                ARGS+=("$a") ;;
     esac
 done
 
 "$HERE/fetch-sources.sh" "${ARGS[@]}"
-"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_DSC[@]}" "${NO_SS[@]}" "${NO_TELEMETRY[@]}" "${NO_TTM[@]}" "${NO_SCLK[@]}" "${NO_KFD[@]}" "${ARGS[@]}"
+"$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_DSC[@]}" "${NO_SS[@]}" "${NO_TELEMETRY[@]}" "${NO_TTM[@]}" "${NO_SCLK[@]}" "${NO_KFD[@]}" "${WITH_VCN[@]}" "${ARGS[@]}"
 sudo "$HERE/install.sh"
