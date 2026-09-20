@@ -9,6 +9,8 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## Unreleased
 
+## v1.9.6 — 2026-09-20
+
 - **Adicionado:** Instalação do driver VA-API de encode (opção manual 14 +
   etapa do Install All). Baixa o `releases/latest` do
   simpmix/bc250-encoding-decoding-fix — um driver VA-API que encoda
@@ -36,6 +38,15 @@ como histórico datado de antes da adoção de versões numeradas.
   nos caminhos que falham e que funcionam; a variável discriminante era a
   profundidade de cor de saída (bpc=16 falha vs bpc=10 funciona), não o
   bpp do DSC. Ver `.kb/display.md`.
+- **Adicionado (experimental, oculto):** `bc250-vcn-ungate.patch` — patch
+  somente de pesquisa que remove os três portões do driver no VCN 2.0.3
+  (skip do ip-block na discovery, harvest mask, prefixo de ucode) para o
+  `vcn_v2_0` tentar um bring-up MMIO direto com o firmware `navi10_vcn`.
+  Fica atrás do parâmetro `amdgpu.bc250_vcn_ungate=1` (default desligado —
+  o kernel bota normal) e foi propositalmente deixado fora do menu do
+  Combined Fix: a versão incondicional impediu o boot. Testar apenas via
+  `patch-driver.sh --vcn`. O caminho PSP GPCOM foi investigado
+  exaustivamente e está fechado nesta plataforma. Ver `.kb/vcn.md`.
 
 ## v1.9.5 — 2026-09-19
 

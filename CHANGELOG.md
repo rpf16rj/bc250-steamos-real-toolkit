@@ -9,6 +9,8 @@ before the toolkit adopted numbered releases.
 
 ## Unreleased
 
+## v1.9.6 — 2026-09-20
+
 - **Added:** VA-API encode driver install (manual option 14 + Install All
   step). Downloads simpmix/bc250-encoding-decoding-fix `releases/latest` —
   a VA-API driver that encodes H.264/HEVC with Vulkan compute shaders + CPU
@@ -34,6 +36,15 @@ before the toolkit adopted numbered releases.
   the failing and working paths; the discriminating variable was output
   color depth (bpc=16 fail vs bpc=10 work), not DSC bpp. See
   `.kb/display.md`.
+- **Added (experimental, hidden):** `bc250-vcn-ungate.patch` — a
+  research-only patch that removes the three driver gates on VCN 2.0.3
+  (discovery ip-block skip, harvest mask, ucode prefix) so `vcn_v2_0`
+  can attempt a direct MMIO bring-up with `navi10_vcn` firmware. It is
+  runtime-gated behind `amdgpu.bc250_vcn_ungate=1` (default off — the
+  kernel boots normally) and intentionally absent from the Combined Fix
+  menu: the unconditional version wedged boot. Test only via
+  `patch-driver.sh --vcn`. The PSP GPCOM path was probed exhaustively
+  and is closed on this platform. See `.kb/vcn.md`.
 
 ## v1.9.5 — 2026-09-19
 

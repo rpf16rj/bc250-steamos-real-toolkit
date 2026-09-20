@@ -32,6 +32,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 ### Display & Áudio
 
 - **DCN201 DSC + HDMI 2.1 PCON** — habilita Display Stream Compression (DSC) no núcleo de display DCN 2.0.1 do BC-250 conectando motores DSC compatíveis com DCN200, e anuncia suporte a HDMI 2.1 FRL PCON para bridges DP-HDMI (ex. Ugreen CH7218). Substitui os patches anteriores de YCbCr 4:4:4 / VRR / ALLM / FRL hot-plug, que não são mais necessários. Baseado na investigação de registradores DCN/DSC por [alex-reid](https://gist.github.com/alex-reid/b55328c246ade7baef8566fb2cadea9b).
+- **Correção de artefatos/sem imagem em 4K120 via PCON** — limita a profundidade de cor de saída ao que cabe no orçamento FRL anunciado pela TV (o PCON decodifica DSC e re-encoda FRL descomprimido); corrige o 4K120 4:4:4 falhando em cold boot ou boot direto no Game Mode quando nada persistiu `max_bpc`
 - **Correção de clock de áudio/vídeo do DisplayPort** — corrige timing de áudio/vídeo DP e desabilita spread spectrum
 - **Codificação AC-3 Surround via HDMI** — Dolby Digital 5.1 por HDMI/DP via eARC, codificação nativa a52 sem latência
 - **Controle de HDMI-CEC / TV** — controle sua TV ou receiver via HDMI-CEC
@@ -45,6 +46,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 - **Firmware BE200 Wi-Fi 7** — para placas PCIe Intel BE200/BE201 sem ucode
 - **Fix do PS Button do DS5 Bridge** — chord combos do DualSense via hid-playstation.ko patchado
 - **DS5 Chord Config** — patch VDF para configuração de chords com QAM habilitado
+- **Driver VA-API de encode** — encode H.264/HEVC acelerado para Sunshine/Steam Link/FFmpeg via compute shaders Vulkan + SIMD de CPU (o bloco VCN do BC-250 vem desativado de fábrica), instalado em `/var/lib/bc250` para sobreviver a updates do SteamOS
 
 ### Monitoramento & Controle
 
