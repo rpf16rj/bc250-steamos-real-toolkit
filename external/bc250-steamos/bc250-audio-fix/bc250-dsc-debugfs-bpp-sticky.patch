@@ -1,0 +1,35 @@
+From: BC-250 SteamOS Real Toolkit
+Subject: [PATCH] drm/amd/display: make dsc_bits_per_pixel debugfs override sticky
+
+dp_dsc_bits_per_pixel_write() silently dropped the write when no stream
+was active on the connector at that instant (display off, blanked, or
+mid modeset teardown), making the debugfs knob unreliable exactly when
+it is most useful for DSC experiments. Store the requested value in
+aconnector->dsc_settings unconditionally; it is applied on the next
+modeset by apply_dsc_policy_for_stream() regardless.
+
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_debugfs.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_debugfs.c
+@@ -2235,6 +2235,13 @@
+ 			break;
+ 	}
+ 
++	/* BC-250: store the override even when no stream is currently
++	 * active on this connector — the value is applied on the next
++	 * modeset via apply_dsc_policy_for_stream(). Dropping it here
++	 * makes the debugfs knob unreliable when the display is off.
++	 */
++	aconnector->dsc_settings.dsc_bits_per_pixel = param[0];
++
+ 	if (!pipe_ctx->stream)
+ 		goto done;
+ 
+@@ -2257,8 +2264,6 @@
+ 	if (dm_crtc_state->stream == NULL)
+ 		goto unlock;
+ 
+-	aconnector->dsc_settings.dsc_bits_per_pixel = param[0];
+-
+ 	dm_crtc_state->dsc_force_changed = true;
+ 
+ unlock:

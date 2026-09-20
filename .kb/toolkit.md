@@ -56,6 +56,12 @@ extras/                           # Optional add-ons (not in start.sh)
 - **Combined Fix** — single kernel build with selectable: audio + gfx1013 + vrr + allm
 - **EDID Override** — HF-VSDB for HDMI 2.1 PCON (FRL 48G, VRR 48-120, ALLM)
 - **AC-3 Surround** — HDMI/DP Dolby Digital 5.1 via eARC
+- **VA-API Encode Driver** — simpmix/bc250-encoding-decoding-fix; H.264/HEVC
+  encode via Vulkan compute + CPU SIMD (VCN is fused off). Downloaded from
+  GitHub `releases/latest` at install time; driver+shaders to `/var/lib/bc250`
+  (survives updates), env to `/etc/environment.d` + `/etc/profile.d`
+  (`LIBVA_DRIVER_NAME=bc250`, encode-only). The bundled DKMS audio module is
+  intentionally NOT installed — audio is the toolkit's own job. Manual: 14/14R.
 
 ### CPU/GPU
 - **CPU Governor** — bc250-smu-oc CPU overclock service

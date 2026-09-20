@@ -19,6 +19,10 @@ Two patches on DCN201, gated by one kernel parameter `amdgpu.bc250_hdmi21`
   `num_dsc = 2`, creates the DSC objects via `dcn20_dsc_create()`, wires
   `dcn20_add_dsc_to_stream_resource`, and sets `dcn201_ip.num_dsc` before
   `dml_init_instance()` (DML reads NumberOfDSC from there).
+- `bc250-dsc-debugfs-bpp-sticky.patch` — stores the `dsc_bits_per_pixel`
+  debugfs write unconditionally instead of dropping it when no stream is
+  active on the connector, so the override knob is reliable for DSC
+  experiments (display off / mid-transition).
 
 Both are the upstream TeleBooth versions (carried by MastaG), adapted to Valve's
 kernel 7.2.4-valve1-1-neptune-72. Applied as one unit by the Combined Fix; the
@@ -37,6 +41,41 @@ Recovery: if the display stays dark after installing, boot with
 `amdgpu.bc250_hdmi21=0` (GRUB `GRUB_CMDLINE_LINUX_DEFAULT` + `update-grub`).
 Some DP→HDMI adapters show black from boot until a hotplug even with the feature
 off — that's a BIOS/GOP→amdgpu handover issue, not these patches.
+
+### gamescope 4K120 PCON failure — root cause: output bpc vs FRL budget (solved 2026-09-20)
+
+Captures show DSC engaging correctly on the failing path: real CTA
+3840x2160@120 timing (1188 MHz), `dsc_clock_en=1`, `dsc_bits_per_pixel=192`
+(12 bpp — the CTA preset for VIC 117/118), slices 960x108, link-status Good.
+VRR and HDR on/off do not change the outcome. The DP link (GPU→PCON) trains
+identically in both paths (4 lanes HBR2 during the DSC stream).
+
+**The discriminator is output color depth (`bpc`), not DSC bpp:** every
+failing capture shows connector `bpc`/`max_bpc` = 16; every working capture
+shows 10. Booting straight into gamescope leaves the driver default
+`max_requested_bpc = 16`; KDE's kwin persists `max_bpc = 10` on the
+connector, and gamescope inherits the property across the session switch.
+An earlier "14 bpp fixed it" result was masked by the session switch.
+
+Mechanism: the CH7218 decodes the DSC-compressed DP stream and re-encodes
+uncompressed FRL to the TV (EDID: Max FRL 6/8/10 Gbps × 4 lanes = FRL5,
+40 Gbps). Uncompressed 4K120 RGB needs ~35.6 Gbps at 10 bpc (fits),
+~42.8 at 12, ~57 at 16 (both exceed FRL5 → no signal/artifacts). DC
+validation only checks the DP link budget — compressed DSC fits HBR2
+regardless of bpc — so 16 bpc "validates" and kills the TV side.
+
+**Fix (verified 2026-09-20):** `bc250-pcon-frl-bpc-cap.patch` clamps
+`requested_bpc` in `create_validate_stream_for_sink()` for
+`DISPLAY_DONGLE_DP_HDMI_CONVERTER` links to the highest even bpc fitting
+`display_info.hdmi.max_frl_rate_per_lane × max_lanes`, gated by
+`dc->config.bc250_hdmi21`. 4K120 → 10 bpc; 4K60 keeps 16 bpc (fits);
+non-PCON paths untouched. Verified on hardware: cold boot straight into
+gamescope now produces clean 4K120 with no user intervention.
+
+Debugfs knobs on the connector (`/sys/kernel/debug/dri/*/DP-1/`):
+`dsc_clock_en` (1=force on/2=off/0=auto), `dsc_bits_per_pixel` (x16,
+sticky via the sticky-bpp patch), `dsc_slice_*`, `dsc_disable_passthrough`
+(PCON decodes DSC → uncompressed FRL to TV), `link_settings`.
 
 ## FRL (Fixed Rate Link)
 - FRL is HDMI 2.1's high-bandwidth transport, replacing TMDS for high-res modes

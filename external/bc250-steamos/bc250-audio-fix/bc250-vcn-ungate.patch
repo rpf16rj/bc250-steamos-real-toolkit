@@ -1,0 +1,116 @@
+Experimental: ungate VCN 2.0.3 on Cyan Skillfish 2 (BC-250, 0x13FE),
+runtime-gated by amdgpu.bc250_vcn_ungate=1 (default OFF).
+
+The driver deliberately skips VCN on CSF2 (amdgpu_discovery.c drops the
+2.0.3 case, the harvest mask kills the block, and the ucode name lookup
+has no 2.0.3 entry). This patch removes all three gates ONLY when the
+module parameter is set, so the patched kernel boots normally and the
+ungate is opt-in per boot:
+
+    amdgpu.bc250_vcn_ungate=1   on the kernel cmdline
+
+With the flag set, the driver attempts a direct MMIO bring-up
+(navi10_vcn ucode, AMDGPU_FW_LOAD_DIRECT -- no PSP involvement).
+If the VCN register file is hardware-clamped by the PSP fuse, boot will
+hang or dmesg shows stuck/zero register reads -- recover by booting
+without the flag.
+
+Note: this patch is independent of the DSC/HDMI2.1 PCON patch
+(bc250_hdmi21 lives in bc250-dcn201-pcon-hdmi21.patch); it applies on a
+pristine tree and composes with it in either order.
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu.h b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+index 77252a627..00846c9fb 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu.h
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+@@ -264,6 +264,7 @@ extern int amdgpu_sg_display;
+ extern int amdgpu_umsch_mm;
+ extern int amdgpu_seamless;
+ extern int amdgpu_umsch_mm_fwlog;
++extern int amdgpu_bc250_vcn_ungate;
+ 
+ extern int amdgpu_user_partt_mode;
+ extern int amdgpu_agp;
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c
+index 47e0680ed..9c7dc9615 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c
+@@ -494,6 +494,16 @@ static void amdgpu_discovery_harvest_config_quirk(struct amdgpu_device *adev)
+ 			break;
+ 		}
+ 	}
++
++	/* BC-250: the harvest table reports VCN as fully harvested even
++	 * though the IP is present; ungate instance 0 for direct bring-up.
++	 * Runtime-gated: amdgpu.bc250_vcn_ungate=1 on the kernel cmdline.
++	 */
++	if (amdgpu_bc250_vcn_ungate &&
++	    (adev->apu_flags & AMD_APU_IS_CYAN_SKILLFISH2)) {
++		adev->vcn.harvest_config = 0;
++		adev->vcn.inst_mask |= 1;
++	}
+ }
+ 
+ static int amdgpu_discovery_verify_npsinfo(struct amdgpu_device *adev,
+@@ -1735,7 +1745,9 @@ static void amdgpu_discovery_harvest_ip(struct amdgpu_device *adev)
+ 
+ 	amdgpu_discovery_harvest_config_quirk(adev);
+ 
+-	if (vcn_harvest_count == adev->vcn.num_vcn_inst) {
++	if (vcn_harvest_count == adev->vcn.num_vcn_inst &&
++	    !((adev->apu_flags & AMD_APU_IS_CYAN_SKILLFISH2) &&
++	      amdgpu_bc250_vcn_ungate)) {
+ 		adev->harvest_ip_mask |= AMD_HARVEST_IP_VCN_MASK;
+ 		adev->harvest_ip_mask |= AMD_HARVEST_IP_JPEG_MASK;
+ 	}
+@@ -2665,6 +2677,8 @@ static int amdgpu_discovery_set_mm_ip_blocks(struct amdgpu_device *adev)
+ 				amdgpu_device_ip_block_add(adev, &jpeg_v2_0_ip_block);
+ 			break;
+ 		case IP_VERSION(2, 0, 3):
++			if (amdgpu_bc250_vcn_ungate)
++				amdgpu_device_ip_block_add(adev, &vcn_v2_0_ip_block);
+ 			break;
+ 		case IP_VERSION(2, 5, 0):
+ 			amdgpu_device_ip_block_add(adev, &vcn_v2_5_ip_block);
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+index 1d7f665bf..1d1f74ee0 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+@@ -241,6 +241,7 @@ int amdgpu_user_partt_mode = AMDGPU_AUTO_COMPUTE_PARTITION_MODE;
+ int amdgpu_indirect_sram = -1;
+ int amdgpu_umsch_mm;
+ int amdgpu_seamless = -1; /* auto */
++int amdgpu_bc250_vcn_ungate;
+ uint amdgpu_debug_mask;
+ int amdgpu_agp = -1; /* auto */
+ int amdgpu_wbrf = -1;
+@@ -1008,6 +1009,17 @@ module_param_named(umsch_mm, amdgpu_umsch_mm, int, 0444);
+ MODULE_PARM_DESC(umsch_mm_fwlog, "Enable umschfw log(0 = disable (default value), 1 = enable)");
+ module_param_named(umsch_mm_fwlog, amdgpu_umsch_mm_fwlog, int, 0444);
+ 
++/**
++ * DOC: bc250_vcn_ungate (int)
++ * BC-250 (Cyan Skillfish 2, 0x13FE) only. Ungate the VCN 2.0.3 IP block:
++ * skip the harvest mask and register the vcn_v2_0 block so the driver
++ * attempts a direct MMIO bring-up (navi10_vcn, no PSP). May wedge boot on
++ * hardware where VCN is clamped by the PSP fuse; enable only for testing.
++ * (0 = disabled (default), 1 = enabled)
++ */
++MODULE_PARM_DESC(bc250_vcn_ungate, "BC-250: experimental VCN 2.0.3 ungate, direct MMIO bring-up (0 = disabled (default), 1 = enabled)");
++module_param_named(bc250_vcn_ungate, amdgpu_bc250_vcn_ungate, int, 0444);
++
+ /**
+  * DOC: smu_pptable_id (int)
+  * Used to override pptable id. id = 0 use VBIOS pptable.
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c
+index 6d9e96fab..aa4e34c87 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c
+@@ -1364,6 +1364,8 @@ static const char *amdgpu_ucode_legacy_naming(struct amdgpu_device *adev, int bl
+ 			if (adev->asic_type == CHIP_NAVI12)
+ 				return "navi12_vcn";
+ 			return "navi14_vcn";
++		case IP_VERSION(2, 0, 3):
++			return "navi10_vcn";
+ 		case IP_VERSION(3, 0, 0):
+ 		case IP_VERSION(3, 0, 64):
+ 		case IP_VERSION(3, 0, 192):

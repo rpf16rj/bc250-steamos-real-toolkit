@@ -59,6 +59,7 @@ NO_TELEMETRY=0
 NO_TTM=0
 NO_SCLK=0
 NO_KFD=0
+WITH_VCN=0
 PREPARE_ONLY=0
 ALLOW_MISSING_SYMVERS=0
 ARGS=()
@@ -73,6 +74,7 @@ for a in "$@"; do
         --no-ttm)         NO_TTM=1 ;;
         --no-sclk)        NO_SCLK=1 ;;
         --no-kfd)         NO_KFD=1 ;;
+        --vcn)            WITH_VCN=1 ;;
         --prepare-only)   PREPARE_ONLY=1 ;;
         --allow-missing-symvers) ALLOW_MISSING_SYMVERS=1 ;;
         *)                ARGS+=("$a") ;;
@@ -492,6 +494,8 @@ fi
 # adds, so PCON is applied first and reversed last.
 PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
 DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
+DSC_BPP_PATCH=$HERE/bc250-dsc-debugfs-bpp-sticky.patch
+FRL_BPC_PATCH=$HERE/bc250-pcon-frl-bpc-cap.patch
 
 if [ "$WITH_DSC_HDMI21" = 1 ]; then
     step "apply DCN201 PCON HDMI 2.1 patch (dp_hdmi21_pcon_support)"
@@ -514,8 +518,36 @@ if [ "$WITH_DSC_HDMI21" = 1 ]; then
         die "DCN201 DSC enable patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
+    step "apply DSC debugfs sticky-bpp patch (reliable dsc_bits_per_pixel writes)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_BPP_PATCH" >/dev/null 2>&1; then
+        echo "DSC debugfs sticky-bpp patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$DSC_BPP_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$DSC_BPP_PATCH"
+        echo "DSC debugfs sticky-bpp patch applied"
+    else
+        die "DSC debugfs sticky-bpp patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
+    step "apply PCON FRL bpc cap patch (fix cold-boot 4K120 deep-color overshoot)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_BPC_PATCH" >/dev/null 2>&1; then
+        echo "PCON FRL bpc cap patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$FRL_BPC_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$FRL_BPC_PATCH"
+        echo "PCON FRL bpc cap patch applied"
+    else
+        die "PCON FRL bpc cap patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
 else
     step "skipping DCN201 DSC + PCON HDMI 2.1 patches (not requested)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_BPC_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$FRL_BPC_PATCH"
+        echo "PCON FRL bpc cap patch REVERSED (leftover from a previous build)"
+    fi
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_BPP_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$DSC_BPP_PATCH"
+        echo "DSC debugfs sticky-bpp patch REVERSED (leftover from a previous build)"
+    fi
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$DSC_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$DSC_PATCH"
         echo "DCN201 DSC enable patch REVERSED (leftover from a previous build)"
@@ -523,6 +555,29 @@ else
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PCON_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$PCON_PATCH"
         echo "DCN201 PCON HDMI 2.1 patch REVERSED (leftover from a previous build)"
+    fi
+fi
+
+VCN_PATCH=$HERE/bc250-vcn-ungate.patch
+VCN_MARK=$TREE/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c
+if [ "$WITH_VCN" = 1 ]; then
+    step "apply VCN 2.0.3 ungate patch (experimental direct bring-up)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VCN_PATCH" >/dev/null 2>&1; then
+        echo "VCN ungate patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$VCN_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$VCN_PATCH" \
+            || die "VCN ungate patch apply FAILED mid-way — tree may be inconsistent; inspect by hand"
+        echo "VCN ungate patch applied"
+    else
+        die "VCN ungate patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+else
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$VCN_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$VCN_PATCH" \
+            || die "VCN ungate patch reverse FAILED mid-way — tree may be inconsistent; inspect by hand"
+        echo "VCN ungate patch REVERSED (leftover from a previous build)"
+    elif grep -q "bc250_vcn_ungate" "$VCN_MARK" 2>/dev/null; then
+        die "VCN ungate is PARTIALLY applied in the tree (marker present, patch -R does not match) — reverse it by hand or restore the tree before building"
     fi
 fi
 

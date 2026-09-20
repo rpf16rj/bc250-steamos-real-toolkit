@@ -9,6 +9,7 @@ Local knowledge base for Cascade. Not committed to git.
 - `kernel.md` — SteamOS kernel (Neptune), versions, patches, module params
 - `display.md` — Display pipeline: DP→HDMI PCON, FRL, EDID override, VRR, ALLM
 - `patches.md` — All kernel patches in the toolkit, what they do, when to apply
+- `vcn.md` — VCN 2.0.3 ungate investigation: PSP GPCOM dead end, experimental patch, test procedure
 - `start_sh.md` — start.sh architecture, functions, menu structure
 - `build.md` — Build system: patch-driver.sh, fetch-sources.sh, build.sh
 - `steamos.md` — SteamOS specifics: read-only fs, GRUB, EFI boot, mkinitcpio
