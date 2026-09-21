@@ -91,9 +91,11 @@ To update later, download the newest release zip, extract it over the old folder
 
 SteamOS updates can replace the kernel, modules, and boot configuration. Run **Install All** from the toolkit menu to reapply all patches. If the kernel version changed, the Combined Fix will rebuild `amdgpu.ko` for the new kernel automatically.
 
+> 💡 **Fast installs:** when a prebuilt `amdgpu.ko`/Mesa matching your exact kernel and selected patches is published, the toolkit downloads and installs it (checksum + vermagic/ABI verified) instead of compiling — minutes become seconds. If nothing matches, it falls back to a local build automatically.
+
 ### No display after reboot (Combined Fix)
 
-The toolkit includes vermagic and ABI guards that refuse to install a mismatched module. If the build fails, the stock `amdgpu.ko` remains untouched and your display should work. If you still get no display:
+The toolkit includes vermagic and ABI guards that refuse to install a mismatched module. If the build fails, the stock `amdgpu.ko` remains untouched and your display should work. If you still get no display, pick a recovery entry at the GRUB boot menu (shown automatically once the toolkit is installed): **"pre-install kernel+initramfs"** boots the stock drivers snapshot taken before install, or **"HDMI21-DSC OFF"** disables the DSC/PCON patch. From a booted system you can also:
 
 1. Boot into Desktop Mode (or connect via SSH)
 2. Run `sudo ./start.sh` → Revert Combined Fix

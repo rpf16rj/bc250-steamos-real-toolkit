@@ -91,9 +91,11 @@ Para atualizar depois, baixe o zip da release mais nova, extraia por cima da pas
 
 Atualizações do SteamOS podem substituir o kernel, módulos e configuração de boot. Rode **Install All** no menu do toolkit para reaplicar todos os patches. Se a versão do kernel mudou, o Combined Fix vai recompilar o `amdgpu.ko` para o novo kernel automaticamente.
 
+> 💡 **Instalação rápida:** quando existe um `amdgpu.ko`/Mesa pré-compilado publicado que corresponde exatamente ao seu kernel e aos patches escolhidos, o toolkit baixa e instala (checksum + vermagic/ABI verificados) em vez de compilar — minutos viram segundos. Se nada combinar, cai para a compilação local automaticamente.
+
 ### Sem vídeo após reiniciar (Combined Fix)
 
-O toolkit inclui guardas de vermagic e ABI que recusam instalar um módulo incompatível. Se o build falhar, o `amdgpu.ko` original permanece intacto e seu display deve funcionar. Se ainda assim não houver vídeo:
+O toolkit inclui guardas de vermagic e ABI que recusam instalar um módulo incompatível. Se o build falhar, o `amdgpu.ko` original permanece intacto e seu display deve funcionar. Se ainda assim não houver vídeo, escolha uma entrada de recovery no menu do GRUB (mostrado automaticamente depois que o toolkit é instalado): **"pre-install kernel+initramfs"** bota com o snapshot dos drivers originais salvo antes do install, ou **"HDMI21-DSC OFF"** desliga o patch DSC/PCON. Num sistema que ainda bota você também pode:
 
 1. Inicie no Modo Desktop (ou conecte via SSH)
 2. Rode `sudo ./start.sh` → Revert Combined Fix

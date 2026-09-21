@@ -9,6 +9,57 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## Unreleased
 
+## v1.9.7 — 2026-09-20
+
+**Novidades:**
+
+- **Instalação muito mais rápida** — o toolkit agora baixa um
+  `amdgpu.ko` e um Mesa patchado pré-compilados que correspondem
+  exatamente ao seu kernel e opções, em vez de compilar (~30 min →
+  segundos). Se nada combinar, cai para a compilação local
+  automaticamente.
+- **Rollback automático se o driver quebrar o boot** — antes de trocar
+  o driver de vídeo, o kernel+initramfs originais são salvos e uma
+  entrada "pre-install kernel+initramfs" aparece no menu de boot.
+- **Menu de recovery ativado por padrão** — as entradas de recovery do
+  GRUB agora são instaladas junto com qualquer fix de driver, sem
+  precisar ir ao menu Extras.
+- **Entrada "reverter toolkit" removida do boot** — ela não conseguia
+  rodar quando o kernel falhava mesmo; a entrada de snapshot cobre esse
+  caso.
+
+**Detalhes técnicos:**
+
+- **Adicionado:** caminho rápido de `amdgpu.ko` pré-compilado no
+  `patch-driver.sh` — baixa `amdgpu-<uname -r>.ko.zst` + `.sha256` +
+  manifesto `.flags` do release `prebuilt` do GitHub; só instala com
+  match exato de kernel + conjunto de flags, e o `install.sh` ainda
+  revalida vermagic/ABI. `--no-prebuilt` força build local.
+  `package-prebuilt.sh` empacota/publica os artefatos.
+- **Adicionado:** Mesa pré-compilado — `package-mesa-prebuilt.sh` tara
+  `/opt/bc250-gfx1013/<VERSION>` (64+32-bit);
+  `install-mesa-prebuilt.sh` extrai e define `VK_DRIVER_FILES` com
+  fallback pro ICD 32-bit stock; `start.sh` tenta antes do
+  `build-mesa.sh`. Mesa/toolkit/mesh precisam bater exatamente com o
+  manifesto; glibc é mínimo (compatível pra frente).
+- **Adicionado:** `stock_boot_backup()` no `install.sh` salva
+  `/boot/vmlinuz-<preset>` + `initramfs-<preset>.img` em
+  `/boot/bc250-backup/` antes de tocar no módulo; quando já existe um
+  override instalado, rebuilda um initramfs stock uma vez para o
+  snapshot sempre carregar o amdgpu original. O script grub.d emite uma
+  entrada extra que bota esse snapshot enquanto ele existir.
+- **Alterado:** a entrada GRUB de `bc250.revert_all=1` foi removida (a
+  unit oneshot precisa de userspace funcionando — inútil num kernel
+  travado); o flag continua utilizável digitado manualmente e a unit
+  segue instalada. As recovery entries agora são auto-instaladas (modo
+  `auto`) após todo install que troca o módulo do kernel.
+- **Corrigido:** `--no-ss` não entra mais na assinatura de flags do
+  prebuilt em kernels >= 7.2 (o patch já é upstream, então o Combined
+  Fix sempre gerava `... no-ss` e errava o artefato publicado).
+- **Corrigido:** aborts de SIGPIPE sob `pipefail` nos scripts novos —
+  `ldd | head` e `tar -tf | grep -q` saíam com 141; a saída agora é
+  capturada primeiro / comparada em bash.
+
 ## v1.9.6 — 2026-09-20
 
 **Novidades:**

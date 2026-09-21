@@ -35,10 +35,49 @@ EFI (nvme0n1p1) → steamcl.efi → GRUB → vmlinuz-linux-neptune-72
 - `GRUB_VIDEO_BACKEND=efi_gop` makes `00_header` emit only `insmod efi_gop`,
   avoiding the missing `efi_uga.mod` boot hang.
 - **Recovery entries — verified working (2026-09-16):** the toolkit's
-  `/etc/grub.d/42_bc250-recovery` writes the two menuentries, `update-grub`
+  `/etc/grub.d/42_bc250-recovery` writes the menuentries, `update-grub`
   regenerates `/efi/EFI/steamos/grub.cfg` (log: "Installing grub configuration
   file at /efi/EFI/steamos/grub.cfg"), and the toolkit's post-check finds
   "BC-250 recovery: HDMI21-DSC OFF" in it. They show up in the boot menu.
+- **Pre-install snapshot entry (2026-09-20):** "pre-install kernel+initramfs"
+  boots the stock vmlinuz+initramfs snapshot that `install.sh` saves to
+  `/boot/bc250-backup/` before installing the module override. Since amdgpu
+  loads from the initramfs (early KMS), this restores the stock display
+  driver — the A/B-style rollback the user asked for. The entry is emitted
+  only while a snapshot exists for the current kernel version; snapshots
+  live outside the `vmlinuz-*` glob so they never confuse kernel detection.
+  Uninstall removes `/boot/bc250-backup`.
+- **"REVERT TOOLKIT" entry removed (2026-09-20):** `bc250.revert_all=1` needs
+  a working userspace boot for its oneshot unit to run — useless exactly in
+  a kernel wedge, which is when a menu entry matters. The snapshot entry
+  covers that case. The flag still works if typed manually on a bootable
+  system, so `bc250-recovery-revert.service` is still installed.
+- **Auto-install (2026-09-20):** `install_recovery_entries auto` now runs
+  after every kernel-module-replacing install (Combined Fix, Audio Fix,
+  GFX1013 Fix), so the menu + entries are on for a fresh user without
+  visiting Extras. Re-running is idempotent and refreshes an older
+  /etc/grub.d script in place.
+
+## Boot Assessment (auto menu after failed boots)
+- SteamOS ships systemd's automatic boot assessment:
+  `systemd-boot-check-no-failures.service` gates `boot-complete.target`;
+  `systemd-bless-boot.service` marks the loader entry "good" once reached;
+  `holo-boot.service` runs `holo-bootconf set-mode booted` (ConditionPathExists
+  /efi/SteamOS) — the success signal to `steamcl.efi`.
+- **Observed on hardware:** after ~4 consecutive failed boots the machine
+  surfaced a boot menu styled differently from GRUB but listing the same
+  entries — most likely `steamcl.efi`'s own recovery/menu (it does A/B
+  partset selection and boot tracking; the ESP config dir is root-only so
+  the exact counter logic wasn't read). It may also auto-fall-back to the
+  other A/B partset.
+- **Why the toolkit GRUB menu is still needed:** the assessment only helps
+  on hard boot failure. Our most common bad state — kernel boots fine but
+  display stays black (DSC/PCON) — reaches graphical.target and counts as a
+  SUCCESS, so the auto menu never triggers. The forced GRUB timeout is the
+  only way to reach the recovery entries in that case.
+- `bootctl` reports `GRUB 2.14` with `✗ Boot counting` — bless-boot's
+  counter bookkeeping is effectively a no-op on GRUB; the A/B logic lives
+  in steamcl/holo-bootconf, not in GRUB env.
 - **The GRUB menu is hidden by default and `GRUB_TIMEOUT` does nothing.**
   `00_header` never emits `set timeout=${GRUB_TIMEOUT}`; it hardcodes
   `timeout=0` / `timeout_style=menu` in its steamenv block and calls

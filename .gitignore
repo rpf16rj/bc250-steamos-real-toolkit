@@ -32,3 +32,8 @@
 
 # Personal agent rules (local only)
 /AGENTS.local.md
+/external/bc250-steamos/bc250-gfx1013-fix/prebuilt/
+/external/bc250-steamos/bc250-gfx1013-fix/prebuilt-dl/
+/external/bc250-steamos/bc250-audio-fix/prebuilt/
+/external/bc250-steamos/bc250-audio-fix/amdgpu-*.ko.zst*
+/external/bc250-steamos/bc250-audio-fix/amdgpu-*.flags
