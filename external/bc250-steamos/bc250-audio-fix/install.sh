@@ -75,6 +75,42 @@ if steamos-readonly status 2>/dev/null | grep -qi enabled; then
     ROOTFS_WAS_READONLY=1
 fi
 
+# --- Pre-install boot snapshot ---------------------------------------------
+# SteamOS loads amdgpu from the initramfs (early KMS), so keeping the
+# pre-install vmlinuz+initramfs under /boot/bc250-backup makes the stock
+# display driver bootable again through the toolkit's GRUB recovery entry.
+# Only safe to snapshot while no override is installed — once updates/ holds
+# a patched amdgpu, the on-disk initramfs is already patched and copying it
+# would preserve the broken state, not the good one. When an override exists
+# but no backup does (upgrade from an older toolkit), rebuild a stock
+# initramfs once just to snapshot it.
+BOOT_BACKUP_DIR=/boot/bc250-backup
+stock_boot_backup() {
+    local bvk=$BOOT_BACKUP_DIR/vmlinuz-$PRESET
+    local bimg=$BOOT_BACKUP_DIR/initramfs-$PRESET.img
+    [ -f "$bvk" ] && [ -f "$bimg" ] && return 0
+    mkdir -p "$BOOT_BACKUP_DIR"
+    if [ -f "$MARKER" ] && [ -f "$DST" ]; then
+        # already patched: temporarily drop the override and rebuild a stock
+        # initramfs so the snapshot really carries the stock amdgpu
+        mv "$DST" "$DST.patched-tmp"
+        depmod "$REL" >/dev/null 2>&1 || true
+        mkinitcpio -p "$PRESET" >/dev/null 2>&1 || true
+    fi
+    cp -a "/boot/vmlinuz-$PRESET" "$bvk" 2>/dev/null
+    cp -a "/boot/initramfs-$PRESET.img" "$bimg" 2>/dev/null
+    if [ -f "$DST.patched-tmp" ]; then
+        mv "$DST.patched-tmp" "$DST"
+        depmod "$REL" >/dev/null 2>&1 || true
+    fi
+    if [ -f "$bvk" ] && [ -f "$bimg" ]; then
+        echo "stock kernel+initramfs snapshot saved to $BOOT_BACKUP_DIR (GRUB recovery entry)"
+    else
+        echo "warning: could not snapshot stock kernel/initramfs — recovery entry will not appear" >&2
+    fi
+}
+stock_boot_backup
+
 INSTALL_STARTED=1
 install -D -m644 "$SRC" "$DST"
 sha256sum "$DST" | awk '{print $1}' > "$MARKER"

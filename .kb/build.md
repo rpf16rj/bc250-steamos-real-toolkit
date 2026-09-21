@@ -1,4 +1,4 @@
-<!-- tags: build, patch-driver, fetch-sources, build-sh, install-sh, rollback, mesa, radv, mesh -->
+<!-- tags: build, patch-driver, fetch-sources, build-sh, install-sh, rollback, mesa, radv, mesh, prebuilt, recovery, grub -->
 # Build System
 
 ## Overview
@@ -23,6 +23,12 @@ applies patches, builds only the amdgpu.ko module, and installs it.
 
 ### install.sh
 - Backs up the stock amdgpu.ko
+- **Snapshots the pre-install kernel+initramfs** to `/boot/bc250-backup/`
+  (`vmlinuz-<preset>` + `initramfs-<preset>.img`) BEFORE installing — this is
+  the stock-drivers boot target for the GRUB recovery entry. Only snapshots
+  while no override is installed; if an override exists but no backup does
+  (upgrade from an older toolkit), it rebuilds a stock initramfs once just
+  to snapshot it.
 - Installs the patched amdgpu.ko to `/lib/modules/$(uname -r)/...`
 - Runs `depmod -a`
 - Rebuilds initramfs (`mkinitcpio -P`)
@@ -34,8 +40,49 @@ applies patches, builds only the amdgpu.ko module, and installs it.
 
 ### patch-driver.sh
 - Orchestrates: fetch-sources.sh → build.sh → install.sh
-- Accepts flags: `--audio`, `--gfx1013`, `--vrr`, `--allm`, `--no-audio-clock`, `--no-ss`, `--no-telemetry`, `--no-ttm`, `--no-sclk`, `--no-kfd`, `--no-frl-hp`, `--no-ycbcr444`, `--mastag-mesh`, `--native-mesh`
+- **Prebuilt fast path:** before building, tries to download
+  `amdgpu-<uname -r>.ko.zst` (+ `.sha256` + `.flags` manifest) from the
+  rolling `prebuilt` GitHub release. Installs only on an EXACT kernel
+  release + flag-signature match (SHA256 verified; install.sh re-checks
+  vermagic/ABI). Any mismatch → normal source build. `--no-prebuilt`
+  forces a local build.
+- Accepts flags: `--audio`, `--gfx1013`, `--vrr`, `--allm`, `--no-audio-clock`, `--no-ss`, `--no-telemetry`, `--no-ttm`, `--no-sclk`, `--no-kfd`, `--no-frl-hp`, `--no-ycbcr444`, `--mastag-mesh`, `--native-mesh`, `--vcn`, `--no-prebuilt`
 - All `--no-*` flags skip individual patches and reverse leftovers from previous builds
+
+### package-prebuilt.sh (maintainer)
+- Packages `amdgpu.ko.zst` → `prebuilt/amdgpu-<rel>.ko.zst` + `.sha256` +
+  `.flags` manifest (flag signature normalized like `kernel_flags_sig`)
+- `--upload` pushes the 3 assets to release tag `prebuilt` via `gh`
+  (creates the release on first use); uses `~/.local/bin/gh` fallback
+
+### Mesa prebuilt (bc250-gfx1013-fix)
+- `package-mesa-prebuilt.sh --upload --mastag-mesh|--native-mesh` —
+  tars `/opt/bc250-gfx1013/<VERSION>` into
+  `mesa-<mesaver>-bc250.<ver>-<mesh>.tar.zst` + sha256 + flags
+  manifest, uploads to the same `prebuilt` release
+- `install-mesa-prebuilt.sh <tarball>` — extracts to `/`, sets
+  `VK_DRIVER_FILES` (falls back to stock 32-bit ICD when the tarball has
+  no lib32)
+- `gfx1013_try_mesa_prebuilt` in start.sh runs it before the source build:
+  mesa/mesh must match the manifest exactly; glibc is a MINIMUM
+  (`user_glibc >= manifest_glibc` via sort -V — glibc is forward-compat,
+  so it stays out of the asset name so any client can find the file).
+  Mesa is built `-Dllvm=disabled` so there is no libLLVM coupling; glibc
+  is the only ABI guard needed. A Mesa that fails checks is never
+  installed — a broken RADV would take down Game Mode (gamescope needs
+  Vulkan), so strictness here is load-bearing, not just caution.
+- SIGPIPE gotcha: `ldd --version | head` under `set -o pipefail` exits 141 —
+  capture full ldd output first, then grep. Same for `tar -tf | grep -q` on
+  the Mesa tarball (grep exits early, tar dies on SIGPIPE) — list once into
+  a variable and use bash `[[ "$var" == *pat* ]]` instead.
+- Flag-signature gotcha (2026-09-20): `--no-ss` is a no-op on kernels >= 7.2
+  (the DP spread-spectrum patch is upstream and build.sh force-skips it), but
+  the Combined Fix still appends it because the checklist item doesn't exist
+  there — the sig became `audio gfx1013 dsc no-ss` vs the published
+  `audio gfx1013 dsc` manifest and the prebuilt never matched. Both
+  `kernel_flags_sig` and `package-prebuilt.sh` now drop `no-ss` on >=7.2,
+  and patch-driver.sh writes `prebuilt/amdgpu-<rel>.flags` after every build
+  so packaging never guesses flags.
 - `--no-audio-clock`, `--no-telemetry`, `--no-ss` only apply within `--audio`
 - `--no-ttm`, `--no-sclk`, `--no-kfd`, `--no-frl-hp`, `--no-ycbcr444` apply to always-on patches
 - Must run as regular user (calls sudo internally for install step)

@@ -2948,6 +2948,8 @@ install_audio_fix() {
     fi
 
     print_success "DisplayPort audio/video fix installed! Reboot required."
+    # Kernel module was replaced — make sure the GRUB recovery entries exist.
+    install_recovery_entries auto || true
     persist_state_add "audio"
     print_info "After reboot, verify DisplayPort video/audio play back at normal speed."
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
@@ -4246,6 +4248,54 @@ revert_fsr4_proton() {
     print_info "Restart Steam to apply."
 }
 
+# Tries to install a prebuilt patched Mesa tarball from the rolling `prebuilt`
+# GitHub release instead of compiling. Requires an exact match of Mesa
+# version + toolkit VERSION + mesh mode, and a host glibc >= the build's
+# (glibc is forward-compatible — the manifest stores the minimum). Any
+# mismatch returns non-zero and the caller falls back to a local build.
+# A Mesa that fails its checks is never installed: a broken RADV would take
+# down Game Mode (gamescope needs Vulkan), so the guard stays strict.
+gfx1013_try_mesa_prebuilt() {
+    local mesa_dir=$1 mesh_flag=$2
+    command -v curl >/dev/null || return 1
+    command -v zstd >/dev/null || return 1
+    local version mesa_ver mesh glibc_have asset base dl manifest glibc_need lowest
+    version=$(<"$mesa_dir/VERSION") || return 1
+    mesa_ver=$(sed -n 's/^MESA_VERSION=//p' "$mesa_dir/build-mesa.sh" | head -n1)
+    # capture ldd fully first — `ldd | head` under pipefail dies on SIGPIPE
+    glibc_have=$(ldd --version)
+    glibc_have=$(echo "$glibc_have" | grep -oE '[0-9]+\.[0-9]+' | head -n1)
+    case "$mesh_flag" in
+        *native*) mesh=native ;;
+        *)        mesh=mastag ;;
+    esac
+    [ -n "$mesa_ver" ] && [ -n "$glibc_have" ] || return 1
+
+    asset="mesa-${mesa_ver}-bc250.${version}-${mesh}"
+    base="https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/download/prebuilt"
+
+    dl="$mesa_dir/prebuilt-dl"
+    mkdir -p "$dl"
+    curl -fsSL --max-time 15 -o "$dl/$asset.flags" "$base/$asset.flags" || return 1
+    manifest=$(cat "$dl/$asset.flags")
+    # exact fields
+    [[ "$manifest" == *"mesa=${mesa_ver} "* || "$manifest" == *"mesa=${mesa_ver}" ]] || return 1
+    [[ "$manifest" == *"mesh=${mesh} "*  || "$manifest" == *"mesh=${mesh}"  ]] || return 1
+    # glibc minimum: need <= have
+    glibc_need=$(echo "$manifest" | grep -oE 'glibc=[0-9]+\.[0-9]+' | cut -d= -f2)
+    [ -n "$glibc_need" ] || return 1
+    lowest=$(printf '%s\n%s\n' "$glibc_need" "$glibc_have" | sort -V)
+    lowest=${lowest%%$'\n'*}
+    [ "$lowest" = "$glibc_need" ] || return 1
+
+    curl -fsSL --max-time 300 -o "$dl/$asset.tar.zst" "$base/$asset.tar.zst" || return 1
+    curl -fsSL --max-time 15 -o "$dl/$asset.tar.zst.sha256" "$base/$asset.tar.zst.sha256" || return 1
+    (cd "$dl" && sha256sum -c "$asset.tar.zst.sha256" >/dev/null) || return 1
+
+    print_info "Installing prebuilt Mesa ${mesa_ver} (mesh: ${mesh}) — skipping source build"
+    runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./install-mesa-prebuilt.sh '$dl/$asset.tar.zst'"
+}
+
 gfx1013_ensure_mesa_build_deps() {
     # SteamOS's immutable rootfs strips dev headers and .pc files from many
     # packages to save space, even though pacman's local DB still lists the
@@ -4423,20 +4473,24 @@ install_gfx1013_fix() {
         return 1
     fi
 
-    # Check for meson, ninja, and the C build toolchain
-    print_info "Step 6/7: Checking for meson/ninja build tools and dev headers..."
-    if ! gfx1013_ensure_mesa_build_deps; then
-        fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "GFX1013 Fix — missing build deps"
-        return 1
-    fi
+    if ! gfx1013_try_mesa_prebuilt "$mesa_dir" "$mesh_flag"; then
+        # Check for meson, ninja, and the C build toolchain
+        print_info "Step 6/7: Checking for meson/ninja build tools and dev headers..."
+        if ! gfx1013_ensure_mesa_build_deps; then
+            fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "GFX1013 Fix — missing build deps"
+            return 1
+        fi
 
-    print_info "Step 7/7: Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
-    if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
-        fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "GFX1013 Fix — build-mesa.sh"
-        return 1
+        print_info "Step 7/7: Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+        if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
+            fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "GFX1013 Fix — build-mesa.sh"
+            return 1
+        fi
     fi
 
     print_success "GFX1013 compute queue fix installed! Reboot required."
+    # Kernel module was replaced — make sure the GRUB recovery entries exist.
+    install_recovery_entries auto || true
     persist_state_add "gfx1013"
     print_info "After reboot, async compute queues are enabled on the BC-250 GPU."
     print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
@@ -4640,20 +4694,25 @@ install_combined_fix() {
                 return 1
             fi
 
-            print_info "Checking for meson/ninja build tools and dev headers..."
-            if ! gfx1013_ensure_mesa_build_deps; then
-                fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
-                return 1
-            fi
+            if ! gfx1013_try_mesa_prebuilt "$mesa_dir" "$mesh_flag"; then
+                print_info "Checking for meson/ninja build tools and dev headers..."
+                if ! gfx1013_ensure_mesa_build_deps; then
+                    fail_with_log "Failed to prepare Mesa build dependencies. Please check the log above." "Combined Fix — missing build deps"
+                    return 1
+                fi
 
-            print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
-            if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
-                fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
-                return 1
+                print_info "Building Mesa/RADV (mesh: ${mesh_flag}) (this may take 10-15 minutes)..."
+                if ! runuser -u "$REAL_USER" -- bash -c "cd '$mesa_dir' && ./build-mesa.sh ${mesh_flag}"; then
+                    fail_with_log "Mesa build failed. Kernel patches are installed, but Mesa/RADV patches were not applied. Async compute may not work correctly." "Combined Fix — build-mesa.sh"
+                    return 1
+                fi
             fi
         fi
 
         print_success "Combined fix installed! Reboot required."
+        # Kernel module was replaced — make sure the GRUB recovery entries
+        # (incl. the pre-install snapshot entry) exist and the menu is on.
+        install_recovery_entries auto || true
         [[ $do_audio -eq 1 ]] && persist_state_add "audio"
         [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
         [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
@@ -6887,8 +6946,12 @@ run_extras_menu() {
 # always track the current kernel:
 #   1. "HDMI21/DSC OFF" — appends amdgpu.bc250_hdmi21=0, for users whose
 #      display stays dark with the Combined Fix's DSC/PCON patch.
-#   2. "REVERT TOOLKIT" — appends bc250.revert_all=1; a oneshot unit sees the
-#      flag, reverts the whole toolkit, and reboots back to stock config.
+#   2. "pre-install kernel+initramfs" — boots the stock vmlinuz+initramfs
+#      snapshot saved under /boot/bc250-backup before the display driver
+#      install (only emitted while a snapshot exists for the current kernel).
+# A "revert toolkit" entry is intentionally absent: bc250.revert_all=1 needs
+# a working userspace boot to run its unit, useless in a kernel wedge — the
+# flag remains usable when typed manually. The unit is still installed.
 # SteamOS uses GRUB (its update-grub writes /efi/EFI/steamos/grub.cfg), not BLS,
 # so the entries are plain menuentries rather than /boot/loader/entries files.
 
@@ -6989,6 +7052,7 @@ emergency_revert() {
     rm -f "$RECOVERY_GRUB_SCRIPT"
     rm -f /boot/acpi_override.cpio
     rm -f /usr/lib/modules/*/updates/amdgpu.ko* 2>/dev/null
+    rm -rf /boot/bc250-backup
     rm -rf /opt/bc250-gfx1013
     sed -i '/VK_DRIVER_FILES/d' /etc/environment 2>/dev/null
     depmod -a 2>/dev/null || true
@@ -7096,7 +7160,7 @@ WantedBy=multi-user.target
 EOF
 }
 
-# grub-mkconfig runs every /etc/grub.d script; this one emits the two recovery
+# grub-mkconfig runs every /etc/grub.d script; this one emits the recovery
 # menuentries. Because it runs on every update-grub — including the ones a
 # SteamOS update triggers — the entries always point at the current kernel and
 # no separate refresh service is needed. The default entry is left untouched.
@@ -7105,10 +7169,11 @@ recovery_write_grub_script() {
 #!/bin/sh
 # BC-250 recovery boot entries — generated by bc250-steamos-real-toolkit.
 #
-# Emits two extra menuentries that boot the current kernel with one extra
-# kernel parameter, so a user can recover without hand-editing GRUB:
-#   * "HDMI21-DSC OFF"  -> amdgpu.bc250_hdmi21=0
-#   * "REVERT TOOLKIT"  -> bc250.revert_all=1
+# Emits extra menuentries, so a user can recover without hand-editing GRUB:
+#   * "HDMI21-DSC OFF"  -> boots current kernel + amdgpu.bc250_hdmi21=0
+#   * "pre-install kernel+initramfs" -> boots the stock vmlinuz+initramfs
+#     snapshot install.sh saved under /boot/bc250-backup (only emitted while
+#     a snapshot exists for the current kernel version)
 set -e
 
 . /usr/share/grub/grub-mkconfig_lib
@@ -7156,6 +7221,8 @@ args="${GRUB_CMDLINE_LINUX} ${GRUB_CMDLINE_LINUX_DEFAULT}"
 
 emit_entry() {
     title="$1"; extra="$2"
+    kpath="${3:-${rel_dirname}/${basename}}"
+    ipath="${4:-${initrd_path}}"
     echo "menuentry '$(echo "$title" | grub_quote)' ${CLASS} {"
     echo "	load_video"
     echo "	set gfxpayload=\$linux_gfx_mode"
@@ -7165,16 +7232,36 @@ emit_entry() {
     echo "	insmod gzio"
     if [ -n "$access" ]; then printf '%s\n' "$access"; fi
     if [ "x${GRUB_DISABLE_STEAMCL_ENVIRONMENT:-false}" != xtrue ]; then
-        echo "	steamenv_boot	linux ${rel_dirname}/${basename} ${args} ${extra}"
+        echo "	steamenv_boot	linux ${kpath} ${args} ${extra}"
     else
-        echo "	linux	${rel_dirname}/${basename} rw ${args} ${extra}"
+        echo "	linux	${kpath} rw ${args} ${extra}"
     fi
-    echo "	initrd	${initrd_path}"
+    echo "	initrd	${ipath}"
     echo "}"
 }
 
 emit_entry "SteamOS (BC-250 recovery: HDMI21-DSC OFF)" "amdgpu.bc250_hdmi21=0"
-emit_entry "BC-250 RECOVERY: revert whole toolkit and reboot" "bc250.revert_all=1"
+
+# NOTE: no "revert toolkit" menu entry — bc250.revert_all=1 needs a working
+# userspace boot to run its systemd unit, which is useless exactly when it
+# matters (kernel wedge). The flag still works when typed manually on a
+# bootable system; the unit is still installed for that.
+
+# Second entry — only when install.sh snapshotted the pre-install kernel and
+# initramfs for this kernel version. SteamOS loads amdgpu from the initramfs
+# (early KMS), so booting the snapshot gives back the stock display driver
+# without touching the installed override. The snapshot lives outside the
+# vmlinuz-* glob so it never confuses the kernel detection above.
+backup_dir="${dirname}/bc250-backup"
+if [ -e "${backup_dir}/vmlinuz-${version}" ] && [ -e "${backup_dir}/initramfs-${version}.img" ]; then
+    binitrd=
+    for i in ${initrd_early}; do
+        binitrd="${binitrd} ${rel_dirname}/${i}"
+    done
+    binitrd="${binitrd} ${rel_dirname}/bc250-backup/initramfs-${version}.img"
+    emit_entry "BC-250 RECOVERY: pre-install kernel+initramfs (stock drivers)" "" \
+        "${rel_dirname}/bc250-backup/vmlinuz-${version}" "${binitrd# }"
+fi
 EOF
     # SteamOS's 00_header hardcodes timeout=0 and its steamenv_init ignores
     # GRUB_TIMEOUT, so the menu never appears on hardware without the Deck
@@ -7217,7 +7304,7 @@ install_recovery_entries() {
     recovery_menu_conf_load
     [[ -f $RECOVERY_MENU_CONF ]] || recovery_menu_conf_write "$RECOVERY_MENU" "$RECOVERY_TIMEOUT"
 
-    if [[ "$auto" != "auto" ]] && ! confirm "This adds two entries to the GRUB menu and shows the menu for ${RECOVERY_TIMEOUT}s at boot (SteamOS hides it by default): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0) and 'REVERT TOOLKIT' (bc250.revert_all=1 — reverts everything and reboots). Proceed?"; then
+    if [[ "$auto" != "auto" ]] && ! confirm "This adds entries to the GRUB menu and shows the menu for ${RECOVERY_TIMEOUT}s at boot (SteamOS hides it by default): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0) and 'pre-install kernel+initramfs' (boots the stock snapshot taken before the display driver install — appears once a Combined Fix install has run). Proceed?"; then
         print_info "Cancelled."
         return 0
     fi
@@ -7258,7 +7345,7 @@ install_recovery_entries() {
 
     persist_state_add "recovery_entries"
     if [[ $RECOVERY_MENU == "on" ]]; then
-        print_info "They appear in the GRUB menu, shown for ${RECOVERY_TIMEOUT}s at boot. 'REVERT TOOLKIT' reverts everything and reboots automatically."
+        print_info "They appear in the GRUB menu, shown for ${RECOVERY_TIMEOUT}s at boot."
     else
         print_info "They are in the GRUB menu, but the menu is hidden at boot (toggle it back on via Extras → GRUB Recovery Entries)."
     fi
@@ -7273,6 +7360,7 @@ uninstall_recovery_entries() {
     steamos_writable "
         systemctl disable --now bc250-recovery-revert.service 2>/dev/null || true
         rm -f \"$RECOVERY_GRUB_SCRIPT\" \"$RECOVERY_REVERT_UNIT\" \"$RECOVERY_REVERT_WANTS\"
+        rm -rf /boot/bc250-backup
         systemctl daemon-reload
     " || print_error "Failed to remove recovery entries."
     if ! steamos_writable 'grub_regen'; then
@@ -7344,17 +7432,17 @@ run_recovery_menu() {
         print_banner
         print_section "GRUB Recovery Boot Entries"
         echo ""
-        echo -e "  ${DIM}Adds two extra entries to the GRUB menu (SteamOS hides the menu${RESET}"
+        echo -e "  ${DIM}Adds extra entries to the GRUB menu (SteamOS hides the menu${RESET}"
         echo -e "  ${DIM}by default on hardware without the Deck button):${RESET}"
         echo -e "  ${DIM}  • 'HDMI21-DSC patch OFF' — boots with amdgpu.bc250_hdmi21=0 for${RESET}"
         echo -e "  ${DIM}    displays that stay dark with the Combined Fix DSC/PCON patch.${RESET}"
-        echo -e "  ${DIM}  • 'REVERT TOOLKIT' — boots with bc250.revert_all=1, reverts the${RESET}"
-        echo -e "  ${DIM}    entire toolkit (GRUB params, services, patched amdgpu.ko) and reboots.${RESET}"
+        echo -e "  ${DIM}  • 'pre-install kernel+initramfs' — boots the stock vmlinuz+initramfs${RESET}"
+        echo -e "  ${DIM}    snapshot saved before the driver install (only once a snapshot exists).${RESET}"
         echo -e "  ${DIM}Entries are generated by a /etc/grub.d script, so every${RESET}"
         echo -e "  ${DIM}update-grub (including SteamOS updates) keeps them on the current kernel.${RESET}"
         echo ""
         print_item "I" "Install / Refresh Recovery Entries" "$(recovery_entries_installed && echo 'installed' || echo 'not installed')"
-        print_item "R" "Remove Recovery Entries"          "Delete both entries, units and helper"
+        print_item "R" "Remove Recovery Entries"          "Delete the entries, units and helper"
         print_item "M" "GRUB Menu at Boot"                "$(recovery_menu_visible && echo "shown for ${RECOVERY_TIMEOUT}s" || echo 'hidden') — toggle"
         print_item "T" "Menu Timeout"                     "${RECOVERY_TIMEOUT}s — change"
         print_item "0" "Back" ""
@@ -7624,7 +7712,8 @@ if [[ "${1:-}" == "--reapply-all" ]]; then
     exit 0
 fi
 
-# Non-interactive full revert used by the "REVERT TOOLKIT" GRUB recovery entry.
+# Non-interactive full revert used by bc250.revert_all=1 on the kernel cmdline
+# (manual flag only — no GRUB menu entry sets it anymore).
 if [[ "${1:-}" == "--revert-all" ]]; then
     AUTO=1
     # '|| true' disables errexit inside the whole revert chain so one failed

@@ -21,13 +21,15 @@
 # --no-kfd skips the KFD flush-TLB-by-runlist patch.
 # --vcn applies the experimental VCN 2.0.3 ungate patch (direct MMIO bring-up;
 # for ACL/clamp investigation only — not part of the stable feature set).
+# --no-prebuilt forces a local source build even when a published prebuilt
+# module matches the running kernel.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 
 usage() {
     cat <<EOF
-Usage: $0 [--gfx1013] [--audio] [--dsc] [--dsc-pcon] [--no-ss] [--no-telemetry] [--no-ttm] [--no-sclk] [--no-kfd] [kernel-tree]
+Usage: $0 [--gfx1013] [--audio] [--dsc] [--dsc-pcon] [--no-ss] [--no-telemetry] [--no-ttm] [--no-sclk] [--no-kfd] [--vcn] [--no-prebuilt] [kernel-tree]
        $0 status
        $0 uninstall
 
@@ -164,6 +166,7 @@ NO_TTM=()
 NO_SCLK=()
 NO_KFD=()
 WITH_VCN=()
+USE_PREBUILT=1
 ARGS=()
 for a in "$@"; do
     case "$a" in
@@ -177,10 +180,75 @@ for a in "$@"; do
         --no-sclk)        NO_SCLK=(--no-sclk) ;;
         --no-kfd)         NO_KFD=(--no-kfd) ;;
         --vcn)            WITH_VCN=(--vcn) ;;
+        --no-prebuilt)    USE_PREBUILT=0 ;;
         *)                ARGS+=("$a") ;;
     esac
 done
 
+# --- Prebuilt module fast path ---------------------------------------------
+# A published prebuilt amdgpu.ko.zst may replace the whole fetch+build cycle,
+# but ONLY for the exact running kernel release AND the exact flag signature
+# it was built with — anything else falls back to the normal source build.
+# Assets live on the rolling `prebuilt` GitHub release, one set per kernel:
+#   amdgpu-<uname -r>.ko.zst        the module
+#   amdgpu-<uname -r>.ko.zst.sha256 checksum (verified before install)
+#   amdgpu-<uname -r>.flags         the normalized flag signature
+# install.sh then re-verifies vermagic + task_struct ABI before touching /usr.
+kernel_flags_sig() {
+    local sig="" kmaj kmin
+    [ ${#WITH_AUDIO[@]} -gt 0 ] && sig="$sig audio"
+    [ ${#WITH_GFX1013[@]} -gt 0 ] && sig="$sig gfx1013"
+    [ ${#WITH_DSC[@]} -gt 0 ] && sig="$sig dsc"
+    [ ${#WITH_VCN[@]} -gt 0 ] && sig="$sig vcn"
+    # --no-ss is a no-op on kernels >= 7.2 (the DP spread-spectrum disable is
+    # upstream and build.sh force-skips it), so it must not enter the
+    # signature — otherwise the Combined Fix on 7.2+ always misses the
+    # prebuilt artifact even though the binary is identical.
+    kmaj=$(uname -r | cut -d. -f1)
+    kmin=$(uname -r | cut -d. -f2 | cut -d- -f1)
+    if [ ${#NO_SS[@]} -gt 0 ] && ! { [ "$kmaj" -gt 7 ] 2>/dev/null || { [ "$kmaj" -eq 7 ] 2>/dev/null && [ "$kmin" -ge 2 ] 2>/dev/null; }; }; then
+        sig="$sig no-ss"
+    fi
+    [ ${#NO_TELEMETRY[@]} -gt 0 ] && sig="$sig no-telemetry"
+    [ ${#NO_TTM[@]} -gt 0 ] && sig="$sig no-ttm"
+    [ ${#NO_SCLK[@]} -gt 0 ] && sig="$sig no-sclk"
+    [ ${#NO_KFD[@]} -gt 0 ] && sig="$sig no-kfd"
+    echo "${sig# }"
+}
+
+try_prebuilt() {
+    [ "$USE_PREBUILT" = 1 ] || return 1
+    command -v curl >/dev/null || return 1
+    local rel asset base
+    rel=$(uname -r)
+    asset="amdgpu-${rel}"
+    base="https://github.com/rpf16rj/bc250-steamos-real-toolkit/releases/download/prebuilt"
+
+    # The flag manifest is checked first — a matching kernel with a different
+    # patch set must not silently install the wrong module.
+    curl -fsSL --max-time 15 -o "$HERE/$asset.flags" "$base/$asset.flags" || return 1
+    [ "$(cat "$HERE/$asset.flags")" = "$(kernel_flags_sig)" ] || return 1
+
+    curl -fsSL --max-time 120 -o "$HERE/$asset.ko.zst" "$base/$asset.ko.zst" || return 1
+    curl -fsSL --max-time 15 -o "$HERE/$asset.ko.zst.sha256" "$base/$asset.ko.zst.sha256" || return 1
+    (cd "$HERE" && sha256sum -c "$asset.ko.zst.sha256" >/dev/null) || return 1
+
+    cp "$HERE/$asset.ko.zst" "$HERE/amdgpu.ko.zst"
+    echo "[prebuilt] $rel: flag set '$(cat "$HERE/$asset.flags")' matches — installing prebuilt module"
+    sudo "$HERE/install.sh"
+}
+
+if try_prebuilt; then
+    exit 0
+fi
+[ "$USE_PREBUILT" = 1 ] && echo "[prebuilt] no matching artifact for $(uname -r) — building from source"
+
 "$HERE/fetch-sources.sh" "${ARGS[@]}"
 "$HERE/build.sh" "${WITH_GFX1013[@]}" "${WITH_AUDIO[@]}" "${WITH_DSC[@]}" "${NO_SS[@]}" "${NO_TELEMETRY[@]}" "${NO_TTM[@]}" "${NO_SCLK[@]}" "${NO_KFD[@]}" "${WITH_VCN[@]}" "${ARGS[@]}"
+
+# Record the flag signature this binary was actually built with so
+# package-prebuilt.sh never has to guess it from manual arguments.
+mkdir -p "$HERE/prebuilt"
+kernel_flags_sig > "$HERE/prebuilt/amdgpu-$(uname -r).flags"
+
 sudo "$HERE/install.sh"

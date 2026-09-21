@@ -9,6 +9,53 @@ before the toolkit adopted numbered releases.
 
 ## Unreleased
 
+## v1.9.7 — 2026-09-20
+
+**What's new:**
+
+- **Much faster installs** — the toolkit now downloads a prebuilt
+  `amdgpu.ko` and patched Mesa matching your exact kernel and options
+  instead of compiling (~30 min → seconds). Falls back to a local build
+  automatically when nothing matches.
+- **Automatic rollback if a driver install breaks boot** — before the
+  display driver is replaced, the stock kernel+initramfs is snapshotted
+  and a "pre-install kernel+initramfs" entry appears in the boot menu.
+- **Recovery menu on by default** — the GRUB recovery entries are now
+  installed automatically with any driver fix, no Extras trip needed.
+- **"Revert toolkit" boot entry removed** — it could not run when the
+  kernel failed to boot anyway; the snapshot entry covers that case.
+
+**Technical details:**
+
+- **Added:** prebuilt `amdgpu.ko` fast path in `patch-driver.sh` —
+  downloads `amdgpu-<uname -r>.ko.zst` + `.sha256` + `.flags` manifest
+  from the rolling `prebuilt` GitHub release; installs only on an exact
+  kernel-release + flag-set match, then `install.sh` still re-verifies
+  vermagic/ABI. `--no-prebuilt` forces a local build.
+  `package-prebuilt.sh` packages/uploads the artifacts.
+- **Added:** prebuilt Mesa — `package-mesa-prebuilt.sh` tars
+  `/opt/bc250-gfx1013/<VERSION>` (64+32-bit); `install-mesa-prebuilt.sh`
+  extracts, sets `VK_DRIVER_FILES` with stock-32-bit fallback;
+  `start.sh` tries it before `build-mesa.sh`. Mesa/toolkit/mesh must
+  match the manifest exactly; glibc is a minimum (forward-compatible).
+- **Added:** `stock_boot_backup()` in `install.sh` snapshots
+  `/boot/vmlinuz-<preset>` + `initramfs-<preset>.img` to
+  `/boot/bc250-backup/` before touching the module; when an override is
+  already installed it rebuilds a stock initramfs once so the snapshot
+  always carries the stock amdgpu. The generated grub.d script emits a
+  third menuentry booting that snapshot while it exists.
+- **Changed:** the `bc250.revert_all=1` GRUB entry was removed (its
+  oneshot unit needs a working userspace boot — useless in a kernel
+  wedge); the flag still works when typed manually and the unit remains
+  installed. Recovery entries are now auto-installed (`auto` mode)
+  after every kernel-module-replacing install.
+- **Fixed:** `--no-ss` no longer enters the prebuilt flag signature on
+  kernels >= 7.2 (the patch is upstream there, so the Combined Fix
+  always produced `... no-ss` and missed the published artifact).
+- **Fixed:** SIGPIPE aborts under `pipefail` in the new scripts —
+  `ldd | head` and `tar -tf | grep -q` exited 141; output is captured
+  first / matched in bash now.
+
 ## v1.9.6 — 2026-09-20
 
 **What's new:**
