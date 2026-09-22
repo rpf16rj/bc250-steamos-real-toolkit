@@ -9,6 +9,59 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## Unreleased
 
+## v1.9.8 — 2026-09-22
+
+**Novidades:**
+
+- **Tela preta ao trocar de sessão corrigida** — um novo patch de
+  display re-detecta o link quando a tela fica apagada por >3s, o que
+  resolve a tela escura ao alternar entre Desktop Mode e Game Mode por
+  um adaptador DP→HDMI 2.1 (ativo por padrão, ajustável via
+  `amdgpu.cs_relink_ms`).
+- **Correção para adaptador UGREEN/CH7218** — o opt-in
+  `amdgpu.bc250_ch7218_quirk=1` impede o adaptador de perder o DSC após
+  troca de modo ou standby (o caso da "tela doida"). Desligado por
+  padrão; adicione ao kernel command line só se tiver esse adaptador.
+- **Experimental `amdgpu.bc250_pcon_force_dsc=1`** — para adaptadores
+  PCON que escondem completamente o decoder DSC (ex.: Cable Matters
+  VMM7100).
+- **Suporte ao co-processador PSP/CCP** — o secure processor do BC-250
+  agora é vinculado (série de patches a caminho do upstream;
+  preparação para trabalho futuro de VCN).
+- **`BC250_NO_PREBUILT=1`** — defina antes do `start.sh` ou do
+  `patch-driver.sh` para forçar build local do kernel e do Mesa.
+
+**Detalhes técnicos:**
+
+- **Adicionado:** `bc250-cs-relink-after-long-blank.patch` — quando um
+  link DP→HDMI PCON fica em blank longo (>3s, configurável via
+  `amdgpu.cs_relink_ms`, mais `cs_relink_delay_ms`,
+  `cs_relink_cooldown_ms`, `cs_relink_at_boot`, `cs_relink_debug`) as
+  caps em cache são descartadas e a detecção roda de novo, recuperando
+  a imagem após transições KDE↔gamescope e standbys longos.
+- **Adicionado:** `bc250-ch7218-pcon-quirk.patch` — força
+  `DISPLAY_DONGLE_DP_HDMI_CONVERTER` quando o firmware do adaptador
+  mente, re-asserta os tetos de 12 bpc / FRL 48 Gbps / YCbCr e restaura
+  `DSC_SUPPORT` quando o firmware limpa o bit mas ainda anuncia um
+  decoder DSC. Totalmente controlado por `amdgpu.bc250_ch7218_quirk`
+  (padrão 0).
+- **Adicionado:** `bc250-pcon-force-dsc.patch` — opt-in experimental
+  (`amdgpu.bc250_pcon_force_dsc=1`) que anuncia um decoder DSC para
+  PCONs que o omitem do firmware.
+- **Adicionado:** `bc250-psp-ccp.patch` — vincula o PSP/CCP do BC-250
+  (PCI 1022:143e); sempre aplicado, sem gate de runtime.
+- **Alterado:** os três patches de display vão junto do `--dsc` (ordem:
+  PCON → DSC → DSC_BPP → FRL_BPC → CH7218 → FORCE_DSC → RELINK); o
+  PSP/CCP fica no grupo always-applied.
+- **Adicionado:** `BC250_NO_PREBUILT=1` — honrado pelo
+  `patch-driver.sh` (igual a `--no-prebuilt`) e propagado pelo
+  `runuser` no `start.sh`; também faz `gfx1013_try_mesa_prebuilt`
+  pular o Mesa prebuilt, então um build 100% local fica a uma env de
+  distância.
+- **Nota:** o artefato `prebuilt` de kernel publicado ainda NÃO inclui
+  esses patches — será atualizado após validação em hardware
+  (`package-prebuilt.sh --upload`).
+
 ## v1.9.7 — 2026-09-20
 
 **Novidades:**
