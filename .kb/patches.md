@@ -70,6 +70,16 @@ All patches live in `external/bc250-steamos/bc250-audio-fix/`.
 - **Purpose**: Query GFX clock directly from SMU instead of indirect calculation
 - **Always needed**: Yes (with audio fix)
 
+### bc250-psp-ccp.patch
+- **Purpose**: Bind the BC-250 secure processor (PCI 1022:143e) — carry of
+  Mattia Tadini's 3-patch linux-crypto/LKML series (psp_firmware_is_visible
+  NULL deref fix + vdata gating + sp_pci_table entry), ported from MastaG
+  `0014-bc250-psp-ccp.patch`
+- **Effect**: PSP mailbox/platform access works, fw version readable in
+  sysfs. No SEV/TEE/CCP crypto on this firmware (TEE ring never comes up)
+- **Always applied** (upstream-bound fix, no flag). Relevant to the VCN
+  investigation — PSP was the GPCOM path blocker (.kb/vcn.md)
+
 ### bc250-cyan-skillfish-gpu-telemetry.patch
 - **Purpose**: GPU utilization reporting — needed for correct GPU clock/load readings
 - **Always needed**: Yes (with audio fix, especially with CPU Core Unlock)
@@ -112,7 +122,28 @@ ALL patches are now individually excludable with `--no-*` flags:
 - `--gfx1013` — GFX1013 compute patches + Mesa build
 - `--vrr` — VRR PCON FreeSync (skipped on kernel ≥7)
 - `--allm` — ALLM via DP (skipped on kernel ≥7)
-- `--dsc` / `--dsc-pcon` — DCN201 DSC + PCON HDMI 2.1 pair
+- `--dsc` / `--dsc-pcon` — DCN201 DSC + PCON HDMI 2.1 pair. Since 2026-09-22
+  this block also applies, in order after the PCON patch:
+  - `bc250-ch7218-pcon-quirk.patch` (ported from MastaG
+    `0012-ch7218-pcon-quirk.patch`, by @dejan_994): opt-in
+    `amdgpu.bc250_ch7218_quirk=1` quirk for CH7218 adapters (UGREEN,
+    branch OUI 2B:02:F0) that misreport their downstream port or lose
+    DSC_SUPPORT after a mode change / TV standby resume. Default off;
+    every entry point early-returns without the param.
+  - `bc250-pcon-force-dsc.patch` (MastaG `0013-pcon-force-dsc.patch`):
+    experimental opt-in `amdgpu.bc250_pcon_force_dsc=1` — treats a
+    converter whose DSC capability block reads all zeros as a DSC 1.2a
+    decoder with FEC (Cable Matters 102101 / VMM7100 case). Its
+    retrieve_link_cap call site anchors on the CH7218 DSC-restore call,
+    so it must apply after it.
+  - `bc250-cs-relink-after-long-blank.patch` (MastaG
+    `0011-cs-relink-after-long-blank.patch`): the CH7218-class converter
+    drops its HDMI side after a >few-second blank (KDE<->gamescope
+    handover) and DC's cached-caps resume leaves the sink dark. Re-runs
+    trigger_hotplug when the stream returns after > cs_relink_ms.
+    Tunables: `amdgpu.cs_relink_ms=3000` (0=off),
+    `cs_relink_delay_ms=250`, `cs_relink_cooldown_ms=10000`,
+    `cs_relink_at_boot=0`, `cs_relink_debug=1`.
 - `--vcn` — EXPERIMENTAL VCN 2.0.3 ungate, **hidden from the combined-fix
   menu** (manual flag only). Runtime-gated: all three driver gates open
   only with `amdgpu.bc250_vcn_ungate=1` on the kernel cmdline (default 0,

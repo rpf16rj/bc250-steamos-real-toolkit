@@ -1,0 +1,239 @@
+From: BC-250 SteamOS Real Toolkit
+Subject: [PATCH] drm/amd/display: opt-in CH7218 DP-to-HDMI 2.1 adapter quirk (amdgpu.bc250_ch7218_quirk)
+
+Ported from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0012-ch7218-pcon-quirk.patch
+(patch by @dejan_994) to Valve's SteamOS kernel 7.2 tree. Applied by build.sh
+inside the --dsc block, after the DCN201 PCON HDMI 2.1 patch it depends on
+(bc250_hdmi21 plumbing + dp_hdmi21_pcon_support cap).
+
+The whole patch is runtime-gated: amdgpu.bc250_ch7218_quirk defaults to 0 and
+every entry point early-returns without it, so shipping it in the default
+build changes nothing unless the user opts in on the kernel cmdline. Enable
+with amdgpu.bc250_ch7218_quirk=1 when a CH7218-based adapter (e.g. UGREEN,
+DPCD branch OUI 2B:02:F0) is black at 4K90/4K120 but fine at 4K60, or loses
+DSC after a mode change / TV standby resume.
+
+---
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu.h b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+index 22b0432..a48ccc9 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu.h
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+@@ -260,6 +260,7 @@ extern int amdgpu_num_kcq;
+ extern int amdgpu_vcnfw_log;
+ extern int amdgpu_sg_display;
+ extern int amdgpu_bc250_hdmi21;
++extern int amdgpu_bc250_ch7218_quirk;
+ extern int amdgpu_umsch_mm;
+ extern int amdgpu_seamless;
+ extern int amdgpu_umsch_mm_fwlog;
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+index 9fe6d55..817307a 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+@@ -237,6 +237,7 @@ int amdgpu_use_xgmi_p2p = 1;
+ int amdgpu_vcnfw_log;
+ int amdgpu_sg_display = -1; /* auto */
+ int amdgpu_bc250_hdmi21 = 1;
++int amdgpu_bc250_ch7218_quirk;
+ int amdgpu_user_partt_mode = AMDGPU_AUTO_COMPUTE_PARTITION_MODE;
+ int amdgpu_umsch_mm;
+ int amdgpu_seamless = -1; /* auto */
+@@ -997,6 +998,25 @@ module_param_named(sg_display, amdgpu_sg_display, int, 0444);
+ MODULE_PARM_DESC(bc250_hdmi21, "BC-250: HDMI 2.1 PCON and DSC on DCN201 (0 = disabled, 1 = enabled (default))");
+ module_param_named(bc250_hdmi21, amdgpu_bc250_hdmi21, int, 0444);
+ 
++/**
++ * DOC: bc250_ch7218_quirk (int)
++ * BC-250 (Cyan Skillfish, DCN 2.0.1) only. Opt-in workaround for DP to HDMI
++ * 2.1 adapters built on a Chrontel CH7218 whose firmware misreports its
++ * downstream port, so that the driver treats the adapter as a plain
++ * DisplayPort sink and sends 4K90/4K120 as DP RGB that the adapter cannot
++ * emit over TMDS -- a black screen, while 4K60 still works.
++ *
++ * Off by default, and deliberately so: nothing in the DPCD distinguishes an
++ * affected unit from a healthy one, so enabling this for everyone would
++ * override correct information reported by working adapters. Turn it on only
++ * if you have a CH7218 adapter that is black at 4K120 but fine at 4K60.
++ * Requires bc250_hdmi21=1 (the default). With this unset the driver behaves
++ * exactly as it would without the quirk.
++ * (0 = disabled (default), 1 = enabled)
++ */
++MODULE_PARM_DESC(bc250_ch7218_quirk, "BC-250: opt-in CH7218 DP-to-HDMI 2.1 adapter quirk (0 = disabled (default), 1 = enabled)");
++module_param_named(bc250_ch7218_quirk, amdgpu_bc250_ch7218_quirk, int, 0444);
++
+ /**
+  * DOC: umsch_mm (int)
+  * Enable Multi Media User Mode Scheduler. This is a HW scheduling engine for VCN and VPE.
+diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+index 635e990..db653d8 100644
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+@@ -2544,6 +2544,7 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
+ 		init_data.flags.enable_frl = true;
+ 
+ 	init_data.flags.bc250_hdmi21 = (amdgpu_bc250_hdmi21 != 0);
++	init_data.flags.bc250_ch7218_quirk = (amdgpu_bc250_ch7218_quirk != 0);
+ 
+ 	init_data.flags.seamless_boot_edp_requested = false;
+ 
+diff --git a/drivers/gpu/drm/amd/display/dc/dc.h b/drivers/gpu/drm/amd/display/dc/dc.h
+index b9571ba..2ef59b1 100644
+--- a/drivers/gpu/drm/amd/display/dc/dc.h
++++ b/drivers/gpu/drm/amd/display/dc/dc.h
+@@ -591,6 +591,7 @@ struct dc_config {
+ 	bool enable_mipi_converter_optimization;
+ 	bool enable_frl;
+ 	bool bc250_hdmi21;
++	bool bc250_ch7218_quirk;
+ 	bool force_hdmi21_frl_enc_enable;
+ 	bool skip_frl_pretraining;
+ 	bool use_default_clock_table;
+diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
+index 1cd17a0..da4f245 100644
+--- a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
++++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
+@@ -1160,18 +1160,106 @@ static void read_and_intersect_post_frl_lt_status(
+ 	}
+ }
+ 
++/*
++ * BC-250: opt-in quirk for DP to HDMI 2.1 adapters built on a Chrontel CH7218.
++ *
++ * Affected firmware clears DP_DOWNSTREAMPORT_PRESENT, or reports the detailed
++ * downstream port as DP, while the device identity and the EDID describe a DP
++ * to HDMI 2.1 PCON. DC then classifies the adapter DISPLAY_DONGLE_NONE, never
++ * runs FRL negotiation, and sends 4K90/4K120 as DP RGB, which the adapter
++ * cannot emit over TMDS. The sink stays black; 4K60 still works.
++ *
++ * Healthy CH7218 units report themselves correctly and need none of this, and
++ * nothing in the DPCD tells the two apart -- applying it unconditionally would
++ * override correct information from a working adapter. So it is opt-in:
++ * amdgpu.bc250_ch7218_quirk defaults to 0, every entry point below starts with
++ * the same gate, and with it unset this patch changes no behaviour at all.
++ *
++ * bc250_hdmi21 is required as well. The quirk exists to restore HDMI 2.1 PCON
++ * ceilings, which mean nothing if PCON support is off.
++ */
++#define BC250_CH7218_BRANCH_DEV_ID 0x2B02F0
++
++static bool bc250_ch7218_quirk_wanted(const struct dc_link *link)
++{
++	if (!link || !link->dc)
++		return false;
++
++	if (!link->dc->config.bc250_ch7218_quirk ||
++	    !link->dc->caps.dp_hdmi21_pcon_support)
++		return false;
++
++	/* branch_dev_name is int8_t[6], so this reads exactly the array. */
++	return link->dpcd_caps.branch_dev_id == BC250_CH7218_BRANCH_DEV_ID &&
++	       !memcmp(link->dpcd_caps.branch_dev_name, "CH7218", 6);
++}
++
++/*
++ * Declare the adapter to be what it physically is, and restore the ceilings
++ * its firmware failed to report. Safe to call from anywhere in converter
++ * detection: it returns immediately unless the quirk is enabled and the
++ * adapter identifies as a CH7218.
++ */
++static void bc250_ch7218_force_converter_identity(struct dc_link *link)
++{
++	if (!bc250_ch7218_quirk_wanted(link))
++		return;
++
++	link->dpcd_caps.is_branch_dev = true;
++	link->dpcd_caps.dongle_type = DISPLAY_DONGLE_DP_HDMI_CONVERTER;
++	link->dpcd_caps.dongle_caps.dongle_type = DISPLAY_DONGLE_DP_HDMI_CONVERTER;
++
++	link->dpcd_caps.dongle_caps.dp_hdmi_max_bpc = 12;
++	link->dpcd_caps.dongle_caps.dp_hdmi_frl_max_link_bw_in_kbps = 48000000;
++	link->dpcd_caps.dongle_caps.is_dp_hdmi_ycbcr422_pass_through = true;
++	link->dpcd_caps.dongle_caps.is_dp_hdmi_ycbcr420_pass_through = true;
++	link->dpcd_caps.dongle_caps.extendedCapValid = true;
++
++	DC_LOG_DC("BC-250: CH7218 quirk: forced HDMI 2.1 FRL PCON identity, 48 Gbps\n");
++}
++
++/*
++ * Some CH7218 firmware clears DP_DSC_SUPPORT while still returning a populated
++ * DSC decoder capability block. Only restore the bit when the block really is
++ * populated, so a genuinely DSC-less adapter is left alone even with the quirk
++ * enabled.
++ */
++static void bc250_ch7218_restore_dsc_support(struct dc_link *link)
++{
++	struct dpcd_dsc_capabilities *dsc_caps;
++
++	if (!bc250_ch7218_quirk_wanted(link))
++		return;
++
++	dsc_caps = &link->dpcd_caps.dsc_caps;
++	if (dsc_caps->dsc_basic_caps.fields.dsc_support.DSC_SUPPORT)
++		return;
++
++	if (!dsc_caps->dsc_basic_caps.raw[DP_DSC_REV - DP_DSC_SUPPORT] &&
++	    !dsc_caps->dsc_basic_caps.raw[DP_DSC_SLICE_CAP_1 - DP_DSC_SUPPORT] &&
++	    !dsc_caps->dsc_basic_caps.raw[DP_DSC_MAX_BITS_PER_PIXEL_LOW - DP_DSC_SUPPORT])
++		return;
++
++	dsc_caps->dsc_basic_caps.fields.dsc_support.DSC_SUPPORT = true;
++	DC_LOG_DC("BC-250: CH7218 quirk: restored cleared DSC_SUPPORT\n");
++}
++
+ static void get_active_converter_info(
+ 	uint8_t data, struct dc_link *link)
+ {
+ 	union dp_downstream_port_present ds_port = { .byte = data };
++	bool bc250_forced = false;
+ 	memset(&link->dpcd_caps.dongle_caps, 0, sizeof(link->dpcd_caps.dongle_caps));
+ 
+ 	/* decode converter info*/
+ 	if (!ds_port.fields.PORT_PRESENT) {
+ 		link->dpcd_caps.dongle_type = DISPLAY_DONGLE_NONE;
++		link->dpcd_caps.is_branch_dev = false;
++		/* BC-250: no-op unless amdgpu.bc250_ch7218_quirk is set. */
++		bc250_forced = bc250_ch7218_quirk_wanted(link);
++		bc250_ch7218_force_converter_identity(link);
+ 		set_dongle_type(link->ddc,
+ 				link->dpcd_caps.dongle_type);
+-		link->dpcd_caps.is_branch_dev = false;
+ 		return;
+ 	}
+ 
+@@ -1203,6 +1291,9 @@ static void get_active_converter_info(
+ 			/*Handle DP case as DONGLE_NONE*/
+ 			case DOWN_STREAM_DETAILED_DP:
+ 				link->dpcd_caps.dongle_type = DISPLAY_DONGLE_NONE;
++				/* BC-250: no-op unless amdgpu.bc250_ch7218_quirk is set. */
++				bc250_forced = bc250_ch7218_quirk_wanted(link);
++				bc250_ch7218_force_converter_identity(link);
+ 				break;
+ 			case DOWN_STREAM_DETAILED_VGA:
+ 				link->dpcd_caps.dongle_type =
+@@ -1329,6 +1420,17 @@ static void get_active_converter_info(
+ 		DC_LOG_DP2("\tdfp_cap_ext.max_video_h_active_width = %d", link->dpcd_caps.dongle_caps.dfp_cap_ext.max_video_h_active_width);
+ 		DC_LOG_DP2("\tdfp_cap_ext.max_video_v_active_height = %d", link->dpcd_caps.dongle_caps.dfp_cap_ext.max_video_v_active_height);
+ 	}
++
++	/*
++	 * BC-250: re-assert last, but only when the identity had to be forced
++	 * above. The DFP capability extension parsed above overwrites the
++	 * ceilings with what the firmware claims, which on an affected CH7218 is
++	 * exactly what is wrong. An adapter that reported its port correctly is
++	 * left with the values DC derived from it, including the FRL rate
++	 * intersected with the PCON's own training status.
++	 */
++	if (bc250_forced)
++		bc250_ch7218_force_converter_identity(link);
+ }
+ 
+ static void apply_usbc_combo_phy_reset_wa(struct dc_link *link,
+@@ -2029,6 +2131,8 @@ static bool retrieve_link_cap(struct dc_link *link)
+ 				link->dpcd_caps.dsc_caps.dsc_basic_caps.raw,
+ 				sizeof(link->dpcd_caps.dsc_caps.dsc_basic_caps.raw));
+ 		if (status == DC_OK) {
++			/* BC-250: no-op unless amdgpu.bc250_ch7218_quirk is set. */
++			bc250_ch7218_restore_dsc_support(link);
+ 			is_fec_supported = link->dpcd_caps.fec_cap.bits.FEC_CAPABLE;
+ 			is_dsc_basic_supported = link->dpcd_caps.dsc_caps.dsc_basic_caps.fields.dsc_support.DSC_SUPPORT;
+ 			is_dsc_passthrough_supported = link->dpcd_caps.dsc_caps.dsc_basic_caps.fields.dsc_support.DSC_PASSTHROUGH_SUPPORT;
