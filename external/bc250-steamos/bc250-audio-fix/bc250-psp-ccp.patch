@@ -1,0 +1,96 @@
+From: BC-250 SteamOS Real Toolkit
+Subject: [PATCH] crypto: ccp - bind the AMD BC-250 secure processor (1022:143e)
+
+Ported from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0014-bc250-psp-ccp.patch
+to Valve's SteamOS kernel 7.2 tree. Carry of Mattia Tadini's 3-patch series
+posted to linux-crypto/LKML 2026-09-19 (squashed upstream-style):
+  1/3 crypto: ccp - fix NULL dereference in psp_firmware_is_visible()
+  2/3 crypto: ccp - do not start PSP sub-devices without their vdata
+  3/3 crypto: ccp - add support for the AMD BC-250 secure processor
+
+Applied unconditionally: it is an upstream-bound device-enable fix, not a
+workaround. Gives the board a bound PSP: pspv3/pspv4 register layout read,
+platform access mailbox (pa_v1), firmware version in sysfs. No SEV, no TEE,
+no CCP crypto engine on this firmware. Relevant to the VCN investigation —
+the PSP was the hard blocker on the GPCOM path (see .kb/vcn.md).
+
+diff --git a/drivers/crypto/ccp/psp-dev.c b/drivers/crypto/ccp/psp-dev.c
+index b14ce51..c9ab47c 100644
+--- a/drivers/crypto/ccp/psp-dev.c
++++ b/drivers/crypto/ccp/psp-dev.c
+@@ -198,13 +198,17 @@ static int psp_init(struct psp_device *psp)
+ {
+ 	int ret;
+ 
+-	if (!psp_check_sev_support(psp)) {
++	/*
++	 * The capability register describes the silicon and the vdata describes
++	 * what this driver was given to drive it with. Require both.
++	 */
++	if (psp->vdata->sev && !psp_check_sev_support(psp)) {
+ 		ret = sev_dev_init(psp);
+ 		if (ret)
+ 			return ret;
+ 	}
+ 
+-	if (!psp_check_tee_support(psp)) {
++	if (psp->vdata->tee && !psp_check_tee_support(psp)) {
+ 		ret = tee_dev_init(psp);
+ 		if (ret)
+ 			return ret;
+diff --git a/drivers/crypto/ccp/sp-pci.c b/drivers/crypto/ccp/sp-pci.c
+index ede6ff9..bb64c6c 100644
+--- a/drivers/crypto/ccp/sp-pci.c
++++ b/drivers/crypto/ccp/sp-pci.c
+@@ -80,7 +80,7 @@ static umode_t psp_firmware_is_visible(struct kobject *kobj, struct attribute *a
+ 		val = ioread32(psp->io_regs + psp->vdata->bootloader_info_reg);
+ 
+ 	if (attr == &dev_attr_tee_version.attr && psp->capability.tee &&
+-	    psp->vdata->tee->info_reg)
++	    psp->vdata->tee && psp->vdata->tee->info_reg)
+ 		val = ioread32(psp->io_regs + psp->vdata->tee->info_reg);
+ 
+ 	/* If platform disallows accessing this register it will be all f's */
+@@ -477,6 +477,21 @@ static const struct psp_vdata pspv7 = {
+ 	.intsts_reg		= 0x10514,	/* P2CMSG_INTSTS */
+ };
+ 
++/*
++ * The BC-250 uses the pspv3 register layout but has no usable TEE: the
++ * capability register advertises one and PSP_CMD_TEE_RING_INIT never
++ * completes. Platform access has its own mailbox and is unaffected.
++ */
++static const struct psp_vdata pspv_bc250 = {
++	.platform_access	= &pa_v1,
++	.bootloader_info_reg	= 0x109ec,	/* C2PMSG_59 */
++	.feature_reg		= 0x109fc,	/* C2PMSG_63 */
++	.inten_reg		= 0x10690,	/* P2CMSG_INTEN */
++	.intsts_reg		= 0x10694,	/* P2CMSG_INTSTS */
++	.platform_features	= PLATFORM_FEATURE_DBC |
++				  PLATFORM_FEATURE_HSTI,
++};
++
+ #endif
+ 
+ static const struct sp_dev_vdata dev_vdata[] = {
+@@ -550,6 +565,12 @@ static const struct sp_dev_vdata dev_vdata[] = {
+ #endif
+ 	},
+ 
++	{	/* 10 */
++		.bar = 2,
++#ifdef CONFIG_CRYPTO_DEV_SP_PSP
++		.psp_vdata = &pspv_bc250,
++#endif
++	},
+ };
+ static const struct pci_device_id sp_pci_table[] = {
+ 	{ PCI_VDEVICE(AMD, 0x1537), .driver_data = (kernel_ulong_t)&dev_vdata[0] },
+@@ -560,6 +581,7 @@ static const struct pci_device_id sp_pci_table[] = {
+ 	{ PCI_VDEVICE(AMD, 0x14CA), .driver_data = (kernel_ulong_t)&dev_vdata[5] },
+ 	{ PCI_VDEVICE(AMD, 0x15C7), .driver_data = (kernel_ulong_t)&dev_vdata[6] },
+ 	{ PCI_VDEVICE(AMD, 0x1649), .driver_data = (kernel_ulong_t)&dev_vdata[6] },
++	{ PCI_VDEVICE(AMD, 0x143e), .driver_data = (kernel_ulong_t)&dev_vdata[10] },
+ 	{ PCI_VDEVICE(AMD, 0x1134), .driver_data = (kernel_ulong_t)&dev_vdata[7] },
+ 	{ PCI_VDEVICE(AMD, 0x17E0), .driver_data = (kernel_ulong_t)&dev_vdata[7] },
+ 	{ PCI_VDEVICE(AMD, 0x156E), .driver_data = (kernel_ulong_t)&dev_vdata[8] },

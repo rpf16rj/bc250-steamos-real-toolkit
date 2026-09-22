@@ -45,7 +45,10 @@ applies patches, builds only the amdgpu.ko module, and installs it.
   rolling `prebuilt` GitHub release. Installs only on an EXACT kernel
   release + flag-signature match (SHA256 verified; install.sh re-checks
   vermagic/ABI). Any mismatch → normal source build. `--no-prebuilt`
-  forces a local build.
+  forces a local build. `BC250_NO_PREBUILT=1` does the same via
+  environment — works through `sudo BC250_NO_PREBUILT=1 ./start.sh`
+  (propagated through `runuser` via `patch_env`) and also skips the Mesa
+  prebuilt in `gfx1013_try_mesa_prebuilt`.
 - Accepts flags: `--audio`, `--gfx1013`, `--vrr`, `--allm`, `--no-audio-clock`, `--no-ss`, `--no-telemetry`, `--no-ttm`, `--no-sclk`, `--no-kfd`, `--no-frl-hp`, `--no-ycbcr444`, `--mastag-mesh`, `--native-mesh`, `--vcn`, `--no-prebuilt`
 - All `--no-*` flags skip individual patches and reverse leftovers from previous builds
 

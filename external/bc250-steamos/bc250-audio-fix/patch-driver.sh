@@ -21,8 +21,8 @@
 # --no-kfd skips the KFD flush-TLB-by-runlist patch.
 # --vcn applies the experimental VCN 2.0.3 ungate patch (direct MMIO bring-up;
 # for ACL/clamp investigation only — not part of the stable feature set).
-# --no-prebuilt forces a local source build even when a published prebuilt
-# module matches the running kernel.
+# --no-prebuilt (or BC250_NO_PREBUILT=1) forces a local source build even when
+# a published prebuilt module matches the running kernel.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -167,6 +167,7 @@ NO_SCLK=()
 NO_KFD=()
 WITH_VCN=()
 USE_PREBUILT=1
+[ "${BC250_NO_PREBUILT:-0}" = "1" ] && USE_PREBUILT=0
 ARGS=()
 for a in "$@"; do
     case "$a" in

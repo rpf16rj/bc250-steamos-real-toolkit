@@ -77,6 +77,19 @@ Debugfs knobs on the connector (`/sys/kernel/debug/dri/*/DP-1/`):
 sticky via the sticky-bpp patch), `dsc_slice_*`, `dsc_disable_passthrough`
 (PCON decodes DSC → uncompressed FRL to TV), `link_settings`.
 
+## CH7218 firmware quirk (opt-in, 2026-09-22)
+Some CH7218 firmware misreports the downstream port (clears
+DP_DOWNSTREAMPORT_PRESENT or reports DP) → driver classifies the adapter
+DISPLAY_DONGLE_NONE → no FRL negotiation → 4K90/4K120 black while 4K60
+works. Also observed: a *correctly-reporting* unit loses DSC_SUPPORT after
+a TV standby cycle (falls back to 4:2:2 10-bit). Ported from
+MastaG/linux-cachyos-bc250 `0012-ch7218-pcon-quirk.patch` (author
+@dejan_994), applied inside `--dsc` after the PCON patch it depends on.
+**Enable with `amdgpu.bc250_ch7218_quirk=1`** on the cmdline — off by
+default because nothing in DPCD tells a broken unit from a healthy one.
+Check detection: `dmesg | grep "CH7218 quirk"` and
+`cat /sys/kernel/debug/dri/*/DP-1/dsc_clock_en`.
+
 ## FRL (Fixed Rate Link)
 - FRL is HDMI 2.1's high-bandwidth transport, replacing TMDS for high-res modes
 - CH7218 supports FRL up to 48 Gbps (4 lanes × 12 Gbps)

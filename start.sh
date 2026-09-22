@@ -2942,6 +2942,7 @@ install_audio_fix() {
     else
         print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
     fi
+    [ "${BC250_NO_PREBUILT:-0}" = "1" ] && patch_env="${patch_env}export BC250_NO_PREBUILT=1;"
     if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${audio_flags}"; then
         fail_with_log "DisplayPort audio/video fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Audio Fix — patch-driver.sh"
         return 1
@@ -4257,6 +4258,7 @@ revert_fsr4_proton() {
 # down Game Mode (gamescope needs Vulkan), so the guard stays strict.
 gfx1013_try_mesa_prebuilt() {
     local mesa_dir=$1 mesh_flag=$2
+    [ "${BC250_NO_PREBUILT:-0}" = "1" ] && return 1
     command -v curl >/dev/null || return 1
     command -v zstd >/dev/null || return 1
     local version mesa_ver mesh glibc_have asset base dl manifest glibc_need lowest
@@ -4461,6 +4463,7 @@ install_gfx1013_fix() {
     fi
     
     print_info "Step 5/5: Building and installing kernel module (this may take 5-10 minutes)..."
+    [ "${BC250_NO_PREBUILT:-0}" = "1" ] && patch_env="${patch_env}export BC250_NO_PREBUILT=1;"
     if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh --gfx1013"; then
         fail_with_log "GFX1013 compute queue fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "GFX1013 Fix — patch-driver.sh"
         return 1
@@ -4574,7 +4577,7 @@ install_combined_fix() {
 
     # DSC + HDMI 2.1 PCON is one feature (one amdgpu.bc250_hdmi21 switch); kernel 7.x only
     if [[ "$kver_major" -ge 7 ]]; then
-        checklist_items+=("+DSC + HDMI 2.1 PCON (Exp):4K120 4:4:4 via DP->HDMI 2.1 (amdgpu.bc250_hdmi21=0 disables)")
+        checklist_items+=("+DSC + HDMI 2.1 PCON (Exp):4K120 4:4:4 via DP->HDMI 2.1; incl. opt-in CH7218 quirk (amdgpu.bc250_ch7218_quirk=1)")
     fi
 
     # DP Spread Spectrum only needed before kernel 7.2 (upstream since then)
@@ -4681,6 +4684,7 @@ install_combined_fix() {
             print_info "Could not resolve the short kernel commit locally; patch-driver.sh will use its normal source lookup."
         fi
 
+        [ "${BC250_NO_PREBUILT:-0}" = "1" ] && patch_env="${patch_env}export BC250_NO_PREBUILT=1;"
         if ! runuser -u "$REAL_USER" -- bash -c "cd '$fix_dir' && ${patch_env} ./patch-driver.sh ${flags_str}"; then
             fail_with_log "Combined fix build/install failed. The built-in vermagic/ABI guards refuse to install a mismatched module, so your display driver should be unchanged." "Combined Fix — patch-driver.sh"
             return 1
@@ -4728,6 +4732,8 @@ install_combined_fix() {
             echo -e "  ${DIM}4K120 4:4:4 needs a DP->HDMI 2.1 adapter; a native DP monitor is unaffected.${RESET}"
             echo -e "  ${DIM}If the display stays dark after reboot, boot with ${RESET}${BOLD}amdgpu.bc250_hdmi21=0${RESET}${DIM} (add it to${RESET}"
             echo -e "  ${DIM}GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub, then run update-grub).${RESET}"
+            echo -e "  ${DIM}UGREEN/CH7218 adapter black at 4K120 (fine at 4K60) or losing DSC after standby?${RESET}"
+            echo -e "  ${DIM}Add ${RESET}${BOLD}amdgpu.bc250_ch7218_quirk=1${RESET}${DIM} the same way — it is opt-in and off by default.${RESET}"
         fi
         print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert options, then reboot."
     fi

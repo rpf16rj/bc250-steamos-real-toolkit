@@ -1,0 +1,164 @@
+From: BC-250 SteamOS Real Toolkit
+Subject: [PATCH] drm/amd/display: opt-in DSC decoder advertisement for PCONs that hide it (amdgpu.bc250_pcon_force_dsc)
+
+Ported from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0013-pcon-force-dsc.patch
+to Valve's SteamOS kernel 7.2 tree. Applied by build.sh inside the --dsc
+block, after the CH7218 quirk patch (its call site sits right after the
+CH7218 DSC-restore call in retrieve_link_cap()).
+
+Experimental, off by default: amdgpu.bc250_pcon_force_dsc=1 treats a
+DP-to-HDMI converter whose DSC capability block reads all zeros as a
+DSC 1.2a decoder with FEC, using a known-good CH7218 block as template
+(e.g. Cable Matters 102101 / Synaptics VMM7100 fw 7.02.120). Adapters that
+advertise any DSC capability at all are untouched. If modes that need DSC
+come up black or corrupted, remove the parameter.
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu.h b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+index a48ccc9..7c1440c 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu.h
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+@@ -261,6 +261,7 @@ extern int amdgpu_vcnfw_log;
+ extern int amdgpu_sg_display;
+ extern int amdgpu_bc250_hdmi21;
+ extern int amdgpu_bc250_ch7218_quirk;
++extern int amdgpu_bc250_pcon_force_dsc;
+ extern int amdgpu_umsch_mm;
+ extern int amdgpu_seamless;
+ extern int amdgpu_umsch_mm_fwlog;
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+index 817307a..5cb3017 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+@@ -238,6 +238,7 @@ int amdgpu_vcnfw_log;
+ int amdgpu_sg_display = -1; /* auto */
+ int amdgpu_bc250_hdmi21 = 1;
+ int amdgpu_bc250_ch7218_quirk;
++int amdgpu_bc250_pcon_force_dsc;
+ int amdgpu_user_partt_mode = AMDGPU_AUTO_COMPUTE_PARTITION_MODE;
+ int amdgpu_umsch_mm;
+ int amdgpu_seamless = -1; /* auto */
+@@ -1017,6 +1018,25 @@ module_param_named(bc250_hdmi21, amdgpu_bc250_hdmi21, int, 0444);
+ MODULE_PARM_DESC(bc250_ch7218_quirk, "BC-250: opt-in CH7218 DP-to-HDMI 2.1 adapter quirk (0 = disabled (default), 1 = enabled)");
+ module_param_named(bc250_ch7218_quirk, amdgpu_bc250_ch7218_quirk, int, 0444);
+ 
++/**
++ * DOC: bc250_pcon_force_dsc (int)
++ * BC-250 (Cyan Skillfish, DCN 2.0.1) only. Experimental, opt-in. Some DP to
++ * HDMI 2.1 converters whose silicon has a DSC 1.2a decoder ship firmware that
++ * advertises neither DSC nor FEC in the DPCD (a Cable Matters 102101 on a
++ * Synaptics VMM7100 with firmware 7.02.120 reads all zeros). Without DSC the
++ * DP 1.4 link cannot carry 4K120 RGB and the driver falls back to YCbCr
++ * 4:2:2. With this set, a DP-to-HDMI converter that reports an all-zero DSC
++ * capability block is treated as a DSC 1.2a decoder with FEC, using the
++ * capability block a known-good CH7218 PCON reports, so the source encodes
++ * DSC and asks the adapter to decode it. If the adapter's firmware really
++ * cannot, modes that need DSC come up black or corrupted: remove the
++ * parameter. Adapters that advertise any DSC capability are left alone.
++ * Requires bc250_hdmi21=1 (the default).
++ * (0 = disabled (default), 1 = enabled)
++ */
++MODULE_PARM_DESC(bc250_pcon_force_dsc, "BC-250: experimental, advertise a DSC 1.2a decoder and FEC on behalf of a DP-to-HDMI 2.1 adapter that reports none (0 = disabled (default), 1 = enabled)");
++module_param_named(bc250_pcon_force_dsc, amdgpu_bc250_pcon_force_dsc, int, 0444);
++
+ /**
+  * DOC: umsch_mm (int)
+  * Enable Multi Media User Mode Scheduler. This is a HW scheduling engine for VCN and VPE.
+diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+index db653d8..d114e6a 100644
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+@@ -2545,6 +2545,7 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
+ 
+ 	init_data.flags.bc250_hdmi21 = (amdgpu_bc250_hdmi21 != 0);
+ 	init_data.flags.bc250_ch7218_quirk = (amdgpu_bc250_ch7218_quirk != 0);
++	init_data.flags.bc250_pcon_force_dsc = (amdgpu_bc250_pcon_force_dsc != 0);
+ 
+ 	init_data.flags.seamless_boot_edp_requested = false;
+ 
+diff --git a/drivers/gpu/drm/amd/display/dc/dc.h b/drivers/gpu/drm/amd/display/dc/dc.h
+index 2ef59b1..acf8a66 100644
+--- a/drivers/gpu/drm/amd/display/dc/dc.h
++++ b/drivers/gpu/drm/amd/display/dc/dc.h
+@@ -592,6 +592,7 @@ struct dc_config {
+ 	bool enable_frl;
+ 	bool bc250_hdmi21;
+ 	bool bc250_ch7218_quirk;
++	bool bc250_pcon_force_dsc;
+ 	bool force_hdmi21_frl_enc_enable;
+ 	bool skip_frl_pretraining;
+ 	bool use_default_clock_table;
+diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
+index da4f245..06e8b45 100644
+--- a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
++++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
+@@ -1244,6 +1244,61 @@ static void bc250_ch7218_restore_dsc_support(struct dc_link *link)
+ 	DC_LOG_DC("BC-250: CH7218 quirk: restored cleared DSC_SUPPORT\n");
+ }
+ 
++/*
++ * BC-250: amdgpu.bc250_pcon_force_dsc, experimental and off by default.
++ *
++ * Some DP-to-HDMI 2.1 converters whose silicon has a DSC 1.2a decoder ship
++ * firmware that advertises neither DSC nor FEC: a Cable Matters 102101 on a
++ * Synaptics VMM7100 (fw 7.02.120) reads all zeros from DP_DSC_SUPPORT through
++ * DP_DSC_BITS_PER_PIXEL_INC and 0 at DP_FEC_CAPABILITY. The DP 1.4 link then
++ * cannot carry 4K120 RGB and the stream falls back to YCbCr 4:2:2.
++ *
++ * When asked to, advertise a decoder on the adapter's behalf. The capability
++ * block is the one a known-good Chrontel CH7218 PCON reports (DSC 1.2, 12 bpp
++ * max, RGB/4:4:4/4:2:2, 8/10/12 bpc, 2560 px slices), with DSC_SUPPORT set
++ * and passthrough clear, and FEC is marked capable because DP 1.4 requires
++ * FEC under DSC. Only a DP-to-HDMI converter whose block is entirely zero is
++ * touched; anything that advertises DSC itself is left as reported. If the
++ * firmware really cannot decode, modes that need DSC come up black or
++ * corrupted and the parameter must be dropped.
++ */
++static const uint8_t bc250_pcon_dsc_template[16] = {
++	0x01, 0x21, 0x00, 0x07, 0x3b, 0x04, 0x01, 0xc0,
++	0x00, 0x07, 0x0e, 0x71, 0x08, 0x01, 0x00, 0x00,
++};
++
++static void bc250_pcon_force_dsc(struct dc_link *link)
++{
++	struct dpcd_dsc_capabilities *dsc_caps;
++	unsigned int i;
++
++	if (!link || !link->dc)
++		return;
++
++	if (!link->dc->config.bc250_pcon_force_dsc ||
++	    !link->dc->caps.dp_hdmi21_pcon_support)
++		return;
++
++	if (link->dpcd_caps.dongle_type != DISPLAY_DONGLE_DP_HDMI_CONVERTER)
++		return;
++
++	dsc_caps = &link->dpcd_caps.dsc_caps;
++	for (i = 0; i < sizeof(dsc_caps->dsc_basic_caps.raw); i++)
++		if (dsc_caps->dsc_basic_caps.raw[i])
++			return;
++
++	/* both are the 16-byte DP_DSC_SUPPORT..DP_DSC_BITS_PER_PIXEL_INC block */
++	memcpy(dsc_caps->dsc_basic_caps.raw, bc250_pcon_dsc_template,
++	       sizeof(dsc_caps->dsc_basic_caps.raw));
++	link->dpcd_caps.fec_cap.bits.FEC_CAPABLE = 1;
++
++	DC_LOG_WARNING("BC-250: pcon_force_dsc: advertising a DSC 1.2a decoder and FEC on behalf of branch %06x '%.6s' fw %02x.%02x, which reported none\n",
++		       link->dpcd_caps.branch_dev_id,
++		       (const char *)link->dpcd_caps.branch_dev_name,
++		       (unsigned int)(uint8_t)link->dpcd_caps.branch_fw_revision[0],
++		       (unsigned int)(uint8_t)link->dpcd_caps.branch_fw_revision[1]);
++}
++
+ static void get_active_converter_info(
+ 	uint8_t data, struct dc_link *link)
+ {
+@@ -2133,6 +2188,8 @@ static bool retrieve_link_cap(struct dc_link *link)
+ 		if (status == DC_OK) {
+ 			/* BC-250: no-op unless amdgpu.bc250_ch7218_quirk is set. */
+ 			bc250_ch7218_restore_dsc_support(link);
++			/* BC-250: no-op unless amdgpu.bc250_pcon_force_dsc is set. */
++			bc250_pcon_force_dsc(link);
+ 			is_fec_supported = link->dpcd_caps.fec_cap.bits.FEC_CAPABLE;
+ 			is_dsc_basic_supported = link->dpcd_caps.dsc_caps.dsc_basic_caps.fields.dsc_support.DSC_SUPPORT;
+ 			is_dsc_passthrough_supported = link->dpcd_caps.dsc_caps.dsc_basic_caps.fields.dsc_support.DSC_PASSTHROUGH_SUPPORT;

@@ -331,7 +331,9 @@ git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_training.c \
     drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c \
     drivers/gpu/drm/amd/display/dc/link/link_detection.c \
-    drivers/gpu/drm/amd/display/dc/link/link_validation.c
+    drivers/gpu/drm/amd/display/dc/link/link_validation.c \
+    drivers/crypto/ccp/psp-dev.c \
+    drivers/crypto/ccp/sp-pci.c
 
 if [ "$WITH_AUDIO" = 1 ]; then
     if [ "$NO_TELEMETRY" = 1 ]; then
@@ -489,6 +491,19 @@ else
     fi
 fi
 
+# BC-250 PSP/CCP bind — upstream-bound carry (Mattia Tadini's linux-crypto
+# series), always applied: a device-enable fix, not a workaround.
+step "apply BC-250 PSP/CCP bind patch (crypto/ccp 1022:143e)"
+PSP_CCP_PATCH=$HERE/bc250-psp-ccp.patch
+if patch -p1 -R --dry-run --fuzz=3 -s -f < "$PSP_CCP_PATCH" >/dev/null 2>&1; then
+    echo "PSP/CCP bind patch already applied"
+elif patch -p1 --dry-run --fuzz=3 -s -f < "$PSP_CCP_PATCH" >/dev/null 2>&1; then
+    patch -p1 --fuzz=3 -s < "$PSP_CCP_PATCH"
+    echo "PSP/CCP bind patch applied"
+else
+    die "PSP/CCP bind patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+fi
+
 # DSC + PCON HDMI 2.1 are one feature now (two patches, one amdgpu.bc250_hdmi21
 # switch). The DSC patch reads dc->config.bc250_hdmi21, which the PCON patch
 # adds, so PCON is applied first and reversed last.
@@ -496,6 +511,18 @@ PCON_PATCH=$HERE/bc250-dcn201-pcon-hdmi21.patch
 DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
 DSC_BPP_PATCH=$HERE/bc250-dsc-debugfs-bpp-sticky.patch
 FRL_BPC_PATCH=$HERE/bc250-pcon-frl-bpc-cap.patch
+# MastaG/dejan_994 CH7218 quirk — needs the PCON patch's bc250_hdmi21 plumbing,
+# so it applies inside this block after it and reverses before it. Entirely
+# runtime-gated by amdgpu.bc250_ch7218_quirk (default 0): shipping it changes
+# nothing unless the user opts in on the cmdline.
+CH7218_PATCH=$HERE/bc250-ch7218-pcon-quirk.patch
+# MastaG opt-in force-DSC for PCONs hiding their decoder (Cable Matters
+# VMM7100) — amdgpu.bc250_pcon_force_dsc, default 0. Apply after CH7218.
+FORCE_DSC_PATCH=$HERE/bc250-pcon-force-dsc.patch
+# MastaG relink-after-long-blank — re-detects the link when the stream has
+# been off > cs_relink_ms (default 3000); fixes the dark-screen-after-
+# session-switch PCON bug. Default-on, tunable via amdgpu.cs_relink_*.
+RELINK_PATCH=$HERE/bc250-cs-relink-after-long-blank.patch
 
 if [ "$WITH_DSC_HDMI21" = 1 ]; then
     step "apply DCN201 PCON HDMI 2.1 patch (dp_hdmi21_pcon_support)"
@@ -538,8 +565,52 @@ if [ "$WITH_DSC_HDMI21" = 1 ]; then
         die "PCON FRL bpc cap patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
+    step "apply CH7218 PCON quirk patch (opt-in amdgpu.bc250_ch7218_quirk)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$CH7218_PATCH" >/dev/null 2>&1; then
+        echo "CH7218 PCON quirk patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$CH7218_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$CH7218_PATCH"
+        echo "CH7218 PCON quirk patch applied"
+    else
+        die "CH7218 PCON quirk patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
+    # force-DSC must come after the CH7218 quirk — its retrieve_link_cap call
+    # site anchors on the CH7218 DSC-restore call.
+    step "apply PCON force-DSC patch (opt-in amdgpu.bc250_pcon_force_dsc)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FORCE_DSC_PATCH" >/dev/null 2>&1; then
+        echo "PCON force-DSC patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$FORCE_DSC_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$FORCE_DSC_PATCH"
+        echo "PCON force-DSC patch applied"
+    else
+        die "PCON force-DSC patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
+    step "apply Cyan Skillfish relink-after-long-blank patch (cs_relink_*)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$RELINK_PATCH" >/dev/null 2>&1; then
+        echo "relink-after-long-blank patch already applied"
+    elif patch -p1 --dry-run --fuzz=3 -s -f < "$RELINK_PATCH" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 -s < "$RELINK_PATCH"
+        echo "relink-after-long-blank patch applied"
+    else
+        die "relink-after-long-blank patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
+    fi
+
 else
     step "skipping DCN201 DSC + PCON HDMI 2.1 patches (not requested)"
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$RELINK_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$RELINK_PATCH"
+        echo "relink-after-long-blank patch REVERSED (leftover from a previous build)"
+    fi
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FORCE_DSC_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$FORCE_DSC_PATCH"
+        echo "PCON force-DSC patch REVERSED (leftover from a previous build)"
+    fi
+    if patch -p1 -R --dry-run --fuzz=3 -s -f < "$CH7218_PATCH" >/dev/null 2>&1; then
+        patch -p1 -R --fuzz=3 -s < "$CH7218_PATCH"
+        echo "CH7218 PCON quirk patch REVERSED (leftover from a previous build)"
+    fi
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$FRL_BPC_PATCH" >/dev/null 2>&1; then
         patch -p1 -R --fuzz=3 -s < "$FRL_BPC_PATCH"
         echo "PCON FRL bpc cap patch REVERSED (leftover from a previous build)"
