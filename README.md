@@ -1,5 +1,7 @@
 # BC-250 SteamOS Real Toolkit
 
+> 🧪 **SteamOS version requirement:** This toolkit only tracks the latest **SteamOS Beta/Preview** channel — currently kernel `7.2.4-valve1-1-neptune-72`. It is **not compatible with stable SteamOS 3.8**: the kernel patches are version-specific and won't build or install on older kernels. Make sure your system is on the Beta/Preview channel before installing.
+
 > ⚠️ **Disclaimer:** This toolkit changes low-level system settings (bootloader, kernel modules, power and overclock profiles) on unofficial BC-250 hardware. Use it at your own risk — the author and contributors are not responsible for any damage, data loss, or hardware failure. Always make sure your PSU, cabling, and cooling can handle overclocked profiles before applying them, and keep backups when possible.
 
 > ⚠️ **SteamOS updates:** an OS update can replace the kernel, modules, headers, boot configuration, or installed services. After **every SteamOS update**, check the toolkit status and be prepared to reinstall the affected components. This is especially important when the **Beta channel** is enabled. If an operation fails, the toolkit saves a diagnostic log in your home directory and copies it to the Desktop when available. The Desktop shortcut keeps the terminal open after the script exits so the error remains visible.
