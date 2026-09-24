@@ -1,5 +1,25 @@
-<!-- tags: troubleshooting, display, sync, black-screen, audio, crash, boot, diagnostics -->
+<!-- tags: troubleshooting, display, sync, black-screen, audio, crash, boot, diagnostics, pipx, governor -->
 # Troubleshooting
+
+## Services / Install Issues
+
+### bc250-smu-oc.service fails 203/EXEC after a SteamOS update
+- **Symptom**: `bc250-smu-oc.service` fails at boot with
+  `Unable to locate executable '/root/.local/share/pipx/venvs/bc250-smu-oc/bin/python'`
+  and toolkit repair reports "Failed to reinstall bc250_smu_oc via pipx".
+- **Root cause**: pipx ran as root → venv under `/root/.local/share/pipx`,
+  which lives on the read-only A/B rootfs. Every SteamOS update wipes it,
+  and repairs used to fail with EROFS because `pipx install` ran before
+  any `steamos-readonly disable`. `pipx reinstall` also can't handle
+  packages installed from a local path.
+- **Fix (v1.9.8+)**: the venv now lives under `/var/lib/bc250/pipx`
+  (`PIPX_HOME`, bins in `/var/lib/bc250/bin`) — writable without disabling
+  readonly and survives A/B updates. Repair just runs Install → CPU
+  Governor once; `bc250-apply --install` rewrites the unit's ExecStart
+  with the persistent interpreter automatically.
+- **Note**: user-installed pacman packages (python-pipx) are also wiped by
+  updates — `cpu_governor_ensure_pipx` now reinstalls pipx first when the
+  binary is missing.
 
 ## Display Issues
 

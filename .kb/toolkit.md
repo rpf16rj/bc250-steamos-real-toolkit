@@ -56,15 +56,35 @@ extras/                           # Optional add-ons (not in start.sh)
 - **Combined Fix** — single kernel build with selectable: audio + gfx1013 + vrr + allm
 - **EDID Override** — HF-VSDB for HDMI 2.1 PCON (FRL 48G, VRR 48-120, ALLM)
 - **AC-3 Surround** — HDMI/DP Dolby Digital 5.1 via eARC
-- **VA-API Encode Driver** — simpmix/bc250-encoding-decoding-fix; H.264/HEVC
-  encode via Vulkan compute + CPU SIMD (VCN is fused off). Downloaded from
-  GitHub `releases/latest` at install time; driver+shaders to `/var/lib/bc250`
-  (survives updates), env to `/etc/environment.d` + `/etc/profile.d`
-  (`LIBVA_DRIVER_NAME=bc250`, encode-only). The bundled DKMS audio module is
-  intentionally NOT installed — audio is the toolkit's own job. Manual: 14/14R.
+- **VA-API Video Driver** — simpmix/bc250-encoding-decoding-fix; since v0.5.0 a
+  full suite: H.264/HEVC encode + bit-exact H.264/HEVC decode (incl. Main10,
+  `VAEntrypointVLD`) + VideoProc scaling, via Vulkan compute + threaded CPU
+  wavefront (VCN is fused off — proven at register level 2026-09-23, see
+  `.kb/vcn.md`). Downloaded from GitHub `releases/latest` at
+  install time; driver+shaders to `/var/lib/bc250` (survives updates), env to
+  `/etc/environment.d` + `/etc/profile.d` (`LIBVA_DRIVER_NAME=bc250`). The
+  bundled DKMS audio module is intentionally NOT installed — audio is the
+  toolkit's own job. Manual: 14/14R.
+  **Flatpak caveat:** sandboxed apps don't inherit `/etc/environment.d` and
+  some manifests (e.g. Moonlight) explicitly unset `LIBVA_DRIVER_NAME`/
+  `LIBVA_DRIVERS_PATH`. Fix per app:
+  `flatpak override --user <app-id> --env=LIBVA_DRIVER_NAME=bc250
+  --env=LIBVA_DRIVERS_PATH=/var/lib/bc250/dri
+  --env=BC250_SHADER_DIR=/var/lib/bc250/shaders
+  --filesystem=/var/lib/bc250:ro` — verified working with
+  com.moonlight_stream.Moonlight 6.1.0 (VAAPI encode probe OK inside the
+  sandbox). Undo: `flatpak override --user --reset <app-id>`.
+  **Decode caveat (measured):** bc250 VLD decode ≈30 fps vs FFmpeg software
+  ≈510 fps at 1080p60 HEVC — Moonlight-as-client should stay on software
+  decoding (VAAPI decode caused ~2 fps + apparent "network drops" = decode
+  queue overflow). The driver's real win is host-side encode (~86 fps
+  HEVC 1080p measured in-sandbox).
 
 ### CPU/GPU
-- **CPU Governor** — bc250-smu-oc CPU overclock service
+- **CPU Governor** — bc250-smu-oc CPU overclock service. Installed via
+  pipx into the persistent `/var/lib/bc250/pipx` venv (`bc250_pipx`
+  wrapper sets `PIPX_HOME`/`PIPX_BIN_DIR` — NEVER use bare `pipx` as root:
+  it lands on the read-only `/root/.local` and dies every SteamOS update)
 - **GPU Governor** — cyan-skillfish GPU governor service
 - **CPU Core Unlock** — 6c/12t → 8c/16t (experimental, needs reboot)
 - **CU Live Manager** — WGP/CU live manager for GPU compute units

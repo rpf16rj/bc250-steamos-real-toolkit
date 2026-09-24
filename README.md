@@ -48,7 +48,7 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 - **BE200 Wi-Fi 7 firmware** — for Intel BE200/BE201 PCIe cards missing ucode
 - **DS5 Bridge PS Button fix** — DualSense chord combos via patched hid-playstation.ko
 - **DS5 Chord Config** — QAM-enabled chord configuration VDF patch
-- **VA-API encode driver** — H.264/HEVC hardware-accelerated encode for Sunshine/Steam Link/FFmpeg via Vulkan compute shaders + CPU SIMD (the BC-250's VCN block is fused off), installed under `/var/lib/bc250` so it survives SteamOS updates
+- **VA-API video driver** — H.264/HEVC encode for Sunshine/Steam Link/FFmpeg **plus** bit-exact H.264/HEVC decode (incl. HEVC Main10) for mpv/FFmpeg `--hwdec=vaapi`, via Vulkan compute shaders + threaded CPU wavefront (the BC-250's VCN block is fused off), installed under `/var/lib/bc250` so it survives SteamOS updates
 
 ### Monitoring & Control
 
@@ -122,6 +122,22 @@ This is a hardware limitation. The BC-250's DisplayPort 1.4 link provides 25.14 
 ### Random crashes or reboots under load
 
 If running 8 cores + 40 CUs, your PSU may be undersized. Try the **Mild (undervolt)** profile first. If crashes persist, revert to 6c/12t + 32 CUs and test stability.
+
+### Flatpak apps (Moonlight) don't see the VA-API driver
+
+Flatpak sandboxes don't inherit `/etc/environment.d`, and some apps — Moonlight included — explicitly **unset** `LIBVA_DRIVER_NAME`/`LIBVA_DRIVERS_PATH` in their manifest. Give the app a per-user override:
+
+```bash
+flatpak override --user com.moonlight_stream.Moonlight \
+  --env=LIBVA_DRIVER_NAME=bc250 \
+  --env=LIBVA_DRIVERS_PATH=/var/lib/bc250/dri \
+  --env=BC250_SHADER_DIR=/var/lib/bc250/shaders \
+  --filesystem=/var/lib/bc250:ro
+```
+
+Restart the app afterwards. To undo: `flatpak override --user --reset com.moonlight_stream.Moonlight`. The same pattern works for any Flatpak that should use the driver.
+
+> ⚠️ **Streaming client (Moonlight): keep software decoding.** The bc250 VLD decoder is a bit-exact CPU-wavefront implementation — measured ~30 fps vs ~510 fps for FFmpeg's software decoder at 1080p60 HEVC on the BC-250. If Moonlight shows ~2 fps and "network drops" with VAAPI enabled, that is the decode queue overflowing, not the network — set the video decoder back to Software. The driver's win is **encode** on the host side (~86 fps HEVC 1080p measured); decode is for apps that require `hwdec=vaapi` specifically.
 
 ### Build fails after SteamOS update
 

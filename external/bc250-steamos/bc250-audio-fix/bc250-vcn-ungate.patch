@@ -1,28 +1,21 @@
-Experimental: ungate VCN 2.0.3 on Cyan Skillfish 2 (BC-250, 0x13FE),
-runtime-gated by amdgpu.bc250_vcn_ungate=1 (default OFF).
+BC-250: experimental VCN 2.0.3 ungate — staged bring-up + EFI breadcrumb
 
-The driver deliberately skips VCN on CSF2 (amdgpu_discovery.c drops the
-2.0.3 case, the harvest mask kills the block, and the ucode name lookup
-has no 2.0.3 entry). This patch removes all three gates ONLY when the
-module parameter is set, so the patched kernel boots normally and the
-ungate is opt-in per boot:
+amdgpu.bc250_vcn_ungate=0  stock: VCN untouched (default)
+                          =1  reg-only: register IP block, skip early/sw_init
+                          =2  probe: + ucode parse + sw_init, zero VCN MMIO;
+                             VCN ucode is never submitted to the PSP (CSF2
+                             PSP returns ITEM_NOT_FOUND for LOAD_IP_FW 13)
+                          =3  full: real bring-up. Each stage logs a
+                             breadcrumb, persists the step name to the EFI
+                             var BC250VcnStep (survives a full CPU stall),
+                             then settles 200ms.
 
-    amdgpu.bc250_vcn_ungate=1   on the kernel cmdline
-
-With the flag set, the driver attempts a direct MMIO bring-up
-(navi10_vcn ucode, AMDGPU_FW_LOAD_DIRECT -- no PSP involvement).
-If the VCN register file is hardware-clamped by the PSP fuse, boot will
-hang or dmesg shows stuck/zero register reads -- recover by booting
-without the flag.
-
-Note: this patch is independent of the DSC/HDMI2.1 PCON patch
-(bc250_hdmi21 lives in bc250-dcn201-pcon-hdmi21.patch); it applies on a
-pristine tree and composes with it in either order.
-diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu.h b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
-index 77252a627..00846c9fb 100644
+After a =3 wedge, boot normally and read
+/sys/firmware/efi/efivars/BC250VcnStep-* : it holds the last completed
+stage; the killing MMIO is the next one in the sequence.
 --- a/drivers/gpu/drm/amd/amdgpu/amdgpu.h
 +++ b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
-@@ -264,6 +264,7 @@ extern int amdgpu_sg_display;
+@@ -267,6 +267,7 @@
  extern int amdgpu_umsch_mm;
  extern int amdgpu_seamless;
  extern int amdgpu_umsch_mm_fwlog;
@@ -30,11 +23,39 @@ index 77252a627..00846c9fb 100644
  
  extern int amdgpu_user_partt_mode;
  extern int amdgpu_agp;
-diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c
-index 47e0680ed..9c7dc9615 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+@@ -244,6 +244,7 @@
+ int amdgpu_indirect_sram = -1;
+ int amdgpu_umsch_mm;
+ int amdgpu_seamless = -1; /* auto */
++int amdgpu_bc250_vcn_ungate;
+ uint amdgpu_debug_mask;
+ int amdgpu_agp = -1; /* auto */
+ int amdgpu_wbrf = -1;
+@@ -1060,6 +1061,19 @@
+ module_param_named(umsch_mm_fwlog, amdgpu_umsch_mm_fwlog, int, 0444);
+ 
+ /**
++ * DOC: bc250_vcn_ungate (int)
++ * BC-250 (Cyan Skillfish 2, 0x13FE) only. Ungate the VCN 2.0.3 IP block:
++ * skip the harvest mask and register the vcn_v2_0 block.
++ * 0 = disabled (default), 1 = register the block only (no ucode, no
++ * sw_init, no MMIO), 2 = + ucode/sw_init but still zero VCN MMIO,
++ * 3 = full bring-up incl. MMIO (may wedge boot where VCN is clamped
++ * by the PSP fuse; test only). VCN ucode is never submitted through
++ * the PSP at any level — the TEE has no slot for it on this ASIC.
++ */
++MODULE_PARM_DESC(bc250_vcn_ungate, "BC-250: experimental VCN 2.0.3 ungate, direct MMIO bring-up (0 = disabled (default), 1 = register only, 2 = +fw/sw no MMIO, 3 = full)");
++module_param_named(bc250_vcn_ungate, amdgpu_bc250_vcn_ungate, int, 0444);
++
++/**
+  * DOC: smu_pptable_id (int)
+  * Used to override pptable id. id = 0 use VBIOS pptable.
+  * id > 0 use the soft pptable with specicfied id.
 --- a/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c
 +++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c
-@@ -494,6 +494,16 @@ static void amdgpu_discovery_harvest_config_quirk(struct amdgpu_device *adev)
+@@ -494,6 +494,16 @@
  			break;
  		}
  	}
@@ -51,7 +72,7 @@ index 47e0680ed..9c7dc9615 100644
  }
  
  static int amdgpu_discovery_verify_npsinfo(struct amdgpu_device *adev,
-@@ -1735,7 +1745,9 @@ static void amdgpu_discovery_harvest_ip(struct amdgpu_device *adev)
+@@ -1735,7 +1745,9 @@
  
  	amdgpu_discovery_harvest_config_quirk(adev);
  
@@ -62,50 +83,22 @@ index 47e0680ed..9c7dc9615 100644
  		adev->harvest_ip_mask |= AMD_HARVEST_IP_VCN_MASK;
  		adev->harvest_ip_mask |= AMD_HARVEST_IP_JPEG_MASK;
  	}
-@@ -2665,6 +2677,8 @@ static int amdgpu_discovery_set_mm_ip_blocks(struct amdgpu_device *adev)
+@@ -2665,6 +2677,12 @@
  				amdgpu_device_ip_block_add(adev, &jpeg_v2_0_ip_block);
  			break;
  		case IP_VERSION(2, 0, 3):
-+			if (amdgpu_bc250_vcn_ungate)
++			if (amdgpu_bc250_vcn_ungate) {
++				dev_warn(adev->dev,
++					 "BC-250: registering VCN 2.0.3 IP block (ungate=%d)\n",
++					 amdgpu_bc250_vcn_ungate);
 +				amdgpu_device_ip_block_add(adev, &vcn_v2_0_ip_block);
++			}
  			break;
  		case IP_VERSION(2, 5, 0):
  			amdgpu_device_ip_block_add(adev, &vcn_v2_5_ip_block);
-diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
-index 1d7f665bf..1d1f74ee0 100644
---- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
-+++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
-@@ -241,6 +241,7 @@ int amdgpu_user_partt_mode = AMDGPU_AUTO_COMPUTE_PARTITION_MODE;
- int amdgpu_indirect_sram = -1;
- int amdgpu_umsch_mm;
- int amdgpu_seamless = -1; /* auto */
-+int amdgpu_bc250_vcn_ungate;
- uint amdgpu_debug_mask;
- int amdgpu_agp = -1; /* auto */
- int amdgpu_wbrf = -1;
-@@ -1008,6 +1009,17 @@ module_param_named(umsch_mm, amdgpu_umsch_mm, int, 0444);
- MODULE_PARM_DESC(umsch_mm_fwlog, "Enable umschfw log(0 = disable (default value), 1 = enable)");
- module_param_named(umsch_mm_fwlog, amdgpu_umsch_mm_fwlog, int, 0444);
- 
-+/**
-+ * DOC: bc250_vcn_ungate (int)
-+ * BC-250 (Cyan Skillfish 2, 0x13FE) only. Ungate the VCN 2.0.3 IP block:
-+ * skip the harvest mask and register the vcn_v2_0 block so the driver
-+ * attempts a direct MMIO bring-up (navi10_vcn, no PSP). May wedge boot on
-+ * hardware where VCN is clamped by the PSP fuse; enable only for testing.
-+ * (0 = disabled (default), 1 = enabled)
-+ */
-+MODULE_PARM_DESC(bc250_vcn_ungate, "BC-250: experimental VCN 2.0.3 ungate, direct MMIO bring-up (0 = disabled (default), 1 = enabled)");
-+module_param_named(bc250_vcn_ungate, amdgpu_bc250_vcn_ungate, int, 0444);
-+
- /**
-  * DOC: smu_pptable_id (int)
-  * Used to override pptable id. id = 0 use VBIOS pptable.
-diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c
-index 6d9e96fab..aa4e34c87 100644
 --- a/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c
 +++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c
-@@ -1364,6 +1364,8 @@ static const char *amdgpu_ucode_legacy_naming(struct amdgpu_device *adev, int bl
+@@ -1364,6 +1364,8 @@
  			if (adev->asic_type == CHIP_NAVI12)
  				return "navi12_vcn";
  			return "navi14_vcn";
@@ -114,3 +107,393 @@ index 6d9e96fab..aa4e34c87 100644
  		case IP_VERSION(3, 0, 0):
  		case IP_VERSION(3, 0, 64):
  		case IP_VERSION(3, 0, 192):
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_psp.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_psp.c
+@@ -3524,8 +3524,25 @@
+ 		    ucode->ucode_id == AMDGPU_UCODE_ID_IMU_D))
+ 			continue;
+ 
++		/* BC-250: the PSP TEE has no VCN firmware slot on Cyan
++		 * Skillfish — LOAD_IP_FW type 13 is rejected and may wedge
++		 * the KM ring. With the ungate param set, keep VCN ucode
++		 * out of PSP submission; the VCPU boots it via the
++		 * driver-programmed LMI path in vcn_v2_0_start(). */
++		if (amdgpu_bc250_vcn_ungate &&
++		    ucode->ucode_id == AMDGPU_UCODE_ID_VCN) {
++			dev_warn(adev->dev,
++				 "BC-250: VCN ucode kept out of PSP ip_fw_load\n");
++			continue;
++		}
++
+ 		psp_print_fw_hdr(psp, ucode);
+ 
++		if (amdgpu_bc250_vcn_ungate)
++			dev_warn(adev->dev,
++				 "BC-250: PSP ip_fw_load ucode_id=%d\n",
++				 ucode->ucode_id);
++
+ 		ret = psp_execute_ip_fw_load(psp, ucode);
+ 		if (ret)
+ 			return ret;
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_vcn.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_vcn.c
+@@ -1482,6 +1482,10 @@
+ 	struct amdgpu_device *adev = ip_block->adev;
+ 	int ret = 0, i;
+ 
++	/* BC-250 (bc250_vcn_ungate=1 or 2): no VCN MMIO at all */
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return 0;
++
+ 	for (i = 0; i < adev->vcn.num_vcn_inst; ++i) {
+ 		struct amdgpu_vcn_inst *vinst = &adev->vcn.inst[i];
+ 
+@@ -1584,6 +1588,10 @@
+ 	bool is_powered;
+ 	u32 inst_off;
+ 
++	/* BC-250 (ungate=1 or 2): VCN regs may be unreadable — never dump */
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return;
++
+ 	if (!adev->vcn.ip_dump)
+ 		return;
+ 
+@@ -1613,6 +1621,10 @@
+ 	bool is_powered;
+ 	u32 inst_off;
+ 
++	/* BC-250 (ungate=1 or 2): VCN regs may be unreadable — never dump */
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return;
++
+ 	if (!adev->vcn.ip_dump)
+ 		return;
+ 
+--- a/drivers/gpu/drm/amd/amdgpu/vcn_v2_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/vcn_v2_0.c
+@@ -21,7 +21,9 @@
+  *
+  */
+ 
++#include <linux/delay.h>
+ #include <linux/firmware.h>
++#include <linux/efi.h>
+ #include <drm/drm_drv.h>
+ 
+ #include "amdgpu.h"
+@@ -98,6 +100,46 @@
+ static int vcn_v2_0_pause_dpg_mode(struct amdgpu_vcn_inst *vinst,
+ 				   struct dpg_pause_state *new_state);
+ static int vcn_v2_0_start_sriov(struct amdgpu_device *adev);
++
++/* BC-250 ungate instrumentation: at bc250_vcn_ungate>=3 emit a
++ * breadcrumb and settle 200ms before each MMIO stage, so journald
++ * keeps the last marker if a register access wedges the fabric.
++ * The step name is also persisted to the EFI variable
++ * "BC250VcnStep-<guid>" — a fabric wedge can stall the CPU so hard that
++ * NMI/panic/pstore/journald/console all die, but an NVRAM write that
++ * already completed survives. On the next boot the variable holds the
++ * last completed step; the killer is the next stage in the sequence.
++ * Read with: cat /sys/firmware/efi/efivars/BC250VcnStep-* */
++#define BC250_STEP_EFI_GUID \
++	EFI_GUID(0xb250cafe, 0xf00d, 0x4b1c, 0x8a, 0x3d, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55)
++
++static void bc250_vcn_persist_step(const char *msg)
++{
++#ifdef CONFIG_EFI
++	static efi_char16_t name[] =
++		{ 'B','C','2','5','0','V','c','n','S','t','e','p', 0 };
++	efi_guid_t guid = BC250_STEP_EFI_GUID;
++
++	if (!efi_enabled(EFI_RUNTIME_SERVICES))
++		return;
++
++	efivar_set_variable(name, &guid,
++			    EFI_VARIABLE_NON_VOLATILE |
++			    EFI_VARIABLE_BOOTSERVICE_ACCESS |
++			    EFI_VARIABLE_RUNTIME_ACCESS,
++			    strlen(msg) + 1, (void *)msg);
++#endif
++}
++MODULE_IMPORT_NS("EFIVAR");
++
++#define BC250_VCN_STEP(_adev, _msg)					\
++	do {								\
++		if (amdgpu_bc250_vcn_ungate >= 3) {			\
++			dev_warn((_adev)->dev, "BC-250: VCN %s\n", _msg); \
++			bc250_vcn_persist_step(_msg);			\
++			msleep(200);					\
++		}							\
++	} while (0)
+ static int vcn_v2_0_reset(struct amdgpu_vcn_inst *vinst);
+ 
+ /**
+@@ -112,6 +154,17 @@
+ {
+ 	struct amdgpu_device *adev = ip_block->adev;
+ 
++	/* BC-250 reg-only mode (bc250_vcn_ungate=1): the IP block is
++	 * registered by discovery but nothing else runs — no ucode
++	 * request, no PSP submission, no sw state. */
++	if (amdgpu_bc250_vcn_ungate == 1) {
++		dev_warn(adev->dev,
++			 "BC-250: VCN reg-only mode, early_init skipped\n");
++		return 0;
++	}
++	if (amdgpu_bc250_vcn_ungate)
++		dev_warn(adev->dev, "BC-250: VCN early_init\n");
++
+ 	if (amdgpu_sriov_vf(adev))
+ 		adev->vcn.inst[0].num_enc_rings = 1;
+ 	else
+@@ -139,6 +192,16 @@
+ 	struct amdgpu_device *adev = ip_block->adev;
+ 	struct amdgpu_fw_shared *fw_shared;
+ 
++	/* BC-250 reg-only mode: early_init already skipped, keep sw_init
++	 * out as well so nothing touches the block. */
++	if (amdgpu_bc250_vcn_ungate == 1) {
++		dev_warn(adev->dev,
++			 "BC-250: VCN reg-only mode, sw_init skipped\n");
++		return 0;
++	}
++	if (amdgpu_bc250_vcn_ungate)
++		dev_warn(adev->dev, "BC-250: VCN sw_init start\n");
++
+ 	/* VCN DEC TRAP */
+ 	r = amdgpu_irq_add_id(adev, SOC15_IH_CLIENTID_VCN,
+ 			      VCN_2_0__SRCID__UVD_SYSTEM_MESSAGE_INTERRUPT,
+@@ -252,7 +315,15 @@
+ {
+ 	int r, idx;
+ 	struct amdgpu_device *adev = ip_block->adev;
+-	struct amdgpu_fw_shared *fw_shared = adev->vcn.inst->fw_shared.cpu_addr;
++	struct amdgpu_fw_shared *fw_shared;
++
++	/* BC-250 (ungate=1 or 2): at level 1 sw_init never ran (fw_shared
++	 * NULL -> deref would crash shutdown); at level 2 the suspend below
++	 * reads VCN regs we must not touch. Skip teardown entirely. */
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return 0;
++
++	fw_shared = adev->vcn.inst->fw_shared.cpu_addr;
+ 
+ 	if (drm_dev_enter(adev_to_drm(adev), &idx)) {
+ 		fw_shared->present_flag_0 = 0;
+@@ -285,12 +356,27 @@
+ 	struct amdgpu_ring *ring = &adev->vcn.inst->ring_dec;
+ 	int i, r;
+ 
++	/* BC-250 (bc250_vcn_ungate=1 or 2): block registered, sw_init done
++	 * at level 2, but never touch the VCN register file. */
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2) {
++		dev_warn(adev->dev,
++			 "BC-250: VCN hw_init skipped (ungate=%d, no MMIO)\n",
++			 amdgpu_bc250_vcn_ungate);
++		return 0;
++	}
++	if (amdgpu_bc250_vcn_ungate)
++		dev_warn(adev->dev,
++			 "BC-250: VCN hw_init FULL mode — MMIO follows\n");
++
++	BC250_VCN_STEP(adev, "hw_init: doorbell_range (NBIO write)");
+ 	adev->nbio.funcs->vcn_doorbell_range(adev, ring->use_doorbell,
+ 					     ring->doorbell_index, 0);
++	BC250_VCN_STEP(adev, "hw_init: doorbell done");
+ 
+ 	if (amdgpu_sriov_vf(adev))
+ 		vcn_v2_0_start_sriov(adev);
+ 
++	BC250_VCN_STEP(adev, "hw_init: ring test (triggers VCPU boot)");
+ 	r = amdgpu_ring_test_helper(ring);
+ 	if (r)
+ 		return r;
+@@ -321,6 +407,9 @@
+ 	struct amdgpu_device *adev = ip_block->adev;
+ 	struct amdgpu_vcn_inst *vinst = adev->vcn.inst;
+ 
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return 0;
++
+ 	cancel_delayed_work_sync(&vinst->idle_work);
+ 
+ 	if ((adev->pg_flags & AMD_PG_SUPPORT_VCN_DPG) ||
+@@ -342,6 +431,9 @@
+ {
+ 	int r;
+ 
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return 0;
++
+ 	r = vcn_v2_0_hw_fini(ip_block);
+ 	if (r)
+ 		return r;
+@@ -362,6 +454,9 @@
+ {
+ 	int r;
+ 
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return 0;
++
+ 	r = amdgpu_vcn_resume(ip_block->adev, 0);
+ 	if (r)
+ 		return r;
+@@ -388,7 +483,11 @@
+ 		return;
+ 
+ 	/* cache window 0: fw */
+-	if (adev->firmware.load_type == AMDGPU_FW_LOAD_PSP) {
++	/* BC-250: the PSP never gets the VCN ucode (no TEE slot), so the
++	 * tmr_mc_addr is unset — always point the VCPU at the fw image
++	 * staged in the driver-owned BO. */
++	if (adev->firmware.load_type == AMDGPU_FW_LOAD_PSP &&
++	    !amdgpu_bc250_vcn_ungate) {
+ 		WREG32_SOC15(UVD, 0, mmUVD_LMI_VCPU_CACHE_64BIT_BAR_LOW,
+ 			(adev->firmware.ucode[AMDGPU_UCODE_ID_VCN].tmr_mc_addr_lo));
+ 		WREG32_SOC15(UVD, 0, mmUVD_LMI_VCPU_CACHE_64BIT_BAR_HIGH,
+@@ -777,7 +876,9 @@
+ 			| 2 << UVD_PGFSM_CONFIG__UVDTE_PWR_CONFIG__SHIFT
+ 			| 2 << UVD_PGFSM_CONFIG__UVDE_PWR_CONFIG__SHIFT);
+ 
++		BC250_VCN_STEP(adev, "PGFSM: config write (1st VCN reg touch)");
+ 		WREG32_SOC15(VCN, 0, mmUVD_PGFSM_CONFIG, data);
++		BC250_VCN_STEP(adev, "PGFSM: config done, poll status");
+ 		SOC15_WAIT_ON_RREG(VCN, 0, mmUVD_PGFSM_STATUS,
+ 			UVD_PGFSM_STATUS__UVDM_UVDU_PWR_ON_2_0, 0xFFFFF);
+ 	} else {
+@@ -791,7 +892,9 @@
+ 			| 1 << UVD_PGFSM_CONFIG__UVDTD_PWR_CONFIG__SHIFT
+ 			| 1 << UVD_PGFSM_CONFIG__UVDTE_PWR_CONFIG__SHIFT
+ 			| 1 << UVD_PGFSM_CONFIG__UVDE_PWR_CONFIG__SHIFT);
++		BC250_VCN_STEP(adev, "PGFSM: config write (1st VCN reg touch)");
+ 		WREG32_SOC15(VCN, 0, mmUVD_PGFSM_CONFIG, data);
++		BC250_VCN_STEP(adev, "PGFSM: config done, poll status");
+ 		SOC15_WAIT_ON_RREG(VCN, 0, mmUVD_PGFSM_STATUS, 0,  0xFFFFF);
+ 	}
+ 
+@@ -1007,22 +1110,38 @@
+ 	uint32_t lmi_swap_cntl;
+ 	int i, j, r;
+ 
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2) {
++		dev_warn(adev->dev, "BC-250: VCN MMIO blocked (ungate<3)\n");
++		return 0;
++	}
++	if (amdgpu_bc250_vcn_ungate)
++		dev_warn(adev->dev,
++			 "BC-250: VCN bring-up — touching MMIO now\n");
++
++	BC250_VCN_STEP(adev, "start: dpm_enable_vcn (SMU msg)");
+ 	if (adev->pm.dpm_enabled)
+ 		amdgpu_dpm_enable_vcn(adev, true, 0);
++	BC250_VCN_STEP(adev, "start: dpm returned");
+ 
+ 	if (adev->pg_flags & AMD_PG_SUPPORT_VCN_DPG)
+ 		return vcn_v2_0_start_dpg_mode(vinst, adev->vcn.inst->indirect_sram);
+ 
++	BC250_VCN_STEP(adev, "start: disable_static_power_gating (first MMIO)");
+ 	vcn_v2_0_disable_static_power_gating(vinst);
++	BC250_VCN_STEP(adev, "start: PGFSM done");
+ 
+ 	/* set uvd status busy */
++	BC250_VCN_STEP(adev, "start: UVD_STATUS busy");
+ 	tmp = RREG32_SOC15(UVD, 0, mmUVD_STATUS) | UVD_STATUS__UVD_BUSY;
+ 	WREG32_SOC15(UVD, 0, mmUVD_STATUS, tmp);
+ 
+ 	/*SW clock gating */
++	BC250_VCN_STEP(adev, "start: disable_clock_gating");
+ 	vcn_v2_0_disable_clock_gating(vinst);
++	BC250_VCN_STEP(adev, "start: CG done");
+ 
+ 	/* enable VCPU clock */
++	BC250_VCN_STEP(adev, "start: VCPU clk enable");
+ 	WREG32_P(SOC15_REG_OFFSET(UVD, 0, mmUVD_VCPU_CNTL),
+ 		UVD_VCPU_CNTL__CLK_EN_MASK, ~UVD_VCPU_CNTL__CLK_EN_MASK);
+ 
+@@ -1031,6 +1150,7 @@
+ 		~UVD_MASTINT_EN__VCPU_EN_MASK);
+ 
+ 	/* setup mmUVD_LMI_CTRL */
++	BC250_VCN_STEP(adev, "start: LMI_CTRL");
+ 	tmp = RREG32_SOC15(UVD, 0, mmUVD_LMI_CTRL);
+ 	WREG32_SOC15(UVD, 0, mmUVD_LMI_CTRL, tmp |
+ 		UVD_LMI_CTRL__WRITE_CLEAN_TIMER_EN_MASK	|
+@@ -1039,6 +1159,7 @@
+ 		UVD_LMI_CTRL__VCPU_DATA_COHERENCY_EN_MASK);
+ 
+ 	/* setup mmUVD_MPC_CNTL */
++	BC250_VCN_STEP(adev, "start: MPC setup");
+ 	tmp = RREG32_SOC15(UVD, 0, mmUVD_MPC_CNTL);
+ 	tmp &= ~UVD_MPC_CNTL__REPLACEMENT_MODE_MASK;
+ 	tmp |= 0x2 << UVD_MPC_CNTL__REPLACEMENT_MODE__SHIFT;
+@@ -1064,9 +1185,11 @@
+ 		(0x1 << UVD_MPC_SET_MUX__SET_1__SHIFT) |
+ 		(0x2 << UVD_MPC_SET_MUX__SET_2__SHIFT)));
+ 
++	BC250_VCN_STEP(adev, "start: mc_resume (LMI cache bars)");
+ 	vcn_v2_0_mc_resume(vinst);
+ 
+ 	/* release VCPU reset to boot */
++	BC250_VCN_STEP(adev, "start: VCPU reset release — VCPU boots");
+ 	WREG32_P(SOC15_REG_OFFSET(UVD, 0, mmUVD_SOFT_RESET), 0,
+ 		~UVD_SOFT_RESET__VCPU_SOFT_RESET_MASK);
+ 
+@@ -1087,6 +1210,7 @@
+ #endif
+ 	WREG32_SOC15(UVD, 0, mmUVD_LMI_SWAP_CNTL, lmi_swap_cntl);
+ 
++	BC250_VCN_STEP(adev, "start: VCPU status poll (fw alive?)");
+ 	for (i = 0; i < 10; ++i) {
+ 		uint32_t status;
+ 
+@@ -1115,6 +1239,7 @@
+ 		DRM_ERROR("VCN decode not responding, giving up!!!\n");
+ 		return r;
+ 	}
++	BC250_VCN_STEP(adev, "start: VCPU ALIVE — ring setup");
+ 
+ 	/* enable master interrupt */
+ 	WREG32_P(SOC15_REG_OFFSET(UVD, 0, mmUVD_MASTINT_EN),
+@@ -1380,6 +1505,9 @@
+ {
+ 	struct amdgpu_device *adev = ip_block->adev;
+ 
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return true;
++
+ 	return (RREG32_SOC15(VCN, 0, mmUVD_STATUS) == UVD_STATUS__IDLE);
+ }
+ 
+@@ -1388,6 +1516,9 @@
+ 	struct amdgpu_device *adev = ip_block->adev;
+ 	int ret;
+ 
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return 0;
++
+ 	ret = SOC15_WAIT_ON_RREG(VCN, 0, mmUVD_STATUS, UVD_STATUS__IDLE,
+ 		UVD_STATUS__IDLE);
+ 
+@@ -1400,6 +1531,9 @@
+ 	struct amdgpu_device *adev = ip_block->adev;
+ 	bool enable = (state == AMD_CG_STATE_GATE);
+ 
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return 0;
++
+ 	if (amdgpu_sriov_vf(adev))
+ 		return 0;
+ 
+@@ -1868,6 +2002,11 @@
+ 	int ret;
+ 	struct amdgpu_device *adev = vinst->adev;
+ 
++	/* BC-250 (ungate=1 or 2): block the lazy start/stop MMIO path —
++	 * this fires from ring begin_use and idle work as well. */
++	if (amdgpu_bc250_vcn_ungate == 1 || amdgpu_bc250_vcn_ungate == 2)
++		return 0;
++
+ 	if (amdgpu_sriov_vf(adev)) {
+ 		vinst->cur_state = AMD_PG_STATE_UNGATE;
+ 		return 0;
