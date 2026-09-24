@@ -9,6 +9,56 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## Unreleased
 
+## v1.9.9 — 2026-09-23
+
+**Novidades:**
+
+- **CPU Governor agora sobrevive a updates do SteamOS** — o serviço de
+  overclock morria a cada atualização do sistema (o venv do pipx ficava
+  na partição raiz read-only) e o reparo falhava com "Failed to reinstall
+  bc250_smu_oc via pipx". O venv agora mora em `/var/lib/bc250` junto com
+  o driver de vídeo, então updates não o apagam mais — e consertar uma
+  instalação já quebrada é uma única execução de Install → CPU Governor.
+- **Investigação de decode por hardware no VCN: encerrada** — o bloco VCN
+  do BC-250 está eletricamente morto (provado em nível de registrador: a
+  primeira leitura de registrador de status trava o fabric PCIe e para a
+  CPU). Decode de vídeo por hardware não é alcançável nesta placa; o
+  caminho recomendado pra decode cliente é software (FFmpeg ≈ 510 fps a
+  1080p60 HEVC vs ~30 fps do decoder por compute do toolkit). As entradas
+  temporárias de teste do VCN foram removidas do menu de boot.
+- **Docs do driver de vídeo** — o item VA-API agora é apresentado como
+  driver de vídeo completo (o upstream v0.5.0 adiciona decode bit-exact
+  de H.264/HEVC incl. Main10 + scaling VideoProc), mais uma receita de
+  `flatpak override` pra apps em sandbox como Moonlight carregarem o
+  driver, e uma nota de requisito SteamOS Beta/Preview nos READMEs (o
+  toolkit mira o kernel `7.2.4-valve1-1-neptune-72`, não o SteamOS 3.8
+  estável).
+
+**Detalhes técnicos:**
+
+- **Corrigido:** novo wrapper `bc250_pipx` — todas as chamadas pipx do
+  CPU governor agora usam `PIPX_HOME=/var/lib/bc250/pipx` +
+  `PIPX_BIN_DIR=/var/lib/bc250/bin` em vez do `/root/.local/share/pipx`
+  padrão, que fica no rootfs A/B read-only. O caminho de reparo não
+  precisa mais de `steamos-readonly disable`, remove o `pipx reinstall`
+  (quebrado pra pacotes instalados de path local) e reinstala o próprio
+  pipx primeiro quando o update apagou o binário. O revert limpa os dois
+  homes de venv (novo e legado).
+- **Removido:** entradas de teste do VCN ungate no GRUB (reg-only /
+  probe / FULL) — o param em estágios `amdgpu.bc250_vcn_ungate` continua
+  no build `--vcn` pra diagnóstico manual, inerte no `=0` padrão.
+- **Alterado:** `bc250-vcn-ungate.patch` passa a ser só diagnóstico —
+  níveis de bring-up em estágios (1 reg-only, 2 probe/sem-MMIO, 3 full),
+  ucode VCN fora do `ip_fw_load` do PSP, e breadcrumbs `BC250_VCN_STEP`
+  por estágio que também persistem o nome do estágio na variável EFI
+  `BC250VcnStep` — o breadcrumb em NVRAM que sobreviveu a um travamento
+  total de CPU e provou o bloco morto (leitura de `mmUVD_PGFSM_STATUS`).
+  `build.sh` agora reseta `amdgpu_psp.c` junto com os demais arquivos VCN.
+- **KB:** `.kb/vcn.md` documenta o veredito completo e as técnicas de
+  captura usadas no caminho (perda do tail do journald no wedge do
+  fabric, morte do pipeline de display, breadcrumb em variável EFI,
+  `fbcon=vc:4-6` escondendo o console verbose).
+
 ## v1.9.8 — 2026-09-22
 
 **Novidades:**

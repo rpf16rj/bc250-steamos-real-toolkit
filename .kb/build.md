@@ -50,6 +50,10 @@ applies patches, builds only the amdgpu.ko module, and installs it.
   (propagated through `runuser` via `patch_env`) and also skips the Mesa
   prebuilt in `gfx1013_try_mesa_prebuilt`.
 - Accepts flags: `--audio`, `--gfx1013`, `--vrr`, `--allm`, `--no-audio-clock`, `--no-ss`, `--no-telemetry`, `--no-ttm`, `--no-sclk`, `--no-kfd`, `--no-frl-hp`, `--no-ycbcr444`, `--mastag-mesh`, `--native-mesh`, `--vcn`, `--no-prebuilt`
+- `--vcn` is diagnostic-only: the investigation concluded 2026-09-23 that
+  the VCN register file is electrically dead (first read wedges the
+  fabric). The staged `bc250_vcn_ungate` param stays inert at `=0` — see
+  `.kb/vcn.md` → "Verdict" before ever using level 3
 - All `--no-*` flags skip individual patches and reverse leftovers from previous builds
 
 ### package-prebuilt.sh (maintainer)

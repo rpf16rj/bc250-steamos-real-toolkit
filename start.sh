@@ -744,35 +744,61 @@ aur_remove() {
 # GOVERNORS
 # ==============================================================================
 
+# pipx home lives on the persistent /var/lib/bc250 volume — NOT the default
+# ~/.local/share/pipx. Running pipx as root puts the venv under /root/.local
+# which sits on the read-only A/B rootfs: every SteamOS update wipes it and
+# any repair attempt fails with EROFS, leaving bc250-smu-oc.service dead
+# (203/EXEC on the venv interpreter). /var is writable and survives updates
+# (the VA-API driver already lives in /var/lib/bc250).
+BC250_PIPX_HOME="/var/lib/bc250/pipx"
+BC250_PIPX_BIN_DIR="/var/lib/bc250/bin"
+
+bc250_pipx() {
+    mkdir -p "$BC250_PIPX_HOME" "$BC250_PIPX_BIN_DIR" 2>/dev/null || true
+    PIPX_HOME="$BC250_PIPX_HOME" PIPX_BIN_DIR="$BC250_PIPX_BIN_DIR" pipx "$@"
+}
+
 cpu_governor_installed() {
     systemctl is-enabled bc250-smu-oc.service &>/dev/null || \
-        pipx list 2>&1 | grep -q 'bc250-smu-oc'
+        bc250_pipx list 2>&1 | grep -q 'bc250-smu-oc'
 }
 
 cpu_governor_venv_healthy() {
-    export PATH="$PATH:/root/.local/bin:/home/deck/.local/bin"
+    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:/home/deck/.local/bin"
     command -v bc250-detect &>/dev/null && bc250-detect --help &>/dev/null
+}
+
+cpu_governor_ensure_pipx() {
+    command -v pipx &>/dev/null && return 0
+    print_info "pipx missing (SteamOS update wipes user-installed pacman packages) — reinstalling..."
+    if ! steamos_writable 'pacman -Syu python-pipx --noconfirm'; then
+        python3 -m ensurepip --default-pip 2>/dev/null || true
+        pip3 install --break-system-packages pipx 2>/dev/null || pip3 install pipx 2>/dev/null || {
+            fail_with_log "Failed to install pipx (pacman and pip fallback both failed). Try: pacman -S python-pipx or pip3 install pipx manually." "CPU Governor — pipx dependency"
+            return 1
+        }
+    fi
 }
 
 cpu_governor_repair_venv() {
     print_info "bc250-detect venv is broken (likely after SteamOS update). Reinstalling..."
-    pipx reinstall bc250-smu-oc 2>/dev/null || {
-        pipx uninstall bc250-smu-oc 2>/dev/null || true
-        local cpu_gov_dir="$EXTERNAL_DIR/bc250_smu_oc"
-        if [[ ! -d "$cpu_gov_dir" ]]; then
-            fail_with_log "Vendored bc250_smu_oc not found at $cpu_gov_dir." "CPU Governor — missing vendored repo for venv repair"
-            return 1
-        fi
-        pushd "$cpu_gov_dir" >/dev/null || return 1
-        run_with_retry "pipx install ." "pipx install bc250_smu_oc" || {
-            fail_with_log "Failed to reinstall bc250_smu_oc via pipx." "CPU Governor — pipx reinstall"
-            popd >/dev/null || true
-            return 1
-        }
+    cpu_governor_ensure_pipx || return 1
+    # NOTE: 'pipx reinstall' cannot handle packages installed from a local
+    # path — go straight to uninstall + install.
+    bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
+    local cpu_gov_dir="$EXTERNAL_DIR/bc250_smu_oc"
+    if [[ ! -d "$cpu_gov_dir" ]]; then
+        fail_with_log "Vendored bc250_smu_oc not found at $cpu_gov_dir." "CPU Governor — missing vendored repo for venv repair"
+        return 1
+    fi
+    pushd "$cpu_gov_dir" >/dev/null || return 1
+    run_with_retry "bc250_pipx install ." "pipx install bc250_smu_oc" || {
+        fail_with_log "Failed to reinstall bc250_smu_oc via pipx." "CPU Governor — pipx reinstall"
         popd >/dev/null || true
+        return 1
     }
-    pipx ensurepath || true
-    export PATH="$PATH:/root/.local/bin"
+    popd >/dev/null || true
+    export PATH="$BC250_PIPX_BIN_DIR:$PATH"
     print_success "bc250-detect venv repaired."
 }
 
@@ -780,7 +806,7 @@ cpu_governor_setup() {
     print_step "01-S" "CPU Governor — Configuration Setup"
 
     # Ensure pipx-installed binaries are on PATH regardless of install path
-    export PATH="$PATH:/root/.local/bin:/home/deck/.local/bin"
+    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:/home/deck/.local/bin"
     # Also pick up pipx ensurepath output if available
     command -v pipx &>/dev/null && eval "$(pipx ensurepath --shell 2>/dev/null || true)" || true
 
@@ -840,7 +866,7 @@ run_cpu_governor() {
             print_info "Removing existing installation..."
             systemctl stop bc250-smu-oc.service 2>/dev/null || true
             systemctl disable bc250-smu-oc.service 2>/dev/null || true
-            pipx uninstall bc250-smu-oc 2>/dev/null || true
+            bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
             [[ -f /etc/bc250-smu-oc.conf ]] && rm -f /etc/bc250-smu-oc.conf
             [[ -d "bc250_smu_oc" ]] && rm -rf "bc250_smu_oc"
         else
@@ -871,11 +897,10 @@ run_cpu_governor() {
     print_info "Using vendored bc250_smu_oc repository..."
     pushd "$CPU_GOVERNOR_DIR" >/dev/null || return 1
     print_info "Installing via pipx..."
-    pipx uninstall bc250-smu-oc 2>/dev/null || true
-    run_with_retry "pipx install ." "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
+    bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
+    run_with_retry "bc250_pipx install ." "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
     popd >/dev/null || true
-    pipx ensurepath || true
-    export PATH="$PATH:/root/.local/bin"
+    export PATH="$BC250_PIPX_BIN_DIR:$PATH"
 
     if ! cpu_governor_venv_healthy; then
         print_info "pipx install completed but bc250-detect is still not working. Attempting reinstall..."
@@ -942,6 +967,7 @@ run_revert_cpu_governor() {
     print_step "R-1" "Revert CPU Governor — Removing bc250-smu-oc"
 
     if ! systemctl is-enabled bc250-smu-oc.service &>/dev/null && \
+       ! bc250_pipx list 2>/dev/null | grep -q 'bc250-smu-oc' && \
        ! pipx list 2>/dev/null | grep -q 'bc250-smu-oc'; then
         print_info "CPU governor does not appear to be installed — nothing to revert."
         return 0
@@ -954,6 +980,8 @@ run_revert_cpu_governor() {
 
     systemctl stop bc250-smu-oc.service 2>/dev/null || true
     systemctl disable bc250-smu-oc.service 2>/dev/null || true
+    bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
+    # Also clear any legacy venv under the default pipx home (/root/.local)
     pipx uninstall bc250-smu-oc 2>/dev/null || true
     [[ -f /etc/bc250-smu-oc.conf ]] && rm -f /etc/bc250-smu-oc.conf
     print_success "CPU governor removed successfully."
@@ -3233,9 +3261,10 @@ ac3_pactl() {
 
 AC3_USER_SCRIPT="$SCRIPT_DIR/extras/hdmi-ac3-encoding/ac3-user-setup.sh"
 
-# --- VA-API encode driver (simpmix/bc250-encoding-decoding-fix) ---------------
+# --- VA-API video driver (simpmix/bc250-encoding-decoding-fix) ----------------
 # The BC-250's VCN block is fused off at the factory; this driver exposes VA-API
-# H.264/HEVC *encode* implemented with Vulkan compute shaders + CPU SIMD.
+# encode AND decode (H.264/HEVC incl. Main10, VideoProc scaling) implemented
+# with Vulkan compute shaders + threaded CPU wavefront/SIMD.
 # Driver + shaders live in /var/lib/bc250 (survives SteamOS A/B updates); only
 # the env files live in /etc and are rewritten by the persistence re-apply.
 # NOTE: the upstream bundle also ships a DKMS audio module (bc250_audio_fix) —
@@ -3278,14 +3307,14 @@ vaapi_reapply_env() {
 
 install_vaapi_driver() {
     local auto="${1:-}"
-    print_step "VAAPI" "Install VA-API Encode Driver (H.264/HEVC via Vulkan compute)"
+    print_step "VAAPI" "Install VA-API Video Driver (H.264/HEVC encode+decode via Vulkan compute)"
 
     echo -e "  ${DIM}  simpmix/bc250-encoding-decoding-fix — the VCN block is fused off on${RESET}"
-    echo -e "  ${DIM}  the BC-250; this driver exposes VA-API encode (h264_vaapi/hevc_vaapi)${RESET}"
-    echo -e "  ${DIM}  implemented with Vulkan compute shaders + CPU SIMD instead.${RESET}"
-    echo -e "  ${DIM}  Used by Sunshine/Moonlight, Steam Link, OBS and FFmpeg. Encode-only.${RESET}"
-    echo -e "  ${DIM}  Sets LIBVA_DRIVER_NAME=bc250 system-wide — hardware decode stays${RESET}"
-    echo -e "  ${DIM}  unavailable either way (VCN is fused off).${RESET}"
+    echo -e "  ${DIM}  the BC-250; this driver exposes VA-API encode AND decode instead:${RESET}"
+    echo -e "  ${DIM}  h264_vaapi/hevc_vaapi encoders + bit-exact H.264/HEVC decoders${RESET}"
+    echo -e "  ${DIM}  (incl. HEVC Main10), via Vulkan compute + threaded CPU wavefront.${RESET}"
+    echo -e "  ${DIM}  Used by Sunshine/Moonlight, Steam Link, OBS, FFmpeg and mpv --hwdec=vaapi.${RESET}"
+    echo -e "  ${DIM}  Sets LIBVA_DRIVER_NAME=bc250 system-wide.${RESET}"
     echo ""
 
     if vaapi_driver_installed; then
@@ -3338,22 +3367,23 @@ install_vaapi_driver() {
     persist_state_add "vaapi"
     rm -rf "$work"
 
-    print_success "VA-API encode driver installed (driver + shaders in $VAAPI_STATE_DIR)."
+    print_success "VA-API video driver installed (driver + shaders in $VAAPI_STATE_DIR)."
     print_info "Start a new session (or reboot) for LIBVA_DRIVER_NAME=bc250 to apply."
-    print_info "Test: LIBVA_DRIVER_NAME=bc250 ffmpeg -init_hw_device vaapi=va:/dev/dri/renderD128 -f lavfi -i testsrc=duration=2:size=1920x1080:rate=60 -vf 'format=nv12,hwupload' -c:v hevc_vaapi -f null -"
+    print_info "Encode test: LIBVA_DRIVER_NAME=bc250 ffmpeg -init_hw_device vaapi=va:/dev/dri/renderD128 -f lavfi -i testsrc=duration=2:size=1920x1080:rate=60 -vf 'format=nv12,hwupload' -c:v hevc_vaapi -f null -"
+    print_info "Decode test: mpv --hwdec=vaapi <file> (H.264/HEVC incl. 10-bit)."
     print_info "Sunshine note: its cap_sys_admin binary can't see env vars — use upstream's"
     print_info "tools/install_vaapi_boot_redirect.sh if you stream with Sunshine."
 }
 
 run_revert_vaapi_driver() {
-    print_step "R-VAAPI" "Revert VA-API Encode Driver"
+    print_step "R-VAAPI" "Revert VA-API Video Driver"
 
     if ! vaapi_driver_installed && [[ ! -d "$VAAPI_STATE_DIR" ]]; then
         print_info "VA-API driver is not installed — nothing to revert."
         return 0
     fi
 
-    if ! confirm "Remove the VA-API encode driver and its environment config?"; then
+    if ! confirm "Remove the VA-API video driver and its environment config?"; then
         print_info "Cancelled."
         return 0
     fi
@@ -3365,7 +3395,7 @@ run_revert_vaapi_driver() {
     rm -rf /usr/local/share/bc250 2>/dev/null || true
     persist_state_remove "vaapi"
 
-    print_success "VA-API encode driver removed."
+    print_success "VA-API video driver removed."
     print_info "Start a new session (or reboot) to clear LIBVA_DRIVER_NAME from the environment."
 }
 
@@ -4586,8 +4616,10 @@ install_combined_fix() {
     fi
 
     # VCN 2.0.3 ungate intentionally NOT in the checklist: it wedged boot on
-    # real hardware and is runtime-gated behind amdgpu.bc250_vcn_ungate=1.
-    # Test only via patch-driver.sh --vcn (see .kb/vcn.md).
+    # real hardware and is runtime-gated behind amdgpu.bc250_vcn_ungate=N
+    # (1=register only, 2=+fw/sw no MMIO, 3=full bring-up; GRUB emits all
+    # three test entries). Test only via patch-driver.sh --vcn
+    # (see .kb/vcn.md).
 
     echo -e "  ${DIM}Groups: Performance/Graphics | Hardware | Experimental (DP/HDMI Port)${RESET}"
     pick_items "Select patches to include:" "${checklist_items[@]}"
@@ -4722,9 +4754,9 @@ install_combined_fix() {
         [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
         if [[ $do_vcn -eq 1 ]]; then
             echo ""
-            echo -e "  ${YELLOW}VCN ungate is experimental.${RESET} ${DIM}After reboot check:${RESET}"
-            echo -e "  ${DIM}  dmesg | grep -iE 'vcn|uvd' — look for 'detected ip block <vcn_v2_0_0>'${RESET}"
-            echo -e "  ${DIM}  ring test pass = VCN alive; stuck/zero regs = PSP hardware clamp confirmed${RESET}"
+            echo -e "  ${YELLOW}VCN ungate is experimental.${RESET} ${DIM}GRUB now has 3 test entries — try in order:${RESET}"
+            echo -e "  ${DIM}  reg-only (1) -> probe (2) -> FULL (3); journalctl -k -b | grep -i 'bc-250\\|vcn'${RESET}"
+            echo -e "  ${DIM}  first level that wedges = the killer stage (breadcrumbs mark every step)${RESET}"
         fi
         if [[ $do_dsc -eq 1 ]]; then
             echo ""
@@ -5934,7 +5966,7 @@ oc_run_bc250_detect() {
     echo -e "  ${YELLOW}⚠  toward your limits. Monitor temperatures; abort (Ctrl+C) if anything looks wrong.${RESET}"
     echo ""
 
-    export PATH="$PATH:/root/.local/bin:/home/deck/.local/bin"
+    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:/home/deck/.local/bin"
     command -v pipx &>/dev/null && eval "$(pipx ensurepath --shell 2>/dev/null || true)" || true
     if ! command -v bc250-detect &>/dev/null; then
         fail_with_log "bc250-detect not found in PATH. Install the CPU Governor first (Install Manual 1)." "bc250-detect — missing"
@@ -6554,7 +6586,7 @@ run_install_all_step() {
 }
 
 run_install_all() {
-    print_step "00" "Install All — Recovery Entries + Swap/ZSWAP + Mitigations + ACPI + RAM/VRAM + Sensor PWM + CoolerControl + Core Unlock + Validation + CPU/GPU Governor + CU Live Manager + Combined Fix + AC-3 Surround + VA-API Encode"
+    print_step "00" "Install All — Recovery Entries + Swap/ZSWAP + Mitigations + ACPI + RAM/VRAM + Sensor PWM + CoolerControl + Core Unlock + Validation + CPU/GPU Governor + CU Live Manager + Combined Fix + AC-3 Surround + VA-API Video"
     if [[ -f "$INSTALL_ALL_PROGRESS" ]]; then
         if confirm "A previous Install All did not finish. Continue from where it stopped?"; then
             print_info "Resuming previous Install All..."
@@ -6582,7 +6614,7 @@ run_install_all() {
     run_install_all_step 13 16 "Installing CU Live Manager" run_cu_live_manager || return 1
     run_install_all_step 14 16 "Installing Combined Fix" install_combined_fix || return 1
     run_install_all_step 15 16 "Installing AC-3 Surround" install_ac3_surround auto || return 1
-    run_install_all_step 16 16 "Installing VA-API Encode Driver" install_vaapi_driver auto || true
+    run_install_all_step 16 16 "Installing VA-API Video Driver" install_vaapi_driver auto || true
 
     install_all_progress_clear
     print_success "Install All completed!"
@@ -6654,8 +6686,8 @@ run_install_manual() {
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "13"  "Install FSR4 Proton (MastaG)"     "Pre-built Proton + OptiScaler + FSR4 + fakenvapi — 3 variants (GE/Native/SLR)"
         print_item "13R" "Revert FSR4 Proton"              "Remove FSR4 Proton compatibility tool"
-        print_item "14"  "Install VA-API Encode Driver"    "H.264/HEVC encode via Vulkan compute (VCN fused off) — Sunshine/Steam Link/FFmpeg"
-        print_item "14R" "Revert VA-API Encode Driver"     "Remove bc250 VA-API driver + env config"
+        print_item "14"  "Install VA-API Video Driver"     "H.264/HEVC encode+decode via Vulkan compute (VCN fused off) — Sunshine/Steam Link/mpv/FFmpeg"
+        print_item "14R" "Revert VA-API Video Driver"      "Remove bc250 VA-API driver + env config"
         print_item "0"  "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -7248,6 +7280,11 @@ emit_entry() {
 
 emit_entry "SteamOS (BC-250 recovery: HDMI21-DSC OFF)" "amdgpu.bc250_hdmi21=0"
 
+# NOTE: the experimental VCN ungate GRUB entries were removed after the
+# 2026-09-23 verdict — the VCN register file is electrically dead (first
+# read wedges the fabric; see .kb/vcn.md). The bc250_vcn_ungate param
+# remains in the --vcn module for manual diagnostics only.
+
 # NOTE: no "revert toolkit" menu entry — bc250.revert_all=1 needs a working
 # userspace boot to run its systemd unit, which is useless exactly when it
 # matters (kernel wedge). The flag still works when typed manually on a
@@ -7310,7 +7347,7 @@ install_recovery_entries() {
     recovery_menu_conf_load
     [[ -f $RECOVERY_MENU_CONF ]] || recovery_menu_conf_write "$RECOVERY_MENU" "$RECOVERY_TIMEOUT"
 
-    if [[ "$auto" != "auto" ]] && ! confirm "This adds entries to the GRUB menu and shows the menu for ${RECOVERY_TIMEOUT}s at boot (SteamOS hides it by default): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0) and 'pre-install kernel+initramfs' (boots the stock snapshot taken before the display driver install — appears once a Combined Fix install has run). Proceed?"; then
+    if [[ "$auto" != "auto" ]] && ! confirm "This adds entries to the GRUB menu and shows the menu for ${RECOVERY_TIMEOUT}s at boot (SteamOS hides it by default): 'HDMI21-DSC OFF' (amdgpu.bc250_hdmi21=0), 'VCN probe' (amdgpu.bc250_vcn_ungate=1 — registers the IP without touching it) and 'VCN ungate FULL' (amdgpu.bc250_vcn_ungate=2 — real bring-up, may wedge; both inert without a --vcn module) and 'pre-install kernel+initramfs' (boots the stock snapshot taken before the display driver install — appears once a Combined Fix install has run). Proceed?"; then
         print_info "Cancelled."
         return 0
     fi

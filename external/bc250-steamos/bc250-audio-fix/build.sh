@@ -332,6 +332,11 @@ git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c \
     drivers/gpu/drm/amd/display/dc/link/link_detection.c \
     drivers/gpu/drm/amd/display/dc/link/link_validation.c \
+    drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c \
+    drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.c \
+    drivers/gpu/drm/amd/amdgpu/amdgpu_vcn.c \
+    drivers/gpu/drm/amd/amdgpu/amdgpu_psp.c \
+    drivers/gpu/drm/amd/amdgpu/vcn_v2_0.c \
     drivers/crypto/ccp/psp-dev.c \
     drivers/crypto/ccp/sp-pci.c
 

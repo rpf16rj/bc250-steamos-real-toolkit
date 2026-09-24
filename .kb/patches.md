@@ -89,16 +89,23 @@ All patches live in `external/bc250-steamos/bc250-audio-fix/`.
 - **Optional**: User selects in combined fix
 - **Mesa**: Requires patched Mesa/RADV build (build-mesa.sh)
 
-### bc250-vcn-ungate.patch (EXPERIMENTAL — hidden from menu)
-- **Purpose**: Ungate VCN 2.0.3 on Cyan Skillfish 2 for a direct MMIO
-  bring-up test (navi10_vcn ucode, AMDGPU_FW_LOAD_DIRECT, no PSP)
-- **Runtime gate**: `amdgpu.bc250_vcn_ungate=1` cmdline param, default 0 —
-  patched kernel boots normally, ungate is opt-in per boot
-- **NOT in combined-fix checklist**: unconditional version wedged boot;
-  enable only via `patch-driver.sh --vcn` for testing
+### bc250-vcn-ungate.patch (DIAGNOSTIC ONLY — investigation concluded 2026-09-23)
+- **Verdict**: VCN block is electrically dead — `mmUVD_PGFSM_CONFIG` write
+  completes (posted write) but the first `mmUVD_PGFSM_STATUS` **read**
+  wedges the fabric so hard the CPU stalls mid-transaction (no NMI, no
+  panic, display dies instantly). HW video decode on BC-250 is impossible
+  (CSF SMU has no VCN power feature). See `.kb/vcn.md` → "Verdict"
+- **Purpose (diagnostic)**: staged ungate — `amdgpu.bc250_vcn_ungate=`
+  `1` reg-only / `2` probe (ucode+sw_init, zero MMIO) / `3` full
+- **Runtime gate**: default `0` = fully inert, patched kernel is stock
+- **NOT in combined-fix checklist**: enable only via `patch-driver.sh
+  --vcn` for diagnostics; =3 wedges boot by design territory
+- **Bonus**: the patch carries `bc250_vcn_persist_step()` — an EFI-var
+  breadcrumb technique reusable for any wedge that kills
+  panic/pstore/journald/console
 - **Ordering**: independent of the PCON patch — all hunks anchored on
   pristine lines (never regenerate with `git diff` while PCON hunks are
-  uncommitted in the tree)
+  uncommitted in the tree; never diff against stale `.orig` bases)
 - **Full notes**: `.kb/vcn.md`
 
 ## Patch Application Order

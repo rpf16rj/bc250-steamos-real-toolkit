@@ -1,5 +1,7 @@
 # BC-250 SteamOS Real Toolkit
 
+> 🧪 **Versão do SteamOS exigida:** este toolkit acompanha apenas o canal **Beta/Preview** mais recente do SteamOS — atualmente o kernel `7.2.4-valve1-1-neptune-72`. Ele **não é compatível com o SteamOS 3.8 estável**: os patches de kernel são específicos de versão e não compilam nem instalam em kernels mais antigos. Confirme que seu sistema está no canal Beta/Preview antes de instalar.
+
 > ⚠️ **Aviso de responsabilidade:** esta ferramenta altera configurações de baixo nível do sistema (bootloader, módulos do kernel, perfis de energia e overclock) em um hardware BC-250 não oficial. Use por sua conta e risco — o autor e os colaboradores não se responsabilizam por qualquer dano, perda de dados ou falha de hardware. Sempre verifique se sua fonte, cabeamento e refrigeração suportam os perfis de overclock antes de aplicá-los, e mantenha backups sempre que possível.
 
 > ⚠️ **Atualizações do SteamOS:** uma atualização pode substituir o kernel, módulos, headers, configuração de boot ou serviços instalados. Depois de **toda atualização do SteamOS**, consulte o status do toolkit e esteja preparado para reinstalar os componentes afetados. Isso é especialmente importante se o canal **Beta** estiver ativo. Se ocorrer um erro, o toolkit salva um log de diagnóstico na sua pasta pessoal e também o copia para a Área de Trabalho quando possível. O atalho da Área de Trabalho mantém o terminal aberto depois que o script termina, permitindo visualizar o erro.
@@ -46,7 +48,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 - **Firmware BE200 Wi-Fi 7** — para placas PCIe Intel BE200/BE201 sem ucode
 - **Fix do PS Button do DS5 Bridge** — chord combos do DualSense via hid-playstation.ko patchado
 - **DS5 Chord Config** — patch VDF para configuração de chords com QAM habilitado
-- **Driver VA-API de encode** — encode H.264/HEVC acelerado para Sunshine/Steam Link/FFmpeg via compute shaders Vulkan + SIMD de CPU (o bloco VCN do BC-250 vem desativado de fábrica), instalado em `/var/lib/bc250` para sobreviver a updates do SteamOS
+- **Driver VA-API de vídeo** — encode H.264/HEVC para Sunshine/Steam Link/FFmpeg **mais** decode bit-exact de H.264/HEVC (incl. HEVC Main10) para mpv/FFmpeg `--hwdec=vaapi`, via compute shaders Vulkan + CPU wavefront multi-thread (o bloco VCN do BC-250 vem desativado de fábrica), instalado em `/var/lib/bc250` para sobreviver a updates do SteamOS
 
 ### Monitoramento & Controle
 
@@ -120,6 +122,22 @@ Isso é uma limitação de hardware. O link DisplayPort 1.4 do BC-250 fornece 25
 ### Travamentos ou reinicializações aleatórias sob carga
 
 Se estiver rodando 8 núcleos + 40 CUs, sua fonte pode estar subdimensionada. Tente o perfil **Mild (undervolt)** primeiro. Se os travamentos persistirem, reverta para 6c/12t + 32 CUs e teste a estabilidade.
+
+### Apps Flatpak (Moonlight) não enxergam o driver VA-API
+
+Sandboxes Flatpak não herdam o `/etc/environment.d`, e alguns apps — incluindo o Moonlight — explicitamente fazem **unset** de `LIBVA_DRIVER_NAME`/`LIBVA_DRIVERS_PATH` no manifest. Dê um override por usuário pro app:
+
+```bash
+flatpak override --user com.moonlight_stream.Moonlight \
+  --env=LIBVA_DRIVER_NAME=bc250 \
+  --env=LIBVA_DRIVERS_PATH=/var/lib/bc250/dri \
+  --env=BC250_SHADER_DIR=/var/lib/bc250/shaders \
+  --filesystem=/var/lib/bc250:ro
+```
+
+Reinicie o app depois. Para desfazer: `flatpak override --user --reset com.moonlight_stream.Moonlight`. O mesmo padrão serve pra qualquer Flatpak que deva usar o driver.
+
+> ⚠️ **Cliente de streaming (Moonlight): mantenha decode por software.** O decoder VLD do bc250 é uma implementação CPU-wavefront bit-exact — medido ~30 fps vs ~510 fps do decoder por software do FFmpeg a 1080p60 HEVC no BC-250. Se o Moonlight mostrar ~2 fps e "network drops" com VAAPI, é a fila de decode transbordando, não a rede — volte o video decoder pra Software. O ganho do driver está no **encode** do lado host (~86 fps HEVC 1080p medido); o decode serve pra apps que exigem `hwdec=vaapi` especificamente.
 
 ### Build falha após atualização do SteamOS
 
