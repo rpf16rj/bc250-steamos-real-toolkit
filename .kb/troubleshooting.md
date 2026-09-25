@@ -19,7 +19,20 @@
   with the persistent interpreter automatically.
 - **Note**: user-installed pacman packages (python-pipx) are also wiped by
   updates — `cpu_governor_ensure_pipx` now reinstalls pipx first when the
-  binary is missing.
+  binary is missing **or broken** (an update can leave `/usr/bin/pipx`
+  present but dead, e.g. its site-packages removed by a Python minor bump —
+  so the check is `pipx --version`, not just `command -v`).
+- **pipx itself as last resort**: if pacman is unavailable, a self-contained
+  pipx is built at `/var/lib/bc250/pipx-venv` (update-proof, rebuilt
+  automatically when broken). `bc250_pipx` prefers the vendored shim over a
+  dead system binary. The old `pip3 install pipx` fallback was removed — it
+  could never work on SteamOS (writes to read-only `/usr` outside
+  `steamos_writable`).
+- **PyPI-free build**: `python-setuptools` is installed alongside pipx so
+  `cpu_governor_pipx_install` can use `--system-site-packages` +
+  `--pip-args "--no-build-isolation"` — the governor build then needs no
+  network at all. Without setuptools it falls back to a normal isolated
+  install (PyPI).
 
 ## Display Issues
 

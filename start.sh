@@ -752,10 +752,32 @@ aur_remove() {
 # (the VA-API driver already lives in /var/lib/bc250).
 BC250_PIPX_HOME="/var/lib/bc250/pipx"
 BC250_PIPX_BIN_DIR="/var/lib/bc250/bin"
+# Self-contained pipx venv, also on the persistent volume — last-resort
+# fallback when pacman is unavailable, and it survives A/B updates.
+BC250_PIPX_VENV="/var/lib/bc250/pipx-venv"
 
 bc250_pipx() {
     mkdir -p "$BC250_PIPX_HOME" "$BC250_PIPX_BIN_DIR" 2>/dev/null || true
-    PIPX_HOME="$BC250_PIPX_HOME" PIPX_BIN_DIR="$BC250_PIPX_BIN_DIR" pipx "$@"
+    # A wiped pacman package can leave a dead /usr/bin/pipx behind (binary
+    # present, site-packages gone after a Python minor bump) — prefer the
+    # vendored pipx whenever the system one is missing or broken.
+    local pipx_bin="pipx"
+    if ! command -v pipx &>/dev/null || ! pipx --version &>/dev/null; then
+        [[ -x "$BC250_PIPX_VENV/bin/pipx" ]] && pipx_bin="$BC250_PIPX_VENV/bin/pipx"
+    fi
+    PIPX_HOME="$BC250_PIPX_HOME" PIPX_BIN_DIR="$BC250_PIPX_BIN_DIR" "$pipx_bin" "$@"
+}
+
+# Install the governor. When the system python has setuptools, force a fully
+# local build (--system-site-packages + --no-build-isolation) so pip never
+# touches PyPI — otherwise fall back to a normal isolated (PyPI) install.
+cpu_governor_pipx_install() {
+    if python3 -c 'import setuptools' &>/dev/null && \
+       bc250_pipx install --help 2>&1 | grep -q 'system-site-packages'; then
+        bc250_pipx install --force --system-site-packages --pip-args "--no-build-isolation" .
+    else
+        bc250_pipx install --force .
+    fi
 }
 
 cpu_governor_installed() {
@@ -764,20 +786,32 @@ cpu_governor_installed() {
 }
 
 cpu_governor_venv_healthy() {
-    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:/home/deck/.local/bin"
+    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:${REAL_HOME:-/root}/.local/bin"
     command -v bc250-detect &>/dev/null && bc250-detect --help &>/dev/null
 }
 
 cpu_governor_ensure_pipx() {
-    command -v pipx &>/dev/null && return 0
-    print_info "pipx missing (SteamOS update wipes user-installed pacman packages) — reinstalling..."
-    if ! steamos_writable 'pacman -Syu python-pipx --noconfirm'; then
-        python3 -m ensurepip --default-pip 2>/dev/null || true
-        pip3 install --break-system-packages pipx 2>/dev/null || pip3 install pipx 2>/dev/null || {
-            fail_with_log "Failed to install pipx (pacman and pip fallback both failed). Try: pacman -S python-pipx or pip3 install pipx manually." "CPU Governor — pipx dependency"
-            return 1
-        }
+    # Existence alone is not enough: an update can leave /usr/bin/pipx
+    # present but dead (its site-packages were wiped by a Python bump).
+    command -v pipx &>/dev/null && pipx --version &>/dev/null && return 0
+    [[ -x "$BC250_PIPX_VENV/bin/pipx" ]] && "$BC250_PIPX_VENV/bin/pipx" --version &>/dev/null && return 0
+
+    print_info "pipx missing or broken (SteamOS update wipes pacman packages) — reinstalling..."
+    if steamos_writable 'pacman -Syu --noconfirm --needed python-pipx python-setuptools'; then
+        command -v pipx &>/dev/null && pipx --version &>/dev/null && return 0
     fi
+
+    # Last resort: self-contained pipx on the persistent /var volume. Needs
+    # PyPI once, then survives updates and is rebuilt here when broken.
+    print_info "pacman route unavailable — building self-contained pipx in $BC250_PIPX_VENV..."
+    if python3 -m venv --clear "$BC250_PIPX_VENV" && \
+       "$BC250_PIPX_VENV/bin/pip" install -q pipx && \
+       "$BC250_PIPX_VENV/bin/pipx" --version &>/dev/null; then
+        print_success "Using vendored pipx at $BC250_PIPX_VENV (survives SteamOS updates)."
+        return 0
+    fi
+    fail_with_log "Failed to install pipx (pacman and vendored-venv fallback both failed). Try: sudo pacman -S python-pipx" "CPU Governor — pipx dependency"
+    return 1
 }
 
 cpu_governor_repair_venv() {
@@ -792,7 +826,7 @@ cpu_governor_repair_venv() {
         return 1
     fi
     pushd "$cpu_gov_dir" >/dev/null || return 1
-    run_with_retry "bc250_pipx install ." "pipx install bc250_smu_oc" || {
+    run_with_retry "cpu_governor_pipx_install" "pipx install bc250_smu_oc" || {
         fail_with_log "Failed to reinstall bc250_smu_oc via pipx." "CPU Governor — pipx reinstall"
         popd >/dev/null || true
         return 1
@@ -806,7 +840,7 @@ cpu_governor_setup() {
     print_step "01-S" "CPU Governor — Configuration Setup"
 
     # Ensure pipx-installed binaries are on PATH regardless of install path
-    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:/home/deck/.local/bin"
+    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:${REAL_HOME:-/root}/.local/bin"
     # Also pick up pipx ensurepath output if available
     command -v pipx &>/dev/null && eval "$(pipx ensurepath --shell 2>/dev/null || true)" || true
 
@@ -876,18 +910,12 @@ run_cpu_governor() {
         fi
     fi
 
-    print_info "Installing dependencies: pipx, stress"
-    if ! steamos_writable 'pacman -Syu python-pipx stress --noconfirm'; then
-        print_info "python-pipx not in pacman repos — trying pip fallback..."
-        steamos_writable 'pacman -Syu stress --noconfirm' || true
-        if ! command -v pipx &>/dev/null; then
-            python3 -m ensurepip --default-pip 2>/dev/null || true
-            pip3 install --break-system-packages pipx 2>/dev/null || pip3 install pipx 2>/dev/null || {
-                fail_with_log "Failed to install pipx (pacman and pip fallback both failed). Try: pacman -S python-pipx or pip3 install pipx manually." "CPU Governor Install — pipx dependency"
-                return 1
-            }
-        fi
-    fi
+    print_info "Installing dependencies: pipx, setuptools, stress"
+    cpu_governor_ensure_pipx || return 1
+    # setuptools enables the PyPI-free pipx build; stress is optional (stress
+    # helper). Both best-effort — their absence is not fatal.
+    steamos_writable 'pacman -S --noconfirm --needed python-setuptools stress' || \
+        print_warning "Could not install python-setuptools/stress — continuing (pipx will fetch build deps from PyPI)."
 
     CPU_GOVERNOR_DIR="$EXTERNAL_DIR/bc250_smu_oc"
     if [[ ! -d "$CPU_GOVERNOR_DIR" ]]; then
@@ -898,7 +926,7 @@ run_cpu_governor() {
     pushd "$CPU_GOVERNOR_DIR" >/dev/null || return 1
     print_info "Installing via pipx..."
     bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
-    run_with_retry "bc250_pipx install ." "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
+    run_with_retry "cpu_governor_pipx_install" "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
     popd >/dev/null || true
     export PATH="$BC250_PIPX_BIN_DIR:$PATH"
 
@@ -5966,7 +5994,7 @@ oc_run_bc250_detect() {
     echo -e "  ${YELLOW}⚠  toward your limits. Monitor temperatures; abort (Ctrl+C) if anything looks wrong.${RESET}"
     echo ""
 
-    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:/home/deck/.local/bin"
+    export PATH="$BC250_PIPX_BIN_DIR:$PATH:/root/.local/bin:${REAL_HOME:-/root}/.local/bin"
     command -v pipx &>/dev/null && eval "$(pipx ensurepath --shell 2>/dev/null || true)" || true
     if ! command -v bc250-detect &>/dev/null; then
         fail_with_log "bc250-detect not found in PATH. Install the CPU Governor first (Install Manual 1)." "bc250-detect — missing"
