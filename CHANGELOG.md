@@ -9,6 +9,27 @@ before the toolkit adopted numbered releases.
 
 ## Unreleased
 
+## v1.9.10 — 2026-09-25
+
+**Fixes:**
+
+- **CPU Governor install is now resilient end-to-end** — four more
+  failure modes in the pipx path are closed:
+  - `pipx` that survived a SteamOS update in name only (binary present,
+    site-packages wiped by a Python minor bump) is now detected via
+    `pipx --version` and reinstalled, instead of crashing mid-install.
+  - The old `pip3 install pipx` fallback — which could never work on
+    SteamOS (it writes to the read-only `/usr`) — was replaced by a
+    self-contained pipx at `/var/lib/bc250/pipx-venv` that survives
+    updates and rebuilds itself when broken.
+  - `python-setuptools` is installed alongside pipx so the governor
+    package builds **without touching PyPI** (`--system-site-packages` +
+    `--no-build-isolation`); offline and flaky-network installs now work.
+  - `pipx install --force` so a half-finished earlier attempt no longer
+    blocks reinstall.
+- PATH fixes: remaining `/home/deck` hardcodes now use the real user's
+  home directory.
+
 ## v1.9.9 — 2026-09-23
 
 **What's new:**
