@@ -13,6 +13,17 @@ como histórico datado de antes da adoção de versões numeradas.
 
 **Correções:**
 
+- **Guard rígido de kernel** — instalações dependentes de kernel
+  (Combined Fix, GFX1013, audio fix, DS5 bridge, sensores, drivers WiFi)
+  agora se recusam a iniciar em kernels anteriores a 7.2, em vez de
+  falhar no meio do build. O mínimo tinha ficado em 6.18 quando o
+  toolkit migrou pra árvore `linux-neptune-72`, e o caminho do DS5
+  bridge nem guard tinha. A mensagem de bloqueio inclui instruções
+  passo a passo de atualização (Modo Game + terminal) e link pro novo
+  guia do README "Atualizando o SteamOS para o kernel 7.2". Componentes
+  não-dependentes de kernel (governors, swap, mitigations) continuam
+  instalando no 6.18.
+
 - **Instalação do CPU Governor agora resiliente de ponta a ponta** —
   mais quatro modos de falha no caminho do pipx foram fechados:
   - `pipx` que sobreviveu a um update do SteamOS só no nome (binário

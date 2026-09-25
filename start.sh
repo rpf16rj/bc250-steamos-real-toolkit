@@ -202,8 +202,11 @@ exec > >(tee -a "$TOOLKIT_RUN_LOG") 2>&1
 
 TOOLKIT_VERSION="v$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.0.0")"
 REPO_URL="https://github.com/rpf16rj/bc250-steamos-real-toolkit"
-MIN_KERNEL_MAJOR=6
-MIN_KERNEL_MINOR=18
+# Kernel patches target the Valve linux-neptune-72 tree only (kernel 7.2.x,
+# SteamOS Beta/Preview channel — stable 3.8 ships 6.18 and cannot build them).
+MIN_KERNEL_MAJOR=7
+MIN_KERNEL_MINOR=2
+KERNEL_UPGRADE_URL="${REPO_URL}#updating-steamos-to-kernel-72"
 CHANGELOG_URL="${REPO_URL}/blob/main/CHANGELOG.md"
 RELEASES_URL="${REPO_URL}/releases/latest"
 
@@ -479,26 +482,28 @@ kernel_version_ok() {
 require_kernel_version() {
     if kernel_version_ok; then return 0; fi
     echo -e "  ${BOLD}${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "  ${BOLD}${RED}Kernel incompatible — SteamOS $(uname -r) detected.${RESET}"
-    echo -e "  ${BOLD}${RED}This feature requires SteamOS kernel ${MIN_KERNEL_MAJOR}.${MIN_KERNEL_MINOR} or newer.${RESET}"
-    echo -e "  ${BOLD}${YELLOW}Update SteamOS to the Beta channel: Settings → System → System Update Channel → Beta.${RESET}"
-    echo -e "  ${BOLD}${YELLOW}Then run a system update and reboot before trying again.${RESET}"
+    echo -e "  ${BOLD}${RED}Kernel incompatible — $(uname -r) detected.${RESET}"
+    echo -e "  ${BOLD}${RED}This feature requires SteamOS kernel ${MIN_KERNEL_MAJOR}.${MIN_KERNEL_MINOR}+ (Beta/Preview channel).${RESET}"
+    echo -e "  ${BOLD}${RED}Installation aborted — nothing was changed.${RESET}"
+    echo ""
+    echo -e "  ${BOLD}${YELLOW}How to update:${RESET}"
+    echo -e "  ${YELLOW}  Game Mode : Settings → System → System Update Channel → Preview${RESET}"
+    echo -e "  ${YELLOW}              → Check For Updates → Apply → restart${RESET}"
+    echo -e "  ${YELLOW}  Terminal  : sudo steamos-select-branch preview && sudo steamos-update${RESET}"
+    echo ""
+    echo -e "  ${BOLD}${CYAN}  Full guide: ${KERNEL_UPGRADE_URL}${RESET}"
     echo -e "  ${BOLD}${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
     return 1
 }
 
 warn_legacy_kernel() {
-    local kver kmajor
-    kver="$(uname -r)"
-    kmajor="${kver%%.*}"
-    [[ "$kmajor" -ge 7 ]] && return 0
+    kernel_version_ok && return 0
     echo -e "  ${BOLD}${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "  ${BOLD}${YELLOW}⚠  This toolkit version requires SteamOS 3.9+ / kernel 7.x.${RESET}"
+    echo -e "  ${BOLD}${YELLOW}⚠  This toolkit requires SteamOS kernel ${MIN_KERNEL_MAJOR}.${MIN_KERNEL_MINOR}+ (Beta/Preview channel).${RESET}"
     echo -e "  ${YELLOW}   Current kernel: $(uname -r)${RESET}"
-    echo -e "  ${YELLOW}   To use this toolkit, update to the Beta Preview channel:${RESET}"
-    echo -e "  ${DIM}   Settings → System → System Update Channel → Beta Preview${RESET}"
-    echo -e "  ${YELLOW}   or use toolkit v1.7.3 which supports kernel 6.x.${RESET}"
+    echo -e "  ${YELLOW}   Kernel-dependent installs are BLOCKED on this kernel.${RESET}"
+    echo -e "  ${YELLOW}   Update SteamOS first — guide: ${KERNEL_UPGRADE_URL}${RESET}"
     echo -e "  ${BOLD}${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
 }
@@ -3194,6 +3199,7 @@ run_revert_ds5_chord_vdf() {
 
 install_ds5_bridge_fix() {
     print_step "DS5-BRIDGE" "Installing DS5 Bridge PS Button Fix (patched hid-playstation.ko)"
+    require_kernel_version || return 1
 
     echo -e "  ${YELLOW}⚠  This builds and installs a patched hid-playstation.ko kernel module.${RESET}"
     echo -e "  ${YELLOW}⚠  A bad build can prevent the DualSense driver from loading at boot.${RESET}"

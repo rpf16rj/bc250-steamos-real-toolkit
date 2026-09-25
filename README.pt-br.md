@@ -66,11 +66,29 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 ## Sistema Compatível
 
-- SteamOS real (testado na versão 3.8.21 beta e 3.10 com kernel 7.2)
+- SteamOS real no canal **Beta/Preview** — kernel `7.2.x` (`linux-neptune-72`; testado no SteamOS 3.10)
 - Placa AMD BC-250
 - Acesso root e conexão com a internet
 
-> **Atualizando para SteamOS 3.10 / kernel 7.2:** ative o Modo Desenvolvedor (Configurações → Sistema → Modo Desenvolvedor), depois ative Canais de Atualização Avançados e troque o canal para **Main**. Após a atualização, rode Install All de novo para reaplicar os patches do toolkit no novo kernel.
+> **O SteamOS 3.8 estável vem com kernel 6.18 — as instalações dependentes de kernel são bloqueadas nele.** Se o toolkit mostrar mensagem de kernel incompatível, atualize primeiro (abaixo).
+
+## Atualizando o SteamOS para o kernel 7.2
+
+Os patches de kernel do toolkit são feitos para a árvore `linux-neptune-72` da Valve (kernel `7.2.x`), que o SteamOS entrega no canal **Beta/Preview**. Se você está no estável (`6.18.x`), troque de canal e atualize:
+
+**Modo Game:**
+`Configurações → Sistema → Canal de Atualização do Sistema` → selecione **Preview** (ou **Beta**) → `Verificar atualizações` → `Aplicar` → reinicie.
+
+**Modo Desktop (Konsole):**
+
+```bash
+sudo steamos-select-branch preview   # ou: beta
+sudo steamos-update                  # baixa e prepara a atualização
+# reinicie, depois verifique:
+uname -r   # deve mostrar 7.2.x-...-neptune-72-...
+```
+
+Depois de atualizar, rode **Install All** de novo — cada componente se reaplica para o novo kernel.
 
 ## Instalação Rápida
 
