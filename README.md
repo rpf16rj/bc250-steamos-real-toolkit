@@ -66,11 +66,29 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 ## Compatible System
 
-- Real SteamOS (tested on 3.8.21 beta and 3.10 with kernel 7.2)
+- Real SteamOS on the **Beta/Preview channel** — kernel `7.2.x` (`linux-neptune-72`; tested on SteamOS 3.10)
 - AMD BC-250 board
 - Root access and an internet connection
 
-> **Updating to SteamOS 3.10 / kernel 7.2:** enable Developer Mode (Settings → System → Developer Mode), then enable Advanced Update Channels and switch the update channel to **Main**. After the update, run Install All again to reapply the toolkit patches for the new kernel.
+> **Stable SteamOS 3.8 ships kernel 6.18 — kernel-dependent installs are blocked there.** If the toolkit shows a kernel incompatibility message, update first (below).
+
+## Updating SteamOS to kernel 7.2
+
+The toolkit's kernel patches are built for Valve's `linux-neptune-72` tree (kernel `7.2.x`), which SteamOS delivers on the **Beta/Preview** channel. If you're on stable (`6.18.x`), switch channels and update:
+
+**Game Mode:**
+`Settings → System → System Update Channel` → select **Preview** (or **Beta**) → `Check For Updates` → `Apply` → restart.
+
+**Desktop Mode (Konsole):**
+
+```bash
+sudo steamos-select-branch preview   # or: beta
+sudo steamos-update                  # downloads and stages the update
+# reboot, then verify:
+uname -r   # should print 7.2.x-...-neptune-72-...
+```
+
+After updating, run **Install All** again — every component re-applies itself for the new kernel.
 
 ## Quick Start
 

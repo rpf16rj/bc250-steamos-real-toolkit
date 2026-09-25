@@ -3,6 +3,22 @@
 
 ## Services / Install Issues
 
+### "Kernel incompatible" / build fails on SteamOS 3.8 (kernel 6.18)
+- **Symptom**: Combined Fix or any kernel-patch item fails during the build,
+  e.g. `error: pathspec 'drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c'
+  did not match any file(s)`.
+- **Root cause**: the toolkit's kernel patches target Valve's
+  `linux-neptune-72` tree (kernel 7.2.x, SteamOS Beta/Preview). Stable 3.8
+  ships kernel 6.18 — the patch paths don't exist in that tree.
+  `MIN_KERNEL_*` was left at 6.18 when the toolkit moved to 7.2, so the
+  version guard silently let 6.18 through (fixed: guard is now 7.2+ and the
+  DS5-bridge path was the only unguarded patch-driver caller).
+- **Fix**: update to the Beta/Preview channel — README section "Updating
+  SteamOS to kernel 7.2" (`#updating-steamos-to-kernel-72`), also printed by
+  `require_kernel_version` at block time. Non-kernel components (CPU/GPU
+  governor, swap, mitigations) still install on 6.18.
+
+
 ### bc250-smu-oc.service fails 203/EXEC after a SteamOS update
 - **Symptom**: `bc250-smu-oc.service` fails at boot with
   `Unable to locate executable '/root/.local/share/pipx/venvs/bc250-smu-oc/bin/python'`
