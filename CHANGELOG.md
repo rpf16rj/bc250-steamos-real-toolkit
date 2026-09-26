@@ -9,6 +9,28 @@ before the toolkit adopted numbered releases.
 
 ## Unreleased
 
+## v1.9.11 — 2026-09-26
+
+**Fixes:**
+
+- **CPU Governor install actually works again** — the v1.9.10 local-build
+  path passed `--pip-args --no-build-isolation` as a separate argument,
+  which pipx's argparse rejects. Now uses the `--pip-args=` form, and
+  falls back to a standard isolated install if the local build fails for
+  any reason.
+- **VA-API driver v0.5.1 loads again ("hardware absent" fix)** — the new
+  upstream driver links the versioned symbol `x264_encoder_open_163`,
+  which SteamOS's `libx264.so.165` cannot satisfy (x264 embeds its soname
+  in symbol names). The missing `DT_NEEDED` failed the whole `dlopen` —
+  decode included — so Moonlight/vainfo reported no hardware. The
+  installer now ldd-checks both driver .so files and provisions the exact
+  `libx264.so.<N>` into `/var/lib/bc250/lib{,32}` (Arch archive for
+  amd64, Debian snapshot for i386), plus `ld.so.conf.d` + `ldconfig`.
+  `vaapi_driver_installed` requires deps to resolve, so broken installs
+  self-heal on reinstall/re-apply. Flatpak apps also need
+  `LD_LIBRARY_PATH=/var/lib/bc250/lib:/var/lib/bc250/lib32` in their
+  overrides (sandboxes ignore host ld.so.conf.d) — documented in the KB.
+
 ## v1.9.10 — 2026-09-25
 
 **Fixes:**
