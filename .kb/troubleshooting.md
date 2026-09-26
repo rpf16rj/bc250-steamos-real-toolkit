@@ -50,6 +50,29 @@
   network at all. Without setuptools it falls back to a normal isolated
   install (PyPI).
 
+### Moonlight/VA-API reports "hardware absent" after v0.5.1 driver upgrade
+- **Symptom**: `LIBVA_DRIVER_NAME=bc250` set, driver file present at
+  `/var/lib/bc250/dri/bc250_drv_video.so`, but every VA-API client (mpv,
+  Moonlight, Steam Link, vainfo) sees no driver. `ldd` on the .so shows
+  `libx264.so.163 => not found`.
+- **Root cause**: upstream v0.5.1 links the **versioned** symbol
+  `x264_encoder_open_163` — x264's SONAME is embedded in the symbol name,
+  so a system libx264 with a different soname (SteamOS ships .165) can
+  never satisfy it, and a symlink does not help. The missing DT_NEEDED
+  fails the whole `dlopen` — decode included. The 32-bit companion driver
+  has the same dependency and SteamOS ships no lib32-x264.
+- **Fix (auto in installer)**: `vaapi_ensure_runtime_deps` ldd-checks both
+  .so files and provisions the exact SONAME into `/var/lib/bc250/lib{,32}`
+  — amd64 from the Arch Linux Archive `x264` package, i386 from the
+  Debian snapshot `libx264-<N>` .deb — then writes
+  `/etc/ld.so.conf.d/99-bc250-vaapi.conf` + `ldconfig`. Private lib dir
+  survives A/B updates; the ld conf lives in /etc and is recreated by the
+  persistence re-apply like the env files.
+- **Note**: upstream's published HEVC decode numbers (323fps 1080p) are on
+  JCT-VC conformance vectors carrying WPP `entry_point_offsets`. Real
+  Sunshine/NVENC streams lack WPP offsets → serial decode ≈26-30fps.
+  Client decode should stay on software (FFmpeg ≈500fps+ 1080p60).
+
 ## Display Issues
 
 ### Sync instability / black screen on mode switch

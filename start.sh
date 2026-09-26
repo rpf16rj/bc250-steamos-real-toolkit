@@ -779,10 +779,12 @@ bc250_pipx() {
 cpu_governor_pipx_install() {
     if python3 -c 'import setuptools' &>/dev/null && \
        bc250_pipx install --help 2>&1 | grep -q 'system-site-packages'; then
-        bc250_pipx install --force --system-site-packages --pip-args "--no-build-isolation" .
-    else
-        bc250_pipx install --force .
+        # NOTE: --pip-args must use '=' form — argparse rejects values that
+        # start with '--' when passed as a separate argument.
+        bc250_pipx install --force --system-site-packages --pip-args="--no-build-isolation" . && return 0
+        print_info "Local-build install failed — retrying with standard isolated install..."
     fi
+    bc250_pipx install --force .
 }
 
 cpu_governor_installed() {
@@ -3310,7 +3312,76 @@ VAAPI_URL_64="https://github.com/simpmix/bc250-encoding-decoding-fix/releases/la
 VAAPI_URL_32="https://github.com/simpmix/bc250-encoding-decoding-fix/releases/latest/download/bc250-driver-linux-i386.tar.gz"
 
 vaapi_driver_installed() {
-    [[ -f "$VAAPI_STATE_DIR/dri/bc250_drv_video.so" && -f "$VAAPI_ENV_CONF" ]]
+    [[ -f "$VAAPI_STATE_DIR/dri/bc250_drv_video.so" && -f "$VAAPI_ENV_CONF" ]] && vaapi_driver_deps_ok
+}
+
+vaapi_driver_deps_ok() {
+    # A missing DT_NEEDED (e.g. libx264.so.N, added in upstream v0.5.1) makes
+    # the whole .so fail to dlopen — libva then reports no hardware at all.
+    ! ldd "$VAAPI_STATE_DIR/dri/bc250_drv_video.so" 2>/dev/null | grep -q "not found"
+}
+
+# The upstream tarball ships only the driver .so — no shared-lib deps — but
+# since v0.5.1 it links versioned x264 symbols (x264_encoder_open_<N>), so a
+# system x264 with a different SONAME cannot satisfy it (and SteamOS has no
+# lib32-x264 at all). Provision the exact SONAME into /var/lib/bc250/lib{,32}
+# — Arch archive for amd64, Debian snapshot for i386 — and ldconfig it.
+vaapi_provide_x264() {
+    local sonum="$1" arch="$2" dest_dir="$3" work pkg vers deb
+    work=$(mktemp -d)
+    install -d -m 0755 "$dest_dir"
+    if [[ "$arch" == "amd64" ]]; then
+        pkg=$(curl -fsSL "https://archive.archlinux.org/packages/x/x264/" 2>/dev/null | \
+              grep -oE "x264-3%3A0\.${sonum}\.r[0-9]+\.[a-z0-9]+-[0-9]+-x86_64\.pkg\.tar\.zst" | sort -uV | tail -1)
+        if [[ -n "$pkg" ]] && curl -fsSL -o "$work/x264.pkg" "https://archive.archlinux.org/packages/x/x264/${pkg}" && \
+           tar -xf "$work/x264.pkg" -C "$work" "usr/lib/libx264.so.${sonum}" 2>/dev/null; then
+            install -m 0755 "$work/usr/lib/libx264.so.${sonum}" "$dest_dir/libx264.so.${sonum}"
+            rm -rf "$work"; return 0
+        fi
+    fi
+    # Debian snapshot — only source for i386, fallback for amd64.
+    vers=$(curl -fsSL "https://snapshot.debian.org/package/x264/" 2>/dev/null | \
+           grep -oE "2%3A0\.${sonum}\.[0-9]+%2B[a-z0-9]+-[0-9]+" | sort -uV | tail -1)
+    [[ -n "$vers" ]] && \
+    deb=$(curl -fsSL "https://snapshot.debian.org/package/x264/${vers}/" 2>/dev/null | \
+          grep -oE "/archive/debian/[^\"]*libx264-${sonum}_[^\"]*_${arch}\.deb" | sort -u | tail -1)
+    if [[ -n "${deb:-}" ]] && curl -fsSL -o "$work/x264.deb" "https://snapshot.debian.org${deb}" && \
+       (cd "$work" && ar x x264.deb && tar -xJf data.tar.* 2>/dev/null); then
+        local lib
+        lib=$(find "$work" -name "libx264.so.${sonum}" | head -1)
+        [[ -n "$lib" ]] && install -m 0755 "$lib" "$dest_dir/libx264.so.${sonum}" && { rm -rf "$work"; return 0; }
+    fi
+    rm -rf "$work"; return 1
+}
+
+vaapi_ensure_runtime_deps() {
+    local changed=0 so arch dest
+    for arch in amd64 i386; do
+        if [[ "$arch" == "amd64" ]]; then
+            so="$VAAPI_STATE_DIR/dri/bc250_drv_video.so"; dest="$VAAPI_STATE_DIR/lib"
+        else
+            so="$VAAPI_STATE_DIR/dri32/bc250_drv_video.so"; dest="$VAAPI_STATE_DIR/lib32"
+        fi
+        [[ -f "$so" ]] || continue
+        local missing
+        missing=$(ldd "$so" 2>/dev/null | sed -n 's/.*\(libx264\.so\.[0-9]*\).*not found.*/\1/p' | head -1)
+        [[ -n "$missing" ]] || continue
+        local sonum="${missing##*.so.}"
+        if [[ -f "$dest/libx264.so.${sonum}" ]] || vaapi_provide_x264 "$sonum" "$arch" "$dest"; then
+            changed=1
+            print_info "Provisioned $missing for $arch driver (system x264 SONAME differs)."
+        else
+            print_warning "Could not fetch $missing for $arch — the driver will not load for $arch clients."
+        fi
+    done
+    if [[ "$changed" == "1" ]]; then
+        printf '%s\n%s\n' "$VAAPI_STATE_DIR/lib" "$VAAPI_STATE_DIR/lib32" > /etc/ld.so.conf.d/99-bc250-vaapi.conf
+        ldconfig
+    fi
+    local leftover
+    leftover=$(ldd "$VAAPI_STATE_DIR/dri/bc250_drv_video.so" 2>/dev/null | grep "not found" || true)
+    [[ -n "$leftover" ]] && print_warning "Unresolved driver deps remain: ${leftover//$'\n'/; }"
+    return 0
 }
 
 vaapi_write_env() {
@@ -3333,6 +3404,7 @@ EOF
 vaapi_reapply_env() {
     if [[ -f "$VAAPI_STATE_DIR/dri/bc250_drv_video.so" ]]; then
         vaapi_write_env
+        vaapi_ensure_runtime_deps
         print_success "VA-API driver env restored (driver files in /var/lib survived the update)."
     else
         install_vaapi_driver auto
@@ -3392,6 +3464,8 @@ install_vaapi_driver() {
         print_info "32-bit driver installed (Steam Link runtime)."
     fi
 
+    vaapi_ensure_runtime_deps
+
     # Mirrors for libva builds that only search /usr/local — tolerated if read-only
     install -d -m 0755 /usr/local/lib/dri /usr/local/share/bc250/shaders 2>/dev/null || true
     install -m 0755 "$work/bc250-driver/bc250_drv_video.so" /usr/local/lib/dri/bc250_drv_video.so 2>/dev/null || true
@@ -3422,7 +3496,8 @@ run_revert_vaapi_driver() {
         return 0
     fi
 
-    rm -rf "$VAAPI_STATE_DIR/dri" "$VAAPI_STATE_DIR/dri32" "$VAAPI_STATE_DIR/shaders"
+    rm -rf "$VAAPI_STATE_DIR/dri" "$VAAPI_STATE_DIR/dri32" "$VAAPI_STATE_DIR/shaders" "$VAAPI_STATE_DIR/lib" "$VAAPI_STATE_DIR/lib32"
+    rm -f /etc/ld.so.conf.d/99-bc250-vaapi.conf && ldconfig 2>/dev/null || true
     rmdir "$VAAPI_STATE_DIR" 2>/dev/null || true
     rm -f "$VAAPI_ENV_CONF" "$VAAPI_ENV_PROFILE" /etc/profile.d/bc250-vaapi.sh
     rm -f /usr/local/lib/dri/bc250_drv_video.so 2>/dev/null || true

@@ -71,9 +71,27 @@ extras/                           # Optional add-ons (not in start.sh)
   `flatpak override --user <app-id> --env=LIBVA_DRIVER_NAME=bc250
   --env=LIBVA_DRIVERS_PATH=/var/lib/bc250/dri
   --env=BC250_SHADER_DIR=/var/lib/bc250/shaders
+  --env=LD_LIBRARY_PATH=/var/lib/bc250/lib:/var/lib/bc250/lib32
   --filesystem=/var/lib/bc250:ro` — verified working with
   com.moonlight_stream.Moonlight 6.1.0 (VAAPI encode probe OK inside the
-  sandbox). Undo: `flatpak override --user --reset <app-id>`.
+  sandbox). The `LD_LIBRARY_PATH` entry is required since v0.5.1: the
+  driver links `libx264.so.<N>` which lives in the private lib dirs, and
+  the sandbox ignores the host's `ld.so.conf.d`.
+  Undo: `flatpak override --user --reset <app-id>`.
+  **v0.5.1 upstream notes** (2026-09-25, pulled automatically via
+  releases/latest): Gamescope/Steam-Link green-screen fix
+  (`vaCreateSurfaces2` now rejects unsupported DMA-BUF imports → forces
+  EGL blit path), H.264 intra-prediction sanitization across multi-slice
+  boundaries (Steam Link fix), and a new **libx264 CPU backend** —
+  `BC250_H264_BACKEND=x264` is now the default (4× faster H.264 encode,
+  leaves the 40 CUs free for the game; `compute` keeps GPU path). Other
+  knobs: `BC250_X264_CRF` (23), `BC250_X264_PRESET`, `BC250_X264_THREADS`
+  (4 live / auto), `BC250_HEVC_SLICES` (4), `OMP_WAIT_POLICY=PASSIVE`,
+  `GOMP_SPINCOUNT=0`, `BC250_USE_CABAC` (1). 32-bit companion driver
+  (`bc250-driver-linux-i386.tar.gz`) is fetched alongside the x86_64 one.
+  Driver vendor string is now "AMD BC-250 Compute VA-API Driver".
+  **VLD decode is still CPU wavefront — unchanged verdict: software
+  decode remains the client path** (see `.kb/vcn.md`).
   **Decode caveat (measured):** bc250 VLD decode ≈30 fps vs FFmpeg software
   ≈510 fps at 1080p60 HEVC — Moonlight-as-client should stay on software
   decoding (VAAPI decode caused ~2 fps + apparent "network drops" = decode
