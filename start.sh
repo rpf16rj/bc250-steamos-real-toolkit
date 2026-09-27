@@ -773,11 +773,33 @@ bc250_pipx() {
     PIPX_HOME="$BC250_PIPX_HOME" PIPX_BIN_DIR="$BC250_PIPX_BIN_DIR" "$pipx_bin" "$@"
 }
 
-# Install the governor. When the system python has setuptools, force a fully
-# local build (--system-site-packages + --no-build-isolation) so pip never
-# touches PyPI — otherwise fall back to a normal isolated (PyPI) install.
+# pip's PEP-517 hooks run inside pipx's SHARED venv (PIPX_HOME/shared), not
+# the package venv — so --no-build-isolation needs setuptools.build_meta to
+# be importable by that interpreter. pipx creates the shared venv without
+# system-site-packages; seed it with a .pth pointing at the system site so
+# the hook finds setuptools without touching PyPI. If the shared venv does
+# not exist yet (first install), pre-create it with --system-site-packages —
+# pipx adopts a valid existing shared venv.
+cpu_governor_seed_shared() {
+    local shared_py="$BC250_PIPX_HOME/shared/bin/python" sys_site shared_site
+    if [[ ! -x $shared_py ]]; then
+        python3 -m venv --system-site-packages "$BC250_PIPX_HOME/shared" 2>/dev/null || true
+    fi
+    [[ -x $shared_py ]] || return 1
+    "$shared_py" -c 'import setuptools.build_meta' &>/dev/null && return 0
+    sys_site=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)
+    shared_site=$("$shared_py" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)
+    [[ -n $sys_site && -d $sys_site && -n $shared_site ]] || return 1
+    mkdir -p "$shared_site" 2>/dev/null || return 1
+    echo "$sys_site" > "$shared_site/zz-bc250-system-site.pth" 2>/dev/null || return 1
+    "$shared_py" -c 'import setuptools.build_meta' &>/dev/null
+}
+
+# Install the governor. When pipx's shared venv can see setuptools, force a
+# fully local build (--system-site-packages + --no-build-isolation) so pip
+# never touches PyPI — otherwise fall back to a normal isolated install.
 cpu_governor_pipx_install() {
-    if python3 -c 'import setuptools' &>/dev/null && \
+    if cpu_governor_seed_shared && \
        bc250_pipx install --help 2>&1 | grep -q 'system-site-packages'; then
         # NOTE: --pip-args must use '=' form — argparse rejects values that
         # start with '--' when passed as a separate argument.
@@ -785,6 +807,24 @@ cpu_governor_pipx_install() {
         print_info "Local-build install failed — retrying with standard isolated install..."
     fi
     bc250_pipx install --force .
+}
+
+# Older installs left pipx shims in /root/.local/bin pointing at the wiped
+# /root/.local/share/pipx tree — pipx warns "already on your PATH" and a bare
+# `sudo bc250-apply` can still hit the dead shim. Remove only symlinks that
+# point into the legacy tree.
+cpu_governor_clean_stale_shims() {
+    local shim target
+    for shim in /root/.local/bin/bc250-apply /root/.local/bin/bc250-detect; do
+        [[ -L $shim ]] || continue
+        target=$(readlink "$shim" 2>/dev/null)
+        case "$target" in
+            /root/.local/share/pipx/*|/root/.local/pipx/*)
+                rm -f "$shim"
+                print_info "Removed stale shim $shim (pointed at wiped $target)."
+                ;;
+        esac
+    done
 }
 
 cpu_governor_installed() {
@@ -811,8 +851,10 @@ cpu_governor_ensure_pipx() {
     # Last resort: self-contained pipx on the persistent /var volume. Needs
     # PyPI once, then survives updates and is rebuilt here when broken.
     print_info "pacman route unavailable — building self-contained pipx in $BC250_PIPX_VENV..."
-    if python3 -m venv --clear "$BC250_PIPX_VENV" && \
-       "$BC250_PIPX_VENV/bin/pip" install -q pipx && \
+    # --system-site-packages: Arch disables ensurepip (no bin/pip in a plain
+    # venv); system-site lets `python -m pip` resolve the system pip instead.
+    if python3 -m venv --clear --system-site-packages "$BC250_PIPX_VENV" && \
+       "$BC250_PIPX_VENV/bin/python" -m pip install -q pipx && \
        "$BC250_PIPX_VENV/bin/pipx" --version &>/dev/null; then
         print_success "Using vendored pipx at $BC250_PIPX_VENV (survives SteamOS updates)."
         return 0
@@ -839,6 +881,7 @@ cpu_governor_repair_venv() {
         return 1
     }
     popd >/dev/null || true
+    cpu_governor_clean_stale_shims
     export PATH="$BC250_PIPX_BIN_DIR:$PATH"
     print_success "bc250-detect venv repaired."
 }
@@ -935,6 +978,7 @@ run_cpu_governor() {
     bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
     run_with_retry "cpu_governor_pipx_install" "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
     popd >/dev/null || true
+    cpu_governor_clean_stale_shims
     export PATH="$BC250_PIPX_BIN_DIR:$PATH"
 
     if ! cpu_governor_venv_healthy; then
@@ -7622,9 +7666,44 @@ run_recovery_menu() {
 # Track which components have been installed and automatically re-apply them
 # after a SteamOS atomic update wipes /etc and /usr/lib/modules.
 
+# SteamOS/Steam-client updates can leave the scout-runtime pinned libcurl
+# pointing at the bundled ubuntu12_32 copy while new system binaries
+# (flatpak, AppImages like ES-DE, git) need CURL_OPENSSL_4 versioned
+# symbols. Every child of the Steam client inherits pinned_libs_* via
+# LD_LIBRARY_PATH, so non-Steam shortcuts die instantly on launch with
+# "version `CURL_OPENSSL_4' not found" (confirmed 2026-09-26, SteamOS
+# 3.9.2). Repoint the pin at the host lib when the pin resolves into the
+# bundled runtime and the host lib carries the version node.
+steam_repair_pinned_libcurl() {
+    # Glob /home/* too: reapply runs as root under the persist service, where
+    # REAL_USER resolves to root and $REAL_HOME has no Steam dir.
+    local rt home arch pin syslib target owner
+    for home in "$REAL_HOME" /home/*; do
+        rt="$home/.local/share/Steam/ubuntu12_32/steam-runtime"
+        [[ -d $rt ]] || continue
+        owner=$(stat -c %U "$home" 2>/dev/null)
+        for arch in 64 32; do
+            pin="$rt/pinned_libs_$arch/libcurl.so.4"
+            [[ -L $pin ]] || continue
+            target=$(readlink "$pin" 2>/dev/null)
+            case "$target" in
+                */steam-runtime/usr/lib/*) ;;   # bundled pin — repair below
+                *) continue ;;                  # already points elsewhere
+            esac
+            case $arch in 64) syslib=/usr/lib/libcurl.so.4 ;; *) syslib=/usr/lib32/libcurl.so.4 ;; esac
+            if [[ -e $syslib ]] && grep -aq CURL_OPENSSL_4 "$syslib" 2>/dev/null; then
+                ln -sf "$syslib" "$pin" && \
+                    [[ -n $owner ]] && chown -h "$owner:$owner" "$pin" 2>/dev/null
+                print_info "Re-pointed Steam pinned libcurl ($arch-bit, $home) -> $syslib (non-Steam shortcut fix)."
+            fi
+        done
+    done
+}
+
 reapply_installed_components() {
     print_step "RAP" "Re-applying toolkit settings after SteamOS update"
     run_grub_boot_fix
+    steam_repair_pinned_libcurl
     local component
     if [[ ! -f "$PERSIST_STATE_FILE" ]]; then
         print_info "No persisted toolkit state to re-apply."
