@@ -46,9 +46,52 @@
   `steamos_writable`).
 - **PyPI-free build**: `python-setuptools` is installed alongside pipx so
   `cpu_governor_pipx_install` can use `--system-site-packages` +
-  `--pip-args "--no-build-isolation"` — the governor build then needs no
+  `--pip-args="--no-build-isolation"` — the governor build then needs no
   network at all. Without setuptools it falls back to a normal isolated
   install (PyPI).
+  - `--pip-args` MUST use the `=` form: argparse rejects a value starting
+    with `--` when passed as a separate argument (v1.9.10 regression —
+    every fresh install failed with `expected one argument`).
+  - The PEP-517 hooks run in pipx's **shared** venv
+    (`$PIPX_HOME/shared`), not the package venv — `--system-site-packages`
+    alone does NOT expose setuptools there, and the build dies with
+    `BackendUnavailable: Cannot import 'setuptools.build_meta'`
+    (v1.9.11 user report; install still succeeded via the isolated
+    fallback). `cpu_governor_seed_shared` fixes it: pre-creates the
+    shared venv with `--system-site-packages`, or drops a `.pth` file
+    into its site-packages pointing at the system purelib.
+  - Arch disables `ensurepip` — a plain `python3 -m venv` has no
+    `bin/pip`. The vendored-pipx fallback therefore uses
+    `--system-site-packages` + `venv/bin/python -m pip`.
+- **Stale shims**: pre-v1.9.9 installs left `/root/.local/bin/bc250-*`
+  symlinks pointing at the wiped `/root/.local/share/pipx` tree (pipx
+  warns "already on your PATH"). `cpu_governor_clean_stale_shims` removes
+  them after a successful install.
+
+### Non-Steam shortcuts dead in Game Mode after SteamOS/Steam update
+- **Symptom**: after an update, non-Steam shortcuts (ES-DE, flatpak apps,
+  scripts) do nothing on launch; Steam games still work. Journal shows
+  `libcurl.so.4: version 'CURL_OPENSSL_4' not found` for the shortcut's
+  binary, `/usr/bin/flatpak`, `git-remote-https`, etc.
+- **Root cause**: Steam's scout runtime pins a bundled `libcurl.so.4.2.0`
+  (no `CURL_OPENSSL_4` version nodes) into
+  `~/.local/share/Steam/ubuntu12_32/steam-runtime/pinned_libs_{32,64}`,
+  which every Steam child inherits via `LD_LIBRARY_PATH`. After an update
+  rebuilds system binaries against a newer curl, those binaries die at
+  symbol resolution. Steam games survive because pressure-vessel rebuilds
+  `LD_LIBRARY_PATH` inside the container. The pin may also be re-created
+  by the runtime's `pin_newer_runtime_libs` on later Steam updates.
+- **Fix (auto on reapply)**: `steam_repair_pinned_libcurl` runs
+  unconditionally inside `reapply_installed_components` — for each
+  `/home/*` Steam dir it re-points a bundled `libcurl.so.4` pin at the
+  host lib when the host lib carries `CURL_OPENSSL_4`.
+- **Manual fix**:
+  ```bash
+  cd ~/.local/share/Steam/ubuntu12_32/steam-runtime
+  ln -sf /usr/lib/libcurl.so.4  pinned_libs_64/libcurl.so.4
+  ln -sf /usr/lib32/libcurl.so.4 pinned_libs_32/libcurl.so.4
+  # restart Steam
+  ```
 
 ### Moonlight/VA-API reports "hardware absent" after v0.5.1 driver upgrade
 - **Symptom**: `LIBVA_DRIVER_NAME=bc250` set, driver file present at

@@ -9,6 +9,43 @@ before the toolkit adopted numbered releases.
 
 ## Unreleased
 
+## v1.9.12 — 2026-09-26
+
+**Fixes:**
+
+- **CPU Governor local build actually works offline** — pip's PEP-517
+  hooks run inside pipx's *shared* venv, not the package venv, so
+  `--no-build-isolation` needed `setuptools.build_meta` importable there
+  and failed with `BackendUnavailable` (the install still succeeded via
+  the isolated fallback, but wasted a PyPI round-trip). The installer
+  now seeds the shared venv — pre-created with `--system-site-packages`,
+  or a `.pth` pointing at the system site-packages — so the local build
+  never touches the network.
+- **Vendored-pipx fallback works on Arch/SteamOS python** — `ensurepip`
+  is disabled, so a plain `python3 -m venv` has no `bin/pip`; the
+  fallback now creates the venv with `--system-site-packages` and calls
+  `venv/bin/python -m pip`.
+- **Stale `bc250-*` shims cleaned** — pre-v1.9.9 installs left
+  `/root/.local/bin/bc250-apply|bc250-detect` symlinks pointing at the
+  wiped `/root/.local/share/pipx` tree ("already on your PATH" warnings);
+  removed after install/repair.
+- **Non-Steam shortcuts dead after SteamOS/Steam update** — Steam's
+  scout runtime pins a bundled `libcurl.so.4` without `CURL_OPENSSL_4`
+  version nodes into `LD_LIBRARY_PATH`; post-update system binaries
+  (flatpak, AppImages, git) then die at symbol resolution, killing every
+  non-Steam shortcut (Steam games survive inside pressure-vessel).
+  `steam_repair_pinned_libcurl` now runs on every post-update re-apply
+  and re-points bundled pins at the host libcurl for all `/home/*` Steam
+  dirs.
+
+**Docs:**
+
+- KB: PEP-517 shared-venv detail, ensurepip-disabled venv notes, stale
+  shim cleanup, and the pinned-libcurl failure mode with manual fix.
+- KB: VCN research update — external daveconde/bc250-vcn-enable findings
+  revise the "dead" verdict to "power-gated + root-clamped, one
+  isolation latch unlocated" (documented path, nothing shippable yet).
+
 ## v1.9.11 — 2026-09-26
 
 **Fixes:**

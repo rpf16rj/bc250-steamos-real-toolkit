@@ -257,3 +257,64 @@ BIOS patch: the feature-enable site `0x9970f4` in the PSP/ABL image is
 verified (`cbz r4` → nop forces the enable path). Requires SPI flash
 (dump + verify + write), real brick risk without a CH341A backup. Not
 pursued yet.
+
+## External research that REVISES the dead verdict (2026-09-26)
+
+Two repos materially update this file:
+
+- `m2jgh8tg7r-bot/bc250-vcn-linux-research` — meticulous handoff log
+  (R169→R232), mostly static PSP/TOS firmware analysis (fw_type-13 /
+  service-registration path), plus **live bounded SMN probes** on a
+  BIOS P3.00 / SMU 0.58.6.0 box (same as ours).
+- `daveconde/bc250-vcn-enable` — the actionable piece. Live-measured
+  SMU-side VCN power work on the exact same platform (BIOS 3 Robin1,
+  PMFW 0.58.6.0). Depends on `rw-r-r-0644/bc250-smu-unlock`.
+
+### What it changes for us
+
+1. **Our wedge is explained, not fatal.** daveconde measured the same
+   July-style board hang on VCN MMIO reads *while the island is
+   unclocked*. Our `=3` wedge at `mmUVD_PGFSM_STATUS` is the documented
+   pre-clock-work behavior — it does NOT prove the fuse/rail is cut.
+   Hypothesis (b) from this file ("needs a power-up sequence the SMU
+   doesn't natively offer") is now the live one.
+2. **Discovery ROM says VCN 2.0.3 present, NOT harvested, encode+decode
+   both enabled** — contradicts the "eFused off" framing (which was
+   simpmix's claim, not silicon evidence).
+3. **A write vehicle exists that we lacked.** `bc250-smu-unlock` uses a
+   Q2 ring-overflow exploit to open the SMU secure-access debug path
+   (SMU SRAM r/w + code exec via msg-0x61 handler repoint). Host
+   config-window writes to the power sequencer are IGNORED
+   (write-protected); SMU-executed debug writes LAND and persist.
+   BIOS-3/PMFW-0.58.6.0 only — our box qualifies.
+4. **SMN transport**: root `00:00.0` PCI config `0xB8` index / `0xBC`
+   data (NOT kernel `amd_smn_read` 0x60/0x64). Full 32-bit SMN, never
+   hung — our cyan-skillfish governor already uses it.
+5. **Measured partial progress (2026-08-25, live)**: dom6 sequencer at
+   SMN `0x0006D1xx` reads status `0x01010101` (up-ack), ctrl `0x02`;
+   fw-window writes landed slot clocks 0x16/0x17/0x18 + enables +
+   ctrl release `0x02→0x00` (persisted cross-process).
+6. **The remaining wall is a root isolation clamp, not power.** After
+   the clock/gate work above, VCN MMIO reads return uniform all-ones
+   INCLUDING the static `UVD_VERSION` — with NO hang. The whole
+   register file is clamped upstream of the island. Open hunts: a
+   native power message analog to renoir's `PPSMC_MSG_PowerUpVcn`
+   (absent from this PPSMC list), the Q3 msg-`0x3C`/`0x3D`
+   SMU-feature bitmask (147 live Q3 handlers enumerated; msg 0x21's
+   handler sits 0x319 bytes past the dom7 power-up caller), and the
+   `0x06900900` responder family (suspected clamp).
+7. **Kernel/fw path for after power**: upstream deliberately skips VCN
+   for `CHIP_CYAN_SKILLFISH` (no PSP fw_type-13 slot) — the route is
+   userspace direct-load: stage navi10 `vcn.bin` via amdgpu debugfs
+   MMIO, boot VCPU, ring test (`mmUVD_SCRATCH9` 0xCAFEDEAD→0xDEADBEEF).
+   m2jgh8tg7r's R2xx series is separately working the PSP-side
+   enrollment path (all static so far).
+
+### Updated stance
+
+"VCN dead" downgraded to "power-gated + root-clamped, one isolation
+latch unlocated." Nothing shippable: no project anywhere has VCN
+execution yet, and every write path has measured SMU-wedge vectors
+(cold power cycle to recover). If we resume: order is
+`--verify` (read-only) → `--manual-powerup` → `--vcn-power-regs` →
+msg-table/feature-bit hunt for the clamp → `--direct-load` proof.
