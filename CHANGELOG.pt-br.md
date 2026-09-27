@@ -9,6 +9,44 @@ como histórico datado de antes da adoção de versões numeradas.
 
 ## Unreleased
 
+## v1.9.12 — 2026-09-26
+
+**Correções:**
+
+- **Build local do CPU Governor realmente funciona offline** — os hooks
+  PEP-517 do pip rodam dentro do venv *shared* do pipx, não no venv do
+  pacote, então `--no-build-isolation` precisava do
+  `setuptools.build_meta` importável ali e morria com
+  `BackendUnavailable` (a instalação ainda completava pelo fallback
+  isolado, mas desperdiçava um acesso ao PyPI). O installer agora seeda
+  o shared venv — pré-criado com `--system-site-packages`, ou um `.pth`
+  apontando pro site-packages do sistema — então o build local não toca
+  a rede.
+- **Fallback do pipx vendored funciona no python do Arch/SteamOS** —
+  `ensurepip` é desabilitado, então um `python3 -m venv` puro não cria
+  `bin/pip`; o fallback agora cria o venv com `--system-site-packages` e
+  chama `venv/bin/python -m pip`.
+- **Shims `bc250-*` mortos são limpos** — instalações pré-v1.9.9 deixavam
+  symlinks `/root/.local/bin/bc250-apply|bc250-detect` apontando pro
+  `/root/.local/share/pipx` apagado (warnings "already on your PATH");
+  removidos após install/repair.
+- **Atalhos non-Steam mortos após update do SteamOS/Steam** — o scout
+  runtime do Steam pina uma `libcurl.so.4` bundled sem os símbolos
+  versionados `CURL_OPENSSL_4` no `LD_LIBRARY_PATH`; binários do sistema
+  rebuildados (flatpak, AppImages, git) morrem na resolução de símbolo,
+  matando todos os atalhos non-Steam (jogos Steam sobrevivem dentro do
+  pressure-vessel). `steam_repair_pinned_libcurl` agora roda a cada
+  re-apply pós-update e re-aponta pins bundled pra libcurl do host em
+  todos os `/home/*` com Steam.
+
+**Docs:**
+
+- KB: detalhe do PEP-517 no shared venv, notas de venv sem ensurepip,
+  limpeza de shims, e o modo de falha do pinned-libcurl com fix manual.
+- KB: atualização da pesquisa VCN — achados do daveconde/bc250-vcn-enable
+  revisam o veredito "morto" para "power-gated + root-clamped, um latch
+  de isolação não localizado" (caminho documentado, nada shipável ainda).
+
 ## v1.9.11 — 2026-09-26
 
 **Correções:**
