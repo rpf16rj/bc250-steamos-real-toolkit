@@ -3,6 +3,30 @@
 
 ## Services / Install Issues
 
+### "invalid or corrupted package (PGP signature)" / keyring errors on installs
+
+- **Symptom**: package installs inside the toolkit (e.g. option 10 Mesa
+  build deps) fail with `invalid or corrupted package (PGP signature)`,
+  `signature is unknown trust`, `required key missing from keyring` or
+  `keyring is not writable`.
+- **Root cause**: the pacman GPG keyring under `/etc/pacman.d/gnupg` is
+  corrupt or the installed `archlinux-keyring`/`holo-keyring` packages
+  are stale — recently-added packager keys are missing, so fresh package
+  signatures never verify even after a bare `pacman-key --init`.
+- **Fix**: the proven sequence — wipe `gnupg`, `pacman-key --init`,
+  `--populate archlinux holo`, `pacman -Sy archlinux-keyring
+  holo-keyring`, then `--populate` again so the refreshed keyring
+  packages' new keys get imported. `repair_pacman_keyring()` runs this
+  automatically when `run_with_retry` sees a signature/keyring failure
+  (once per call — a repeated signature error fails cleanly instead of
+  looping), and every `pacman -S/-U/-Sw` call in the toolkit routes
+  through it. Manual entry point: **Extras → Repair Pacman Keyring**,
+  or by hand:
+  `sudo steamos-readonly disable && sudo rm -rf /etc/pacman.d/gnupg &&
+   sudo pacman-key --init && sudo pacman-key --populate archlinux holo &&
+   sudo pacman -Sy archlinux-keyring holo-keyring && sudo pacman -Syu &&
+   sudo steamos-readonly enable`
+
 ### "Kernel incompatible" / build fails on SteamOS 3.8 (kernel 6.18)
 - **Symptom**: Combined Fix or any kernel-patch item fails during the build,
   e.g. `error: pathspec 'drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c'

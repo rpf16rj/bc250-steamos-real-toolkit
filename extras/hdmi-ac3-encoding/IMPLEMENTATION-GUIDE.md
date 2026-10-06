@@ -56,7 +56,8 @@ standard 2-channel PCM signal. The receiver detects the AC-3 bitstream
 **Key characteristics:**
 - Zero added latency (encoding is real-time, ~1-2% CPU overhead)
 - Works with any audio source (games, browsers, media players)
-- Stereo content is automatically upmixed to 5.1 by PipeWire's channel mixer
+- Stereo content plays as AC-3 5.1 with only FL/FR active (no host upmix);
+  use the receiver's Dolby Surround/PLII on plain PCM stereo for expansion
 - The receiver displays "Dolby Digital" / "DD" when audio is playing
 
 ## Prerequisites

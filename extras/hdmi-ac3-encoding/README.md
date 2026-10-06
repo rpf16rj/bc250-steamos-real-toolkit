@@ -12,9 +12,15 @@ receiver gets true 5.1 surround sound instead of PCM stereo.
 
 - Zero added latency (native ALSA plugin, no external pipeline)
 - ~1-2% CPU overhead (libavcodec a52 encoder)
-- Stereo content is automatically upmixed to 5.1 by PipeWire's channel mixer
 - Sink stays active for 1 hour after last sound (prevents receiver PCM fallback)
 - 64ms audio buffer (tuned for low latency in gamescope)
+
+> **Note on stereo:** PipeWire does *not* upmix stereo into the extra
+> channels of the 5.1 stream — a stereo app produces AC-3 5.1 with only
+> FL/FR active and silent rear/center/LFE. For stereo upmix, select the
+> plain `output:hdmi-stereo` profile and enable your receiver's own
+> Dolby Surround / Pro Logic II / Neo:6 mode — it works on any 2-channel
+> input and beats a software encode.
 
 ## Why this is needed (SteamOS / BC-250)
 
