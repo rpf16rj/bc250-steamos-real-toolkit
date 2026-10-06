@@ -7,7 +7,34 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
-## Unreleased
+## v1.10.0 — 2026-10-05
+
+**Mudanças:**
+
+- **Mesa GFX1013: sincronizado com a série estável de out-2026 do
+  MastaG** — o conjunto de patches agora acompanha o `patches/mesa/`
+  upstream 0001-0007 contra Mesa **26.2.4** (era 26.2.2): compute-queue
+  fix + **DirectMesh v1.3** (lonewolf0622) substituindo a série antiga
+  de spoof GFX10.3. DirectMesh traz Mesh+Task shaders, barycentrics,
+  VRS no-op, device-generated commands, multiview e indexed Mesh draws
+  (~1.5-1.9x sobre v1.2 em meshlets 96+ vértices). **A env var de opt-in
+  mudou: `RADV_DIRECTMESH=1` por jogo** — `RADV_GFX103` não existe mais.
+- **Telemetria do kernel: `gpu_busy_percent` agora conta compute
+  rings** — fix upstream pra workloads só-compute (Vulkan compute,
+  llama.cpp) lerem 0% de GPU busy; portado pro patch consolidado de
+  telemetria 7.2. O sampling agora dorme em vez de busy-wait.
+- **Daemon CEC Link-Retrain (novo, opt-in)** — `bc250-cec` do MastaG
+  vendorado: retreina o link DisplayPort via `link_settings` do debugfs
+  quando a TV/AVR atrás de um adaptador DP->HDMI (CH7218) liga de novo ou
+  muda o input pra placa — corrige 'sem sinal' sem o replug completo
+  antigo. Serviço systemd, tunáveis em `/etc/bc250-cec.conf`, persistido
+  entre updates do SteamOS. Extras → HDMI-CEC.
+- **Upscaler HelixSR documentado** — os pacotes Proton do MastaG
+  (build out-2026+) trazem o HelixSR (DLSS Model E em compute DX12)
+  como variante do OptiScaler: `PROTON_USE_OPTISCALER=helixsr`
+  (só D3D12). Rode o install do FSR4 Proton de novo pra atualizar os
+  pacotes; o plugin Decky de launch options ganhou os presets
+  `helixsr` e `RADV_DIRECTMESH=1`.
 
 ## v1.9.12 — 2026-09-26
 
