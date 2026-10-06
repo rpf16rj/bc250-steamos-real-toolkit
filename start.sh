@@ -682,6 +682,14 @@ run_with_retry() {
             print_info "Retrying the failed command after keyring repair..."
             continue
         fi
+        # Disk-full failures are not transient — retrying cannot help. Surface
+        # the real cause (SteamOS /var is ~230MB and backs the /etc overlay,
+        # so pacman reports it as '/etc too full').
+        if echo "$output" | grep -qiE "too full|not enough space|no space left"; then
+            print_error "A system partition ran out of space (see output above)."
+            print_info "Check: df -h /var /etc — leftover build trees under /var/lib (umr, bc250-control) are common offenders and can be moved to /home."
+            return $rc
+        fi
         # If it looks like a transient network/download error, ask the user.
         if is_network_error "$output"; then
             # Clean AUR cache on validity-check failures to avoid stale downloads
@@ -821,8 +829,27 @@ bc250_pipx() {
 # pipx adopts a valid existing shared venv.
 cpu_governor_seed_shared() {
     local shared_py="$BC250_PIPX_HOME/shared/bin/python" sys_site shared_site
+    if [[ -x $shared_py ]]; then
+        # A shared venv created under an older Python survives SteamOS
+        # updates but becomes unusable — pipx then injects no working pip
+        # into new package venvs and every install dies inside
+        # list_installed_packages with a JSONDecodeError on empty stdout.
+        # Recreate it on Python version mismatch or when pip does not run.
+        local sys_mm shared_mm
+        sys_mm=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+        [[ -n $sys_mm ]] || return 1   # can't judge staleness without a working system python
+        shared_mm=$("$shared_py" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+        if [[ $shared_mm != "$sys_mm" ]] || ! "$shared_py" -m pip --version &>/dev/null; then
+            print_info "Stale pipx shared venv (python ${shared_mm:-none}, system ${sys_mm:-?}) — recreating..."
+            rm -rf "$BC250_PIPX_HOME/shared"
+        fi
+    fi
     if [[ ! -x $shared_py ]]; then
         python3 -m venv --system-site-packages "$BC250_PIPX_HOME/shared" 2>/dev/null || true
+        # ensurepip can be skipped on some images — make sure shared has pip,
+        # pipx depends on it for every package venv it creates.
+        [[ -x $shared_py ]] && ! "$shared_py" -m pip --version &>/dev/null && \
+            "$shared_py" -m ensurepip --default-pip &>/dev/null || true
     fi
     [[ -x $shared_py ]] || return 1
     "$shared_py" -c 'import setuptools.build_meta' &>/dev/null && return 0
@@ -1006,6 +1033,16 @@ run_cpu_governor() {
     steamos_writable 'pacman -S --noconfirm --needed python-setuptools stress' || \
         print_warning "Could not install python-setuptools/stress — continuing (pipx will fetch build deps from PyPI)."
 
+    # A half-interrupted pacman run can leave a corrupt stress binary
+    # (Exec format error when bc250-detect forks it). Verify it runs;
+    # one reinstall attempt, then warn — detect needs it.
+    if command -v stress &>/dev/null && ! stress --version &>/dev/null; then
+        print_warning "'stress' is installed but not runnable — reinstalling..."
+        steamos_writable 'pacman -S --noconfirm stress' || true
+        stress --version &>/dev/null || \
+            print_warning "'stress' is still broken — bc250-detect will fail. Reinstall it manually: sudo pacman -S stress"
+    fi
+
     CPU_GOVERNOR_DIR="$EXTERNAL_DIR/bc250_smu_oc"
     if [[ ! -d "$CPU_GOVERNOR_DIR" ]]; then
         fail_with_log "Vendored bc250_smu_oc not found at $CPU_GOVERNOR_DIR." "CPU Governor Install — missing vendored repo"
@@ -1045,6 +1082,20 @@ gpu_governor_setup() {
         printf '[dbus]\nenabled = true\n' | cat - "$GPU_DEST" > "${GPU_DEST}.tmp" && mv "${GPU_DEST}.tmp" "$GPU_DEST"
     fi
     print_info "Enabling and starting systemd service..."
+    # Stale admin-unit artifacts in /etc shadow the packaged unit and make
+    # `enable --now` fail (e.g. old drop-ins referencing binaries that no
+    # longer exist — reported as ExecStartPre 203/EXEC restart loops).
+    # The AUR package ships its own unit under /usr/lib/systemd/system, so
+    # anything under /etc/systemd/system for this unit is foreign/stale.
+    local gpu_unit="/etc/systemd/system/cyan-skillfish-governor-smu.service"
+    if [[ -f "$gpu_unit" || -d "${gpu_unit}.d" || -L "/etc/systemd/system/multi-user.target.wants/cyan-skillfish-governor-smu.service" ]]; then
+        print_info "Removing stale /etc unit override for cyan-skillfish-governor-smu..."
+        systemctl stop cyan-skillfish-governor-smu.service 2>/dev/null || true
+        systemctl disable cyan-skillfish-governor-smu.service 2>/dev/null || true
+        rm -f "$gpu_unit" "/etc/systemd/system/multi-user.target.wants/cyan-skillfish-governor-smu.service"
+        rm -rf "${gpu_unit}.d"
+        systemctl daemon-reload || true
+    fi
     systemctl enable --now cyan-skillfish-governor-smu.service || {
         fail_with_log "Failed to enable GPU governor service." "GPU Governor Setup — enable service"
         return 1
@@ -6296,6 +6347,10 @@ oc_run_bc250_detect() {
         fail_with_log "'stress' not found in PATH — bc250-detect needs it to load the CPU. Install the CPU Governor first (Install Manual 1)." "bc250-detect — missing stress"
         return 1
     fi
+    if ! stress --version &>/dev/null; then
+        fail_with_log "'stress' is installed but not runnable (exec format error — corrupt package?). Reinstall it: sudo pacman -S stress" "bc250-detect — broken stress binary"
+        return 1
+    fi
 
     local cpu_dir="$EXTERNAL_DIR/bc250_smu_oc"
     if [[ ! -d "$cpu_dir" ]]; then
@@ -8141,6 +8196,21 @@ validate_combined_fix_prerequisites() {
         print_error "Insufficient disk space: ${free_space_gb:-0}GB free, ${required_space_gb}GB required"
         print_info "Please free up at least ${required_space_gb}GB of space on /home"
         return 1
+    fi
+
+    # /var backs the /etc overlay and pacman's cache/DB — it is ~230MB on
+    # SteamOS. When it fills, pacman fails with a misleading '/etc too full'
+    # deep into the build. Fail early with the real cause instead.
+    local var_free_mb
+    var_free_mb=$(df --output=avail -m /var 2>/dev/null | tail -1 | tr -d ' ')
+    if [[ -n "$var_free_mb" ]] && (( var_free_mb < 100 )); then
+        print_error "Insufficient space on /var: ${var_free_mb}MB free (~100MB minimum — pacman state and the /etc overlay live there)"
+        print_info "Biggest /var/lib consumers:"
+        du -sm /var/lib/* 2>/dev/null | sort -rn | head -5 | while read -r mb d; do echo -e "    ${DIM}${mb}MB  $d${RESET}"; done
+        print_info "Leftover umr build trees (/var/lib/umr, /var/lib/bc250-control/.build) can be moved to /home or deleted."
+        return 1
+    elif [[ -n "$var_free_mb" ]] && (( var_free_mb < 250 )); then
+        print_warning "Low space on /var: ${var_free_mb}MB free — pacman installs may fail midway ('/etc too full')."
     fi
 
     # Check build tools (meson/ninja are auto-installed later by gfx1013_ensure_mesa_build_deps)

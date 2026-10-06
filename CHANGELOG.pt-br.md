@@ -7,6 +7,37 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.10.2 — 2026-10-06
+
+**Correções (das issues #34, #38, #40, #41 do GitHub):**
+
+- **Governor de CPU: shared venv obsoleto do pipx recriado
+  automaticamente** — após um bump de Python do SteamOS (ex. 3.13→3.14) o
+  `/var/lib/bc250/pipx/shared` existente fica inutilizável e todo
+  `pipx install` morria em `list_installed_packages` com JSONDecodeError
+  de stdout vazio (#41). O shared venv agora é validado (versão do Python
+  igual à do sistema + pip funcionando) e reconstruído quando obsoleto.
+- **Governor de CPU: binário `stress` corrompido detectado** — uma
+  instalação pacman interrompida pode deixar o `stress` quebrado
+  (`Exec format error` quando o bc250-detect o executa, #38). A
+  instalação agora verifica e reinstala uma vez; o `bc250-detect` falha
+  cedo com mensagem clara em vez de traceback de OSError.
+- **GPU Governor: overrides obsoletos de unit em /etc removidos antes de
+  habilitar** — `enable --now` falhava em loops 203/EXEC quando artefatos
+  antigos em `/etc/systemd/system/cyan-skillfish-governor-smu.service*`
+  (units/drop-ins de outras instalações, apontando para binários
+  inexistentes) mascaravam a unit do pacote (#34). O setup agora remove a
+  unit obsoleta de `/etc`, seus drop-ins `.service.d/` e o symlink wants,
+  recarrega o systemd, e a unit do pacote em `/usr/lib` assume.
+- **Combined Fix: checagem antecipada de espaço em /var + erro honesto de
+  disco cheio** — `/var` tem ~230MB no SteamOS e sustenta o overlay de
+  `/etc` + estado do pacman; quando enchia (ex. 170MB de restos de build
+  do umr em `/var/lib/umr`) o pacman morria no meio com '/etc too full'
+  e a mensagem culpava os guards de vermagic (#40). A validação agora
+  falha cedo com menos de 100MB livres em `/var` (listando os maiores
+  consumidores de /var/lib), avisa abaixo de 250MB, e o `run_with_retry`
+  reporta erro de disco cheio como tal em vez de tentar de novo.
+
 ## v1.10.1 — 2026-10-06
 
 **Correções:**
