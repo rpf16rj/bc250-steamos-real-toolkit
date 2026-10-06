@@ -125,6 +125,7 @@ persist_detect_and_record_installed() {
     openlinkhub_installed 2>/dev/null && persist_state_add "openlinkhub"
     xone_installed 2>/dev/null && persist_state_add "xbox"
     cec_control_installed 2>/dev/null && persist_state_add "cec"
+    cec_retrain_installed 2>/dev/null && persist_state_add "cec_retrain"
     [[ -f /etc/bc250-cu-live-manager.conf ]] && persist_state_add "cu"
     core_unlock_persist_installed 2>/dev/null && persist_state_add "core_unlock"
     ram_split_installed 2>/dev/null && persist_state_add "ram_split"
@@ -4354,12 +4355,13 @@ install_fsr4_proton() {
     echo -e "  ${BOLD}Launch options (optional, per-game):${RESET}"
     echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%            # disable FSR4 upgrade${RESET}"
     echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%               # FSR4 watermark + OptiScaler log${RESET}"
-    echo -e "  ${DIM}  RADV_GFX103=1 %command%                    # enable mesh/task shaders${RESET}"
+    echo -e "  ${DIM}  RADV_DIRECTMESH=1 %command%                # enable mesh/task shaders${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411f %command%   # default bridge: BC-250 fork RC11 (no need to set)${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=signed %command%     # AMD's signed 4.0.2 bridge${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411b %command%     # third-party 4.1.1b, RDNA2 ghosting fix${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411rc9 %command%   # older fork bridge RC9${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411rc10 %command%  # older fork bridge RC10${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=helixsr %command%     # DLSS Model E via DX12 compute (D3D12 only)${RESET}"
     echo -e "  ${DIM}  PROTON_OPTISCALER_NAME=dxgi.dll %command%  # fix for games shipping own winmm.dll${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true\" %command%  # enable DLSS+Reflex via OptiScaler${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true;Spoofing.Registry=true\" %command%${RESET}"
@@ -4585,7 +4587,7 @@ install_gfx1013_fix() {
     echo -e "  ${DIM}Includes kernel patches + Mesa/RADV patches for full async compute functionality.${RESET}"
     echo -e "  ${DIM}Kernel: compute GFXOFF guard, PASID TLB fix, KFD runlist flush, TTM guard,${RESET}"
     echo -e "  ${DIM}  widened SMU SCLK range (350-2230 MHz) for userspace governors.${RESET}"
-    echo -e "  ${DIM}Mesa: async compute fix, mesh/task shaders (opt-in via RADV_GFX103=1),${RESET}"
+    echo -e "  ${DIM}Mesa: async compute fix, DirectMesh mesh/task shaders (opt-in via RADV_DIRECTMESH=1),${RESET}"
     echo -e "  ${DIM}  FSR4 V3 deferred SDot hybrid (MAD24 chains, dense pre-pass, always active).${RESET}"
     echo -e "  ${DIM}Performance gains of +20-25% in async compute workloads (e.g., Cyberpunk 2077).${RESET}"
     echo ""
@@ -4593,8 +4595,8 @@ install_gfx1013_fix() {
     # Mesh shader mode selection
     local mesh_flag=""
     echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
-    echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
-    echo -e "  ${DIM}     Supports both MESH and TASK shaders. Opt-in per-game with RADV_GFX103=1.${RESET}"
+    echo -e "  ${DIM}  1) MastaG (default): DirectMesh v1.3 mesh+task shaders via RADV_DIRECTMESH=1${RESET}"
+    echo -e "  ${DIM}     MESH+TASK, barycentrics, DGC and indexed draws. Opt-in per-game.${RESET}"
     echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
     echo -e "  ${DIM}     MESH always available, no TASK shader support. No env var needed.${RESET}"
     echo ""
@@ -4820,7 +4822,7 @@ install_combined_fix() {
     local mesh_flag=""
     if [[ $do_gfx -eq 1 ]]; then
         echo -e "  ${CYAN}Mesh Shader Mode:${RESET}"
-        echo -e "  ${DIM}  1) MastaG (default): GFX10.3 spoof + mesh/task shaders via RADV_GFX103=1${RESET}"
+        echo -e "  ${DIM}  1) MastaG (default): DirectMesh v1.3 mesh+task shaders via RADV_DIRECTMESH=1${RESET}"
         echo -e "  ${DIM}  2) Native (lonewolf): Native MESH only on GFX10, no GFX10.3 spoof${RESET}"
         echo ""
         local mesh_choice
@@ -5480,6 +5482,132 @@ run_cec_control() {
         XDG_RUNTIME_DIR="/run/user/$user_id" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$user_id/bus" \
         bash "$cec_script"
+}
+
+# --- CEC Link-Retrain Daemon (MastaG bc250-cec, upstream ad7e79c) ------------
+# Companion to bc250-cec.sh, solving a different problem: a CH7218-class
+# DP->HDMI adapter never restarts its HDMI output when the TV/AVR behind it
+# comes back (power-on or input switch) and never generates a hotplug for the
+# kernel to see. This root systemd daemon watches CEC traffic (display power
+# poll + active-source events naming our physical address) and retrains the
+# DP link via the connector's debugfs link_settings — invisible to
+# gamescope/KDE, unlike the old full replug (still selectable via
+# RELINK_METHOD=hotplug in /etc/bc250-cec.conf). Detection-only by default:
+# never transmits standby/active-source. Waits quietly when no CEC adapter
+# exists. Installs to the root fs, so it is persisted across SteamOS updates.
+
+CEC_RETRAIN_DIR_NAME="bc250-cec-retrain"
+
+cec_retrain_installed() {
+    [[ -f /etc/systemd/system/bc250-cec.service ]]
+}
+
+install_cec_retrain() {
+    print_step "CEC-R" "CEC Link-Retrain Daemon (MastaG bc250-cec)"
+    echo -e "  ${DIM}  Retrains the DP link when the TV/AVR behind a DP->HDMI adapter${RESET}"
+    echo -e "  ${DIM}  powers back on or switches input to us — fixes 'no signal' without a replug.${RESET}"
+    echo ""
+
+    if cec_retrain_installed; then
+        print_info "Already installed. Config: /etc/bc250-cec.conf — logs: journalctl -u bc250-cec -f"
+        return 0
+    fi
+
+    fixes_repo_sync || return 1
+    local src_dir="$FIXES_REPO_DIR/$CEC_RETRAIN_DIR_NAME"
+    if [[ ! -f "$src_dir/bc250-cec-daemon.sh" || ! -f "$src_dir/bc250-cec.service" ]]; then
+        fail_with_log "CEC retrain files not found in the fixes repository." "CEC Link-Retrain — missing files"
+        return 1
+    fi
+
+    # Deps: cec-ctl (v4l-utils) for the CEC bus work; python + python-evdev
+    # only for the opt-in wake-keypress hook (off by default).
+    local missing=()
+    command -v cec-ctl >/dev/null 2>&1 || missing+=("v4l-utils")
+    command -v python3 >/dev/null 2>&1 || missing+=("python")
+    python3 -c "import evdev" 2>/dev/null || missing+=("python-evdev")
+
+    local was=0; is_steamos && { was=1; steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }; }
+    if (( ${#missing[@]} > 0 )); then
+        print_info "Installing missing dependencies: ${missing[*]}"
+        if ! LC_ALL=C pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+            print_error "Failed to install dependencies: ${missing[*]}"
+            (( was )) && steamos-readonly enable || true
+            return 1
+        fi
+    fi
+
+    install -Dm755 "$src_dir/bc250-cec-daemon.sh" /usr/lib/bc250-cec/bc250-cec-daemon.sh || {
+        print_error "Failed to install daemon script."
+        (( was )) && steamos-readonly enable || true
+        return 1
+    }
+    [[ -f /etc/bc250-cec.conf ]] || install -m644 "$src_dir/bc250-cec.conf" /etc/bc250-cec.conf
+    install -m644 "$src_dir/bc250-cec.service" /etc/systemd/system/bc250-cec.service || {
+        print_error "Failed to install service unit."
+        (( was )) && steamos-readonly enable || true
+        return 1
+    }
+    systemctl daemon-reload
+    if ! systemctl enable --now bc250-cec.service 2>&1 | tail -3; then
+        print_error "Failed to enable bc250-cec.service"
+        (( was )) && steamos-readonly enable || true
+        return 1
+    fi
+    (( was )) && steamos-readonly enable || true
+
+    persist_state_add "cec_retrain"
+    print_success "CEC link-retrain daemon installed and running."
+    echo -e "  ${DIM}  No CEC adapter attached? It waits quietly — check: cec-ctl --list-devices${RESET}"
+    echo -e "  ${DIM}  Tunables: /etc/bc250-cec.conf — live log: journalctl -u bc250-cec -f${RESET}"
+}
+
+revert_cec_retrain() {
+    print_step "R-CEC" "Revert CEC Link-Retrain Daemon"
+
+    if ! cec_retrain_installed; then
+        print_info "Not installed."
+        return 0
+    fi
+    confirm "Remove the CEC link-retrain daemon?" || { print_info "Cancelled."; return 0; }
+
+    local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
+    systemctl disable --now bc250-cec.service 2>/dev/null || true
+    rm -f /etc/systemd/system/bc250-cec.service /etc/bc250-cec.conf
+    rm -rf /usr/lib/bc250-cec
+    systemctl daemon-reload
+    (( was )) && steamos-readonly enable || true
+
+    persist_state_remove "cec_retrain"
+    print_success "CEC link-retrain daemon removed."
+}
+
+run_cec_menu() {
+    while true; do
+        print_banner
+        print_section "HDMI-CEC"
+        echo ""
+        local rt_status="not installed"
+        cec_retrain_installed && rt_status="installed"
+        print_item "C" "TV / Receiver Control"        "Open bc250-cec.sh TUI (wake/standby, amp-follow, multi-device etiquette)"
+        print_item "I" "Install Link-Retrain Daemon"  "MastaG bc250-cec — retrains DP link when TV/AVR comes back (status: ${rt_status})"
+        print_item "R" "Revert Link-Retrain Daemon"   "Remove the bc250-cec retrain daemon"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" cec_choice
+
+        case "${cec_choice^^}" in
+            C) run_cec_control;            press_enter ;;
+            I) install_cec_retrain;        press_enter ;;
+            R) revert_cec_retrain;         press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$cec_choice'"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 # ==============================================================================
@@ -7093,7 +7221,7 @@ run_extras_menu() {
         print_item "A" "AIC8800 WiFi/BT Driver"      "Current D80 and legacy DC/DW MCU1 profiles"
         print_item "E" "BE200 Wi-Fi 7 Firmware"      "Install/revert Intel BE200 PCIe firmware (-100/-101 ucode)"
         print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
-        print_item "H" "HDMI-CEC / TV Control"        "Open bc250-cec.sh (TV/receiver control via cecd)"
+        print_item "H" "HDMI-CEC"                      "TV/receiver control + link-retrain daemon (fixes no-signal after AVR/TV switch)"
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
         print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
         print_item "D" "DS5 Bridge PS Button Fix"    "Install/revert patched hid-playstation.ko — DualSense PS button chord combos"
@@ -7111,7 +7239,7 @@ run_extras_menu() {
             A) run_aic8800_menu ;;
             E) run_be200_menu ;;
             F) run_sensors_menu ;;
-            H) run_cec_control;           press_enter ;;
+            H) run_cec_menu ;;
             K) run_coolercontrol_menu ;;
             P) install_persistence;       press_enter ;;
             D) run_ds5_bridge_menu ;;
@@ -7734,6 +7862,7 @@ reapply_installed_components() {
             coolercontrol) install_coolercontrol || print_error "CoolerControl reapply failed" ;;
             openlinkhub)   install_openlinkhub || print_error "OpenLinkHub reapply failed" ;;
             xbox)       install_xbox_adapter || print_error "Xbox adapter reapply failed" ;;
+            cec_retrain) install_cec_retrain || print_error "CEC retrain daemon reapply failed" ;;
             persistence) install_persistence || print_error "Persistence reapply failed" ;;
             recovery_entries) install_recovery_entries auto || print_error "Recovery entries reapply failed" ;;
             *)          print_info "Unknown persisted component: $component" ;;
@@ -7834,6 +7963,10 @@ EOF
 /etc/systemd/system-sleep/bc250-cec-amp.sh
 /etc/systemd/system/bc250-cec-poweroff-standby.service
 /etc/systemd/system/multi-user.target.wants/bc250-cec-poweroff-standby.service
+/etc/systemd/system/bc250-cec.service
+/etc/systemd/system/graphical.target.wants/bc250-cec.service
+/etc/bc250-cec.conf
+/usr/lib/bc250-cec/bc250-cec-daemon.sh
 /etc/atomic-update.conf.d/bc250-toolkit.conf
 EOF
     chown "$REAL_USER":"$REAL_USER" "$PERSIST_KEEP_FILE" 2>/dev/null || true

@@ -2,14 +2,16 @@
 
 Regenerated drop. Versus the previous state of this repo:
 
-- **Patch set regenerated from the shipping tree.** One coherent Mesa series
-  (`patches/mesa/series`, 5 patches against pristine `mesa-26.2.0-rc3`) replaces the previous
-  overlapping set; every patch applies in order and the result builds. Kernel set is the three
-  V33 patches plus the Cyan Skillfish SCLK range widening patch (350–2230 MHz).
+- **Patch set synced to MastaG Oct-2026 stable series.** `patches/mesa/series`
+  (7 patches against pristine `mesa-26.2.4`) adopts upstream's DirectMesh
+  generation, replacing the earlier GFX10.3-spoof approach. Kernel set is the
+  three gfx1013 patches plus the Cyan Skillfish telemetry/SCLK work.
   - 0001: compute queue fix (always active)
-  - 0002/0003: mesh/task shaders + queries (applied, gated by RADV_GFX103=1 at runtime)
-  - 0004: RADV_GFX103 env var promotion
-  - 0005: FSR4 sdot_4x8 dp4a selective reassociation (always active, from dmorazasanchez/bc250-fsr4 v2)
+  - 0002: DirectMesh v1.3 — Mesh+Task, barycentrics, no-op VRS, DGC,
+    multiview, indexed draws (opt-in via `RADV_DIRECTMESH=1`; the old
+    `RADV_GFX103` switch is gone)
+  - 0003-0007: FSR4 V3 deferred SDot, combined-unroll, imageprep/texture
+    candidates, resolution variants, production defaults
 - **Zero environment variables.** The `AMD_GFX1013_V33_*` gates are gone from the driver;
   feature selection happens by commenting patches out of the series before building.
 - **`install.sh` rewritten as a source build.** No binary payloads, no stable/preview channels;

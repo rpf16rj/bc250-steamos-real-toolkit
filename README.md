@@ -42,7 +42,8 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 ### Drivers & Fixes
 
-- **GFX1013 compute queue fix** — async compute + patched Mesa/RADV with mesh/task shader and FSR4 V3 support
+- **GFX1013 compute queue fix** — async compute + patched Mesa/RADV with DirectMesh (mesh/task shaders via `RADV_DIRECTMESH=1`) and FSR4 V3 support
+- **FSR4 Proton** — MastaG's prebuilt FSR4-capable Proton variants (GE-Proton, CachyOS native/SLR) with pinned OptiScaler manifest, FSR4 provider and the opt-in HelixSR upscaler (`PROTON_USE_OPTISCALER=helixsr` — DLSS Model E on DX12 compute, D3D12 games only)
 - **ACPI power states fix** — proper CPU C-/P-state tables (6c and 8c compatible)
 - **AIC8800 WiFi/BT drivers** — current AIC8800D80 support plus an explicit legacy-MCU1 profile for older AIC8800DC/DW WiFi dongles
 - **BE200 Wi-Fi 7 firmware** — for Intel BE200/BE201 PCIe cards missing ucode
@@ -169,8 +170,8 @@ This toolkit builds on top of great work from the BC-250 community. Huge thanks 
 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (ACPI fix, DisplayPort audio/video fix, AIC8800 WiFi/BT driver, HDMI-CEC control)
 - [DryhoppedIPA](https://github.com/DryhoppedIPA) — [bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix) (GFX1013 compute queue kernel + Mesa/RADV patches)
-- [MastaG](https://github.com/MastaG) — [linux-cachyos-bc250](https://github.com/MastaG/linux-cachyos-bc250) (updated Mesa/RADV patches: mesh/task shaders, compute queue, GFX10.3 promotion)
-- [lonewolf0622](https://github.com/lonewolf0622) — [BC250-Native-Mesh-Shaders-](https://github.com/lonewolf0622/BC250-Native-Mesh-Shaders-) (native MESH-only shader patch without GFX10.3 spoofing)
+- [MastaG](https://github.com/MastaG) — [linux-cachyos-bc250](https://github.com/MastaG/linux-cachyos-bc250) (updated Mesa/RADV patches: DirectMesh, compute queue, FSR4 — plus prebuilt FSR4 Proton packages)
+- [lonewolf0622](https://github.com/lonewolf0622) — [bc250meshtaskwork](https://github.com/lonewolf0622/bc250meshtaskwork) (DirectMesh v1.3: mesh/task shaders, barycentrics, DGC, multiview) and [HelixSR](https://github.com/lonewolf0622/HelixSR) (DLSS Model E upscaler via DX12 compute)
 - [dmorazasanchez](https://github.com/dmorazasanchez) — [bc250-fsr4](https://github.com/dmorazasanchez/bc250-fsr4) (FSR4 V3 deferred SDot hybrid optimization)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (PWM fan control driver)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (kernel patch for the 40 CU unlock)

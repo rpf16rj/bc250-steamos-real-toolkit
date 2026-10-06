@@ -1,32 +1,26 @@
 # Mesa patch series for GFX1013 (BC-250), applied in order against
-# pristine mesa-26.2.2 with `git apply` / `patch -p1`.
+# pristine mesa-26.2.4 with `git apply` / `patch -p1`.
 #
-# Patches 0001-0005 from MastaG/linux-cachyos-bc250 (Sep 2026), rebased
-# for Mesa 26.2.2 stable.
+# Patches 0001-0007 from MastaG/linux-cachyos-bc250 (Oct 2026 sync,
+# patches/mesa/ stable series for Mesa 26.2.4).
 #
 # 0001: Expose ACE compute queue + async compute threadgroup workaround.
-# 0002: Mesh/task shading on GFX1013 via GFX10.3 software path.
-# 0003: Mesh/task pipeline-statistics queries (requires 0002).
-# 0004: Opt-in RADV_GFX103=1 env var to promote GFX1013 to GFX10.3.
-#       Safe by itself — only activates when user sets the env var.
-#       Do not export globally; enable per-game only.
-# 0005: FSR4 V3 deferred SDot — MAD24 chains, dense SDot pre-pass,
+#       Always active.
+# 0002: DirectMesh v1.3 (lonewolf0622/bc250meshtaskwork) — VK_EXT_mesh_shader
+#       Mesh AND Task + VK_KHR_fragment_shader_barycentric + no-op VRS +
+#       VK_EXT_device_generated_commands + multiview + indexed Mesh draws.
+#       Replaces the old GFX10.3-spoof path (0002-0004 in the previous
+#       series); RADV_GFX103 is gone. Off unless RADV_DIRECTMESH=1 is set
+#       per game — never affects other GPUs or default rendering.
+# 0003: FSR4 V3 deferred SDot — MAD24 chains, dense SDot pre-pass,
 #       deferred lowering round. Always active.
-#       (stripped: ac_gpu_info.c and radv_physical_device.c changes are
-#       already in 0001 and 0004 respectively)
-# 0006: FSR4 combined-unroll selection (2.84) — NIR pattern matching.
-# 0007: FSR4 image-preparation and texture candidates.
-# 0008: FSR4 resolution-variant coverage and 8K store guard.
-# 0009: FSR4 production defaults — enables all FSR4 optimizations.
+# 0004: FSR4 combined-unroll selection — NIR pattern matching. Active by
+#       default.
+# 0005: FSR4 image-preparation and texture candidates (opt-in envs,
+#       flipped on by 0007).
+# 0006: FSR4 resolution-variant coverage and 8K store guard.
+# 0007: FSR4 production defaults — enables all FSR4 optimizations.
 #
 # Alternative: patches/mesa-native-mesh/series uses lonewolf0622's native
-# mesh approach (MESH only, no TASK, no GFX10.3 spoof needed).
-0001-gfx1013-compute-queue-fix.patch
-0002-gfx1013-mesh-task-shaders.patch
-0003-gfx1013-taskmesh-queries.patch
-0004-radv-gfx103.patch
-0005-bc250-fsr4-v3.patch
-0006-bc250-fsr4-combined-unroll.patch
-0007-bc250-fsr4-imageprep-texture.patch
-0008-bc250-fsr4-resolution-variants.patch
-0009-bc250-fsr4-production-defaults.patch
+# mesh approach (MESH only, no TASK) — mostly superseded by DirectMesh;
+# kept for users who need the smallest possible delta.

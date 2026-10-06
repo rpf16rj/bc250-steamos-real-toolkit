@@ -52,10 +52,28 @@ extras/                           # Optional add-ons (not in start.sh)
 ### Display/Audio
 - **Audio Fix** — DP audio/video clock fix + GPU metrics + telemetry + tunable cache
   - Optional sub-components (via prompt): DP audio clock, DP spread spectrum disable
-- **GFX1013 Compute Fix** — async compute + Mesa/RADV + mesh/task shaders + FSR4
+- **GFX1013 Compute Fix** — async compute + Mesa/RADV + DirectMesh
+  (mesh/task shaders, `RADV_DIRECTMESH=1`) + FSR4
+- **FSR4 Proton** — MastaG's prebuilt Proton packages (protonge /
+  proton-cachyos native/slr) pulled from his pacman repo, extracted to
+  `~/.local/share/Steam/compatibilitytools.d`. Ship pinned OptiScaler
+  manifest + FSR4 provider + **HelixSR** variant
+  (`PROTON_USE_OPTISCALER=helixsr` — DLSS Model E as DX12 compute,
+  D3D12 only, opt-in; needs pkgs built ≥ Oct-2026)
 - **Combined Fix** — single kernel build with selectable: audio + gfx1013 + vrr + allm
 - **EDID Override** — HF-VSDB for HDMI 2.1 PCON (FRL 48G, VRR 48-120, ALLM)
 - **AC-3 Surround** — HDMI/DP Dolby Digital 5.1 via eARC
+- **HDMI-CEC** — two complementary pieces: `bc250-cec.sh` upstream TUI
+  (TV/receiver control via Valve's cecd) + **CEC Link-Retrain Daemon**
+  (MastaG bc250-cec @ ad7e79c, vendored in
+  `external/bc250-steamos/bc250-cec-retrain/`). The daemon retrains the DP
+  link via debugfs `link_settings` when a CH7218-class DP->HDMI adapter's
+  TV/AVR powers on or switches input to us — fixes 'no signal' without a
+  replug. Root systemd service `bc250-cec.service`, conf
+  `/etc/bc250-cec.conf`, persisted across updates (`cec_retrain` state +
+  atomic-update keep list). Complementary to cecd, not conflicting — it
+  claims a second logical address (`--playback`, "SteamOS") purely for
+  detection; never transmits standby/active-source by default.
 - **VA-API Video Driver** — simpmix/bc250-encoding-decoding-fix; since v0.5.0 a
   full suite: H.264/HEVC encode + bit-exact H.264/HEVC decode (incl. Main10,
   `VAEntrypointVLD`) + VideoProc scaling, via Vulkan compute + threaded CPU

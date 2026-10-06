@@ -83,11 +83,22 @@ All patches live in `external/bc250-steamos/bc250-audio-fix/`.
 ### bc250-cyan-skillfish-gpu-telemetry.patch
 - **Purpose**: GPU utilization reporting — needed for correct GPU clock/load readings
 - **Always needed**: Yes (with audio fix, especially with CPU Core Unlock)
+- **Oct-2026 upstream update ported** (into `telemetry-cache-7.2.patch`,
+  the live consolidated patch): `gpu_busy_percent` previously sampled
+  only `gfx_ring[0]`, so compute-only workloads (Vulkan compute,
+  llama.cpp) read 0% busy. Now `cyan_skillfish_rings_busy()` counts the
+  GFX ring **or any compute ring** via `amdgpu_fence_count_emitted()`,
+  and the sampling loop sleeps (`usleep_range`) instead of `udelay`
+  busy-waiting — safe since only sysfs/hwmon/gpu_metrics readers reach
+  it (process context). ROCm/KFD hardware-scheduled queues remain
+  invisible (documented upstream limitation).
 
 ### GFX1013 patches (0001-gfx1013-compute-*)
-- **Purpose**: Enable async compute on GFX10 (GFX1013 spoof for mesh/task shaders)
+- **Purpose**: Enable async compute on GFX10 (kernel side of the DirectMesh path)
 - **Optional**: User selects in combined fix
-- **Mesa**: Requires patched Mesa/RADV build (build-mesa.sh)
+- **Mesa**: Requires patched Mesa/RADV build (build-mesa.sh — DirectMesh
+  series, opt-in via `RADV_DIRECTMESH=1`; the kernel patches are the
+  matching kernel fixes DirectMesh's compute-queue path requires)
 
 ### bc250-vcn-ungate.patch (DIAGNOSTIC ONLY — investigation concluded 2026-09-23)
 - **Verdict**: VCN block is electrically dead — `mmUVD_PGFSM_CONFIG` write

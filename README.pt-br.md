@@ -42,7 +42,8 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 ### Drivers & Correções
 
-- **Correção da fila de compute GFX1013** — compute assíncrono + Mesa/RADV patchadas com suporte a mesh/task shaders e FSR4 V3
+- **Correção da fila de compute GFX1013** — compute assíncrono + Mesa/RADV patchadas com DirectMesh (mesh/task shaders via `RADV_DIRECTMESH=1`) e suporte a FSR4 V3
+- **FSR4 Proton** — variantes Proton pré-compiladas do MastaG com FSR4 (GE-Proton, CachyOS native/SLR) com manifest OptiScaler pinado, provider FSR4 e o upscaler opt-in HelixSR (`PROTON_USE_OPTISCALER=helixsr` — DLSS Model E em compute DX12, só jogos D3D12)
 - **Correção de estados de energia ACPI** — tabelas ACPI C-/P-state corretas (compatíveis com 6c e 8c)
 - **Drivers WiFi/BT AIC8800** — suporte atual ao AIC8800D80 e perfil legacy-MCU1 explícito para dongles WiFi AIC8800DC/DW mais antigos
 - **Firmware BE200 Wi-Fi 7** — para placas PCIe Intel BE200/BE201 sem ucode
@@ -169,8 +170,8 @@ Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um 
 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (correção ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, controle HDMI-CEC)
 - [DryhoppedIPA](https://github.com/DryhoppedIPA) — [bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix) (patches de kernel + Mesa/RADV para a fila de compute GFX1013)
-- [MastaG](https://github.com/MastaG) — [linux-cachyos-bc250](https://github.com/MastaG/linux-cachyos-bc250) (patches atualizados de Mesa/RADV: mesh/task shaders, compute queue, promoção GFX10.3)
-- [lonewolf0622](https://github.com/lonewolf0622) — [BC250-Native-Mesh-Shaders-](https://github.com/lonewolf0622/BC250-Native-Mesh-Shaders-) (patch de mesh shaders nativo sem spoofing de GFX10.3)
+- [MastaG](https://github.com/MastaG) — [linux-cachyos-bc250](https://github.com/MastaG/linux-cachyos-bc250) (patches atualizados de Mesa/RADV: DirectMesh, compute queue, FSR4 — além dos pacotes Proton FSR4 pré-compilados)
+- [lonewolf0622](https://github.com/lonewolf0622) — [bc250meshtaskwork](https://github.com/lonewolf0622/bc250meshtaskwork) (DirectMesh v1.3: mesh/task shaders, barycentrics, DGC, multiview) e [HelixSR](https://github.com/lonewolf0622/HelixSR) (upscaler DLSS Model E via compute DX12)
 - [dmorazasanchez](https://github.com/dmorazasanchez) — [bc250-fsr4](https://github.com/dmorazasanchez/bc250-fsr4) (otimização FSR4 V3 deferred SDot hybrid)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (driver de controle PWM dos fans)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (patch de kernel para o desbloqueio de 40 CUs)
