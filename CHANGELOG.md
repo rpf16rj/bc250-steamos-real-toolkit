@@ -7,6 +7,37 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.10.2 — 2026-10-06
+
+**Fixes (from GitHub issues #34, #38, #40, #41):**
+
+- **CPU Governor: stale pipx shared venv recreated automatically** —
+  after a SteamOS Python bump (e.g. 3.13→3.14) the existing
+  `/var/lib/bc250/pipx/shared` venv becomes unusable, so every `pipx
+  install` died in `list_installed_packages` with a JSONDecodeError on
+  empty stdout (#41). The shared venv is now validated (Python version
+  match + working pip) and rebuilt when stale.
+- **CPU Governor: corrupt `stress` binary detected** — a half-interrupted
+  pacman run can leave `stress` unrunnable (`Exec format error` when
+  bc250-detect forks it, #38). Install now sanity-checks and reinstalls
+  it once; `bc250-detect` fails early with a clear message instead of an
+  OSError traceback.
+- **GPU Governor: stale /etc unit overrides removed before enable** —
+  `enable --now` failed with 203/EXEC restart loops when old
+  `/etc/systemd/system/cyan-skillfish-governor-smu.service*` artifacts
+  (foreign units/drop-ins referencing deleted binaries) shadowed the
+  packaged unit (#34). The setup now purges the stale `/etc` unit file,
+  its `.service.d/` drop-ins and the wants symlink, reloads systemd, and
+  the packaged `/usr/lib` unit takes over.
+- **Combined Fix: early /var space check + honest disk-full errors** —
+  `/var` is ~230MB on SteamOS and backs the `/etc` overlay + pacman
+  state; when it filled (e.g. 170MB of leftover umr build tree in
+  `/var/lib/umr`) pacman died midway with a misleading '/etc too full'
+  and the failure message blamed vermagic guards (#40). Prerequisite
+  validation now fails early under 100MB free on `/var` (lists the top
+  /var/lib consumers), warns under 250MB, and `run_with_retry` reports
+  disk-full output as such instead of retrying.
+
 ## v1.10.1 — 2026-10-06
 
 **Fixes:**
