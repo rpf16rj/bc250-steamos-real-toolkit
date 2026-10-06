@@ -5,9 +5,9 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 VERSION=$(<"${HERE}/VERSION")
-MESA_VERSION=26.2.2
+MESA_VERSION=26.2.4
 MESA_TARBALL_URL=https://archive.mesa3d.org/mesa-${MESA_VERSION}.tar.xz
-MESA_TARBALL_SHA256=eeb29ca7e56cfaa8e8a79538dcf834e3b18e501c31bef5145e959ea437cc4216
+MESA_TARBALL_SHA256=bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9
 BUILD_ROOT="${HERE}/build-mesa"
 MESA_PREFIX="/opt/bc250-gfx1013/${VERSION}"
 
@@ -246,10 +246,10 @@ fi
 echo ""
 if [[ "$MESH_MODE" == "mastag" ]]; then
     echo "   To enable mesh/task shaders per-game, set:"
-    echo "     RADV_GFX103=1"
+    echo "     RADV_DIRECTMESH=1"
 else
     echo "   Native mesh shaders (MESH only, no TASK) are always available."
-    echo "   No RADV_GFX103 env var needed."
+    echo "   No RADV_DIRECTMESH env var needed."
 fi
 echo ""
 echo "   Reboot required for VK_DRIVER_FILES to take effect."

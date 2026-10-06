@@ -36,7 +36,8 @@ https://github.com/dmorazasanchez/bc250-fsr4/tree/v3), reduced to the
 pieces that measurably matter by bisecting on real hardware:
 
  - The GFX1013 compute-queue/identity changes and the RADV_GFX103 override
-   are dropped: they duplicate 0001 and 0004 byte-for-byte.
+   are dropped: the first duplicates 0001 byte-for-byte, and DirectMesh
+   (0002) supersedes the second.
  - The LDS spill-slot override in aco_spill.cpp is dropped. Restoring it
    alone to an otherwise-trimmed build reproduced the full regression, so
    it earns nothing, and it deliberately traded occupancy away.
@@ -47,12 +48,20 @@ pieces that measurably matter by bisecting on real hardware:
 Verified against a positive control: a testing driver built from a
 byte-identical copy of the full patch measured ~4.2 ms and ~89 fps,
 confirming the comparison harness reproduced the known-good result.
+
+BC-250 repository change: the MAD24 rules emit nir_op_imad24_ir3, which only
+ir3 and ACO (with this patch) implement, but were gated only on
+!has_sdot_4x8, so any other backend without packed dot product - RADV or
+radeonsi on LLVM, for one - would be handed an opcode it cannot compile.
+They now also require the new nir_shader_compiler_options::bc250_sdot_mad24,
+which RADV sets only for ACO on GFX1013; every other driver keeps
+upstream's sdot_4x8_iadd lowering unchanged.
 ---
 diff --git a/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp b/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp
-index d509130f4d8..4f5722b0404 100644
+index e17da25945e..b29f1471df5 100644
 --- a/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp
 +++ b/src/amd/compiler/instruction_selection/aco_select_nir_alu.cpp
-@@ -1766,6 +1766,7 @@ visit_alu_instr(isel_context* ctx, nir_alu_instr* instr)
+@@ -1769,6 +1769,7 @@ visit_alu_instr(isel_context* ctx, nir_alu_instr* instr)
        }
        break;
     }
@@ -60,7 +69,7 @@ index d509130f4d8..4f5722b0404 100644
     case nir_op_imul24_relaxed: {
        if (dst.regClass() == s1) {
           emit_sop2_instruction(ctx, instr, aco_opcode::s_mul_i32, dst, false, 0x3);
-@@ -1776,6 +1777,22 @@ visit_alu_instr(isel_context* ctx, nir_alu_instr* instr)
+@@ -1779,6 +1780,22 @@ visit_alu_instr(isel_context* ctx, nir_alu_instr* instr)
        }
        break;
     }
@@ -84,10 +93,19 @@ index d509130f4d8..4f5722b0404 100644
        if (dst.regClass() == s1) {
           Operand op1(get_alu_src(ctx, instr->src[0]));
 diff --git a/src/amd/vulkan/radv_shader.c b/src/amd/vulkan/radv_shader.c
-index c5f78f54d71..4f0d30ea28b 100644
+index 8ba6f45c0d1..3cc00675073 100644
 --- a/src/amd/vulkan/radv_shader.c
 +++ b/src/amd/vulkan/radv_shader.c
-@@ -169,6 +169,121 @@ radv_can_dump_shader_stats(const struct radv_compiler_info *compiler_info, nir_s
+@@ -60,6 +60,8 @@ get_nir_options_for_stage(struct radv_compiler_info *compiler_info, mesa_shader_
+    const bool split_fma = (stage <= MESA_SHADER_GEOMETRY || stage == MESA_SHADER_MESH) && compiler_info->key.split_fma;
+ 
+    ac_nir_set_options(compiler_info->ac, compiler_info->key.use_llvm, options);
++   /* BC-250 FSR4: signed MAD24 SDot lowering (ACO implements imad24_ir3, LLVM does not). */
++   options->bc250_sdot_mad24 = compiler_info->debug.family == CHIP_GFX1013 && !compiler_info->key.use_llvm;
+ 
+    if (split_fma) {
+       if (options->float_mul_add16 & nir_float_muladd_support_has_ffma)
+@@ -171,6 +173,121 @@ radv_can_dump_shader_stats(const struct radv_compiler_info *compiler_info, nir_s
     return compiler_info->debug.dump_shader_stats && !is_meta_shader(nir);
  }
  
@@ -209,7 +227,7 @@ index c5f78f54d71..4f0d30ea28b 100644
  void
  radv_optimize_nir(struct nir_shader *shader, bool optimize_conservatively)
  {
-@@ -790,7 +905,23 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
+@@ -792,7 +909,23 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
        NIR_PASS(_, nir, nir_opt_find_array_copies);
        NIR_PASS(_, nir, nir_lower_vars_to_ssa);
  
@@ -235,7 +253,7 @@ index c5f78f54d71..4f0d30ea28b 100644
        NIR_PASS(_, nir, nir_opt_memcpy);
        NIR_PASS(_, nir, nir_opt_deref);
 diff --git a/src/compiler/nir/nir_opt_algebraic.py b/src/compiler/nir/nir_opt_algebraic.py
-index fd5c6bf00a4..0771b8f28ba 100644
+index fd5c6bf00a4..44e30815782 100644
 --- a/src/compiler/nir/nir_opt_algebraic.py
 +++ b/src/compiler/nir/nir_opt_algebraic.py
 @@ -444,10 +444,47 @@ for sz in (16, 32, 64):
@@ -290,19 +308,37 @@ index fd5c6bf00a4..0771b8f28ba 100644
  udot_4x8_a_b = ('iadd', ('iadd', ('umul24_relaxed', ('extract_u8', a, 0), ('extract_u8', b, 0)),
                                   ('umul24_relaxed', ('extract_u8', a, 1), ('extract_u8', b, 1))),
                          ('iadd', ('umul24_relaxed', ('extract_u8', a, 2), ('extract_u8', b, 2)),
-@@ -462,7 +499,14 @@ udot_2x16_a_b = ('iadd', ('umul24_relaxed', ('extract_u16', a, 0), ('extract_u16
+@@ -462,7 +499,17 @@ udot_2x16_a_b = ('iadd', ('umul24_relaxed', ('extract_u16', a, 0), ('extract_u16
                           ('umul24_relaxed', ('extract_u16', a, 1), ('extract_u16', b, 1)))
  
  optimizations.extend([
 -   (('sdot_4x8_iadd', a, b, c), ('iadd', sdot_4x8_a_b, c), '!options->has_sdot_4x8'),
 +   # BC-250/GFX1013: constant x data SDot benefits from a signed MAD24 chain.
 +   # Keep data x data on EXP028's balanced MUL24 tree (important for ED7).
-+   (('sdot_4x8_iadd', '#a', b, 'c(is_not_const)'), sdot_4x8_a_b_madacc, '!options->has_sdot_4x8'),
-+   (('sdot_4x8_iadd', a, '#b', 'c(is_not_const)'), sdot_4x8_a_b_madacc, '!options->has_sdot_4x8'),
-+   (('sdot_4x8_iadd', '#a', b, '#c'), ('iadd', sdot_4x8_a_b_madconst, c), '!options->has_sdot_4x8'),
-+   (('sdot_4x8_iadd', a, '#b', '#c'), ('iadd', sdot_4x8_a_b_madconst, c), '!options->has_sdot_4x8'),
-+   (('sdot_4x8_iadd', a, b, '#c'), ('iadd', sdot_4x8_a_b_balanced, c), '!options->has_sdot_4x8'),
-+   (('sdot_4x8_iadd', a, b, c), ('iadd', sdot_4x8_a_b_reassoc, c), '!options->has_sdot_4x8'),
++   # imad24_ir3 only exists in ir3 and (with this series) ACO, so these are opt-in per backend.
++   (('sdot_4x8_iadd', '#a', b, 'c(is_not_const)'), sdot_4x8_a_b_madacc, '!options->has_sdot_4x8 && options->bc250_sdot_mad24'),
++   (('sdot_4x8_iadd', a, '#b', 'c(is_not_const)'), sdot_4x8_a_b_madacc, '!options->has_sdot_4x8 && options->bc250_sdot_mad24'),
++   (('sdot_4x8_iadd', '#a', b, '#c'), ('iadd', sdot_4x8_a_b_madconst, c), '!options->has_sdot_4x8 && options->bc250_sdot_mad24'),
++   (('sdot_4x8_iadd', a, '#b', '#c'), ('iadd', sdot_4x8_a_b_madconst, c), '!options->has_sdot_4x8 && options->bc250_sdot_mad24'),
++   (('sdot_4x8_iadd', a, b, '#c'), ('iadd', sdot_4x8_a_b_balanced, c), '!options->has_sdot_4x8 && options->bc250_sdot_mad24'),
++   (('sdot_4x8_iadd', a, b, c), ('iadd', sdot_4x8_a_b_reassoc, c), '!options->has_sdot_4x8 && options->bc250_sdot_mad24'),
++   # Everyone else: upstream's lowering.
++   (('sdot_4x8_iadd', a, b, c), ('iadd', sdot_4x8_a_b_balanced, c), '!options->has_sdot_4x8'),
     (('udot_4x8_uadd', a, b, c), ('iadd', udot_4x8_a_b, c), '!options->has_udot_4x8'),
     (('sudot_4x8_iadd', a, b, c), ('iadd', sudot_4x8_a_b, c), '!options->has_sudot_4x8'),
     (('sdot_2x16_iadd', a, b, c), ('iadd', sdot_2x16_a_b, c), '!options->has_dot_2x16'),
+diff --git a/src/compiler/nir/nir_shader_compiler_options.h b/src/compiler/nir/nir_shader_compiler_options.h
+index 8f0e9a7c0e1..8fe5962bf8d 100644
+--- a/src/compiler/nir/nir_shader_compiler_options.h
++++ b/src/compiler/nir/nir_shader_compiler_options.h
+@@ -662,6 +662,10 @@ typedef struct nir_shader_compiler_options {
+    /** Backend supports sdot_4x8_iadd. */
+    bool has_sdot_4x8;
+ 
++   /** Lower sdot_4x8_iadd through the BC-250 (GFX1013) signed MAD24 chains, which emit imad24_ir3.
++    * Only for backends that implement imad24_ir3 (set by RADV for ACO on GFX1013). */
++   bool bc250_sdot_mad24;
++
+    /** Backend supports udot_4x8_uadd. */
+    bool has_udot_4x8;
+ 

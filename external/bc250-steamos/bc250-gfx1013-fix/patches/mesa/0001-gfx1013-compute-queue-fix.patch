@@ -13,7 +13,7 @@ Mesa 26.2.1 already added GFX1013 to that same condition upstream.
  1 file changed, 5 insertions(+), 6 deletions(-)
 
 diff --git a/src/amd/common/ac_gpu_info.c b/src/amd/common/ac_gpu_info.c
-index 41e5d9b696c..33a3ced5efc 100644
+index 39e7bba153f..dfacc34bb58 100644
 --- a/src/amd/common/ac_gpu_info.c
 +++ b/src/amd/common/ac_gpu_info.c
 @@ -483,11 +483,9 @@ ac_fill_hw_ip_info(struct radeon_info *info, const struct drm_amdgpu_info_device
@@ -30,14 +30,14 @@ index 41e5d9b696c..33a3ced5efc 100644
 +       */
        info->ip[ip_type].num_queues = util_bitcount(ip_info->available_rings);
     }
-
-@@ -1019,7 +1017,8 @@ void ac_fill_bug_info(struct radeon_info *info)
+ 
+@@ -1020,7 +1018,8 @@ void ac_fill_bug_info(struct radeon_info *info)
      * dimension mode.
      */
     info->has_async_compute_threadgroup_bug = info->family == CHIP_ICELAND ||
 -                                             info->family == CHIP_TONGA;
 +                                             info->family == CHIP_TONGA ||
 +                                             info->family == CHIP_GFX1013;
-
+ 
     /* GFX7 CP requires 32 bytes alignment for the indirect buffer arguments on
      * the compute queue.

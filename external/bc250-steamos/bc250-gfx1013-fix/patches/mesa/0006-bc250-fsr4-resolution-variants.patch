@@ -4,7 +4,7 @@ Date: Sun, 7 Sep 2026 00:00:00 +0000
 Subject: [PATCH 8/8] radv: BC-250 FSR4 resolution-variant coverage and 8K store guard
 
 Opt-in extension of the FSR4 optimization to the shader buckets outside
-the one 0006/0007 already covered, from the 2026-09-07 research bundle.
+the one 0004/0005 already covered, from the 2026-09-07 research bundle.
 Both parts are off unless BC250_FSR4_RESOLUTION_VARIANTS=1.
 
 FSR4 ships separate shaders per output-resolution bucket, so the earlier
@@ -35,10 +35,10 @@ Origin: bc250-fsr4-discord-20260907 bundle,
 upgrade-from-previous/0003-resolution-over-composed.patch
 ---
 diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
-index a44040db306..bc771465780 100644
+index 8f08970af13..55cac9bf20d 100644
 --- a/src/amd/vulkan/radv_physical_device.c
 +++ b/src/amd/vulkan/radv_physical_device.c
-@@ -375,7 +375,19 @@ radv_device_get_cache_uuid(struct radv_physical_device *pdev, void *uuid)
+@@ -392,7 +392,19 @@ radv_device_get_cache_uuid(struct radv_physical_device *pdev, void *uuid)
     unsigned bc250_imageprep_mode = debug_get_num_option("BC250_FSR4_IMAGEPREP", 0);
     _mesa_blake3_update(&ctx, bc250_imageprep_version, strlen(bc250_imageprep_version));
     _mesa_blake3_update(&ctx, &bc250_imageprep_mode, sizeof(bc250_imageprep_mode));
@@ -59,10 +59,10 @@ index a44040db306..bc771465780 100644
  
     memcpy(uuid, blake3, VK_UUID_SIZE);
 diff --git a/src/amd/vulkan/radv_shader.c b/src/amd/vulkan/radv_shader.c
-index 07c1e23d41d..1d25099994f 100644
+index bdd9313f75e..11d030dde78 100644
 --- a/src/amd/vulkan/radv_shader.c
 +++ b/src/amd/vulkan/radv_shader.c
-@@ -8519,6 +8519,30 @@ bc250_fsr4_profile(const void *bytes, size_t size)
+@@ -8523,6 +8523,30 @@ bc250_fsr4_profile(const void *bytes, size_t size)
        {61308, 0x8debe292dfad97f5ull, 1025}, /* f768eb37222b4fbd */
        {109064, 0xf89485f5751695fbull, 25}, /* 76367260ae8284e1 */
        {125784, 0x60169c44f557ae55ull, 1}, /* 88fc1786caa6ae3c */
@@ -93,7 +93,7 @@ index 07c1e23d41d..1d25099994f 100644
     };
     bool candidate = false;
     for (unsigned i = 0; i < ARRAY_SIZE(profiles); i++) candidate |= profiles[i].size == size;
-@@ -8528,6 +8552,10 @@ bc250_fsr4_profile(const void *bytes, size_t size)
+@@ -8532,6 +8556,10 @@ bc250_fsr4_profile(const void *bytes, size_t size)
     for (unsigned i = 0; i < ARRAY_SIZE(profiles); i++)
        if (profiles[i].size == size && profiles[i].hash == hash) {
           unsigned flags = profiles[i].flags;
@@ -104,7 +104,7 @@ index 07c1e23d41d..1d25099994f 100644
           if (size == 125784 && hash == 0x60169c44f557ae55ull &&
               debug_get_num_option("BC250_FSR4_TEXTURE", 0) == 1)
              flags |= 524304; /* Existing pointwise schedule, eight outputs. */
-@@ -15005,6 +15033,57 @@ bc250_imageprep_spirv(const struct radv_compiler_info *compiler_info,
+@@ -15009,6 +15037,57 @@ bc250_imageprep_spirv(const struct radv_compiler_info *compiler_info,
     return bc250_imageprep_candidate;
  }
  
@@ -162,7 +162,7 @@ index 07c1e23d41d..1d25099994f 100644
  nir_shader *
  radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct radv_shader_stage *stage,
                           const struct radv_spirv_to_nir_options *options, bool is_internal)
-@@ -15028,6 +15107,10 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
+@@ -15032,6 +15111,10 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
     } else {
        size_t spirv_size;
        const uint32_t *spirv = bc250_imageprep_spirv(compiler_info, stage, is_internal, &spirv_size);
@@ -173,7 +173,7 @@ index 07c1e23d41d..1d25099994f 100644
        assert(stage->spirv.size % 4 == 0);
  
        const bool dump_spirv = compiler_info->debug.dump_spirv &&
-@@ -15190,6 +15273,7 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
+@@ -15194,6 +15277,7 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct
        NIR_PASS(_, nir, nir_lower_doubles, NULL, nir->options->lower_doubles_options);
  
        NIR_PASS(_, nir, nir_normalize_sin_cos);

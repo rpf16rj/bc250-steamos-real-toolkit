@@ -98,10 +98,16 @@ applies patches, builds only the amdgpu.ko module, and installs it.
 ## Mesa Build (in external/bc250-steamos/bc250-gfx1013-fix/)
 
 ### build-mesa.sh
-- Builds patched Mesa/RADV with GFX1013 spoof + mesh/task shader support
+- Builds patched Mesa/RADV (base: `mesa-26.2.4` tarball) with GFX1013 fixes + mesh/task shader support
 - Two modes:
-  - MastaG (default): GFX10.3 spoof + mesh/task via RADV_GFX103=1
-  - Native: Native MESH only on GFX10, no GFX10.3 spoof
+  - MastaG (default): DirectMesh v1.3 (lonewolf0622) — Mesh+Task,
+    barycentrics, no-op VRS, DGC, multiview, indexed draws; opt-in per game
+    via `RADV_DIRECTMESH=1` (replaces the old GFX10.3-spoof series;
+    `RADV_GFX103` no longer exists)
+  - Native: Native MESH only on GFX10, no spoof
+- Series: `patches/mesa/series` = MastaG stable set 0001-0007
+  (compute-queue fix, directmesh, FSR4 v3/unroll/imageprep/res-variants/defaults);
+  pristine upstream copies kept in `patches/mesa/mastag/`
 - Output: `/opt/bc250-gfx1013/`
 - Build deps: meson, ninja, dev headers (auto-installed by `gfx1013_ensure_mesa_build_deps`)
 
