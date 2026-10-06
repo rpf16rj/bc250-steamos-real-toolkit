@@ -24,3 +24,11 @@
 # Alternative: patches/mesa-native-mesh/series uses lonewolf0622's native
 # mesh approach (MESH only, no TASK) — mostly superseded by DirectMesh;
 # kept for users who need the smallest possible delta.
+
+0001-gfx1013-compute-queue-fix.patch
+0002-bc250-directmesh.patch
+0003-bc250-fsr4-v3.patch
+0004-bc250-fsr4-combined-unroll.patch
+0005-bc250-fsr4-imageprep-texture.patch
+0006-bc250-fsr4-resolution-variants.patch
+0007-bc250-fsr4-production-defaults.patch

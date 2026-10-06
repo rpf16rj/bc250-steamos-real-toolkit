@@ -7,6 +7,47 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.10.1 — 2026-10-06
+
+**Fixes:**
+
+- **AC-3 stereo (2/0) profile removed** — the `output:hdmi-ac3-stereo`
+  profile added to let receivers run their own Dolby Surround/PLII upmix
+  on stereo content is gone: the generated AC-3 2/0 bitstream was valid,
+  but the a52→PipeWire delivery was fragile (continuous underruns →
+  receiver never locked). Plain PCM stereo (`output:hdmi-stereo`) +
+  the receiver's own upmixer achieves the same result with no encode.
+  `install_ac3_surround` and revert now also delete a previously
+  installed `/etc/alsa/conf.d/62-bc250-a52-stereo.conf`.
+- **Mesa patch series actually applied again (+ anti-silent-fail
+  hardening)** — `patches/mesa/series` shipped in v1.10.0 with only the
+  comment block and no patch entries, so the build script's series loop
+  iterated nothing and produced **stock Mesa builds** (installed
+  `libvulkan_radeon.so` had no DirectMesh/FSR4). The 7 patch names are
+  back in the series, the stale duplicated `patches/mesa/mastag/` dir
+  was removed, and `build-mesa.sh` now dies if the series lists zero
+  patches, verifies the last patch is applied in the source tree, and
+  checks the installed `libvulkan_radeon.so` for a patch-specific
+  marker (`RADV_DIRECTMESH` in mastag mode / the GFX1013 source marker
+  in native mode) before finishing.
+- **Prebuilt Mesa 26.2.4 (mastag) + amdgpu 7.2.7 artifacts uploaded** —
+  the `prebuilt` release now carries a verified patched Mesa
+  (`mesa-26.2.4-bc250.0.2.0-alpha-mastag`, lib32 included) and the
+  `amdgpu-7.2.7-valve1-1-neptune-72-gc8730d37f9c6` module
+  (`audio gfx1013 dsc`).
+- **Pacman keyring repair hardened + wired into every package call** —
+  the sequence users reported fixing "invalid or corrupted package
+  (PGP signature)" failures during option 10 dependency installs is now
+  the built-in repair: wipe `gnupg`, `pacman-key --init`, populate, then
+  `pacman -Sy archlinux-keyring holo-keyring` and populate again so
+  keys added by refreshed keyring packages are imported (a bare re-init
+  on a stale image keeps failing on recently-added packager keys).
+  `run_with_retry` now attempts the repair once and fails cleanly
+  instead of retrying the repair in a loop, and all direct `pacman`
+  install/download calls — including the Mesa build-deps restore that
+  previously bypassed the repair path — route through it. Also new
+  manual entry: **Extras → Repair Pacman Keyring**.
+
 ## v1.10.0 — 2026-10-05
 
 **Changes:**

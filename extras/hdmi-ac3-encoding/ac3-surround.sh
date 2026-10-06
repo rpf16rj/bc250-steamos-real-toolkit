@@ -5,7 +5,9 @@
 # Enables real-time Dolby Digital 5.1 encoding over HDMI/DisplayPort via eARC.
 # All audio (games, browsers, media players) is encoded to AC-3 by the native
 # ALSA a52 plugin, with zero added latency and ~1-2% CPU overhead.
-# Stereo content is automatically upmixed to 5.1 by PipeWire's channel mixer.
+# Stereo content plays as AC-3 5.1 with only FL/FR active (no host upmix);
+# for stereo expansion enable the receiver's own Dolby Surround/PLII mode
+# on the plain hdmi-stereo PCM profile instead.
 #
 # This script is self-contained and can be used on any Linux system with
 # PipeWire + WirePlumber (SteamOS, CachyOS, Arch, etc.) that has:
@@ -403,6 +405,7 @@ do_revert() {
     steamos_rw
     rm -f "$UDEV_RULE"
     rm -f "$ACP_PROFILE_FILE"
+    rm -f /etc/alsa/conf.d/62-bc250-a52-stereo.conf
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger /sys/class/sound/card0 2>/dev/null || true
     steamos_ro

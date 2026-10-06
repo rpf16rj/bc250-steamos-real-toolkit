@@ -62,7 +62,12 @@ extras/                           # Optional add-ons (not in start.sh)
   D3D12 only, opt-in; needs pkgs built ≥ Oct-2026)
 - **Combined Fix** — single kernel build with selectable: audio + gfx1013 + vrr + allm
 - **EDID Override** — HF-VSDB for HDMI 2.1 PCON (FRL 48G, VRR 48-120, ALLM)
-- **AC-3 Surround** — HDMI/DP Dolby Digital 5.1 via eARC
+- **AC-3 Surround** — HDMI/DP Dolby Digital 5.1 via eARC (a52 @ 640 kbps).
+  For stereo upmix, use plain `output:hdmi-stereo` + the receiver's own
+  Dolby Surround/PLII mode — a dedicated AC-3 2/0 profile was tried and
+  dropped (a52 ioplug avail-accounting produced burst-timing underruns →
+  receiver never locked; and a DD bitstream buys nothing over PCM 2.0
+  when the AVR upmixes any 2ch input anyway).
 - **HDMI-CEC** — two complementary pieces: `bc250-cec.sh` upstream TUI
   (TV/receiver control via Valve's cecd) + **CEC Link-Retrain Daemon**
   (MastaG bc250-cec @ ad7e79c, vendored in

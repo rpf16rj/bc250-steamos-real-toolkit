@@ -591,10 +591,44 @@ toolkit_unhandled_error() {
 trap 'toolkit_unhandled_error "$BASH_COMMAND" "$?"' ERR
 
 repair_pacman_keyring() {
+    # The sequence users report fixing SteamOS "invalid or corrupted package
+    # (PGP signature)" / keyring failures (including option 10 dep installs):
+    #   rm -rf /etc/pacman.d/gnupg; pacman-key --init;
+    #   pacman-key --populate archlinux holo;
+    #   pacman -Sy archlinux-keyring holo-keyring
+    # The keyring-package refresh matters: --populate can only import the keys
+    # the *installed* keyring packages ship; stale images miss recently-added
+    # packager keys and signature checks keep failing after a bare re-init.
+    # The second --populate picks up keys the refreshed packages brought in.
     print_info "Detected a pacman keyring problem — attempting automatic repair..."
     rm -rf /etc/pacman.d/gnupg
-    LC_ALL=C pacman-key --init
+    LC_ALL=C pacman-key --init || return 1
+    LC_ALL=C pacman-key --populate archlinux holo 2>/dev/null || LC_ALL=C pacman-key --populate || return 1
+    LC_ALL=C pacman -Sy --noconfirm archlinux-keyring holo-keyring 2>/dev/null \
+        || LC_ALL=C pacman -Sy --noconfirm archlinux-keyring 2>/dev/null \
+        || true
     LC_ALL=C pacman-key --populate archlinux holo 2>/dev/null || LC_ALL=C pacman-key --populate
+}
+
+# Manual entry point (Extras → Repair Pacman Keyring). Runs the same proven
+# sequence users report fixing "invalid or corrupted package (PGP signature)"
+# errors during option 10 dep installs; it also fires automatically whenever
+# run_with_retry sees a signature/keyring failure.
+run_repair_pacman_keyring() {
+    print_step "FIX" "Repair Pacman Keyring"
+    echo -e "  ${DIM}Rebuilds pacman's GPG keyring and refreshes archlinux-keyring/${RESET}"
+    echo -e "  ${DIM}holo-keyring — fixes 'invalid or corrupted package (PGP signature)',${RESET}"
+    echo -e "  ${DIM}'signature is unknown trust' and 'keyring is not writable' errors.${RESET}"
+    echo ""
+    confirm "Rebuild the pacman keyring now?" || { print_info "Cancelled."; return 0; }
+    local was=0
+    is_steamos && { was=1; steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }; }
+    if repair_pacman_keyring && LC_ALL=C pacman -Sy --noconfirm 2>&1 | tail -5; then
+        print_success "Keyring rebuilt — pacman database sync succeeded."
+    else
+        print_error "Keyring repair or verification sync failed. Check your network and retry."
+    fi
+    (( was )) && steamos-readonly enable || true
 }
 
 is_network_error() {
@@ -628,6 +662,7 @@ run_with_retry() {
         cmd="LC_ALL=C $cmd"
     fi
     print_info "[${context}] starting..."
+    local keyring_repaired=0
     while true; do
         output="$(eval "$cmd" 2>&1)"
         rc=$?
@@ -636,11 +671,14 @@ run_with_retry() {
             print_info "[${context}] completed."
             return 0
         fi
-        # First try the known pacman keyring error path once.
-        # run_with_retry prepends LC_ALL=C to pacman commands so output is
-        # always in English — no need for localized string matching.
-        if echo "$output" | grep -qiE "keyring|invalid or corrupted|signature"; then
-            repair_pacman_keyring
+        # Repair the pacman keyring once on signature/keyring errors, then
+        # retry. run_with_retry prepends LC_ALL=C to pacman commands so output
+        # is always in English — no need for localized string matching. If the
+        # signature error persists after one repair it did not take; fall
+        # through to the normal failure path instead of repairing in a loop.
+        if [[ $keyring_repaired -eq 0 && ( "$cmd" == *pacman* || "$cmd" == *paru* || "$cmd" == *yay* || "$cmd" == *shelly* ) ]] && echo "$output" | grep -qiE "keyring|invalid or corrupted|signature|gpgme|unknown trust|required key"; then
+            keyring_repaired=1
+            repair_pacman_keyring || print_error "Keyring repair did not complete."
             print_info "Retrying the failed command after keyring repair..."
             continue
         fi
@@ -3589,7 +3627,7 @@ install_ac3_surround() {
             was_steamos_deps=1
             steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }
         fi
-        if ! LC_ALL=C pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+        if ! run_with_retry "pacman -S --needed --noconfirm ${missing[*]}" "AC-3 dependencies"; then
             print_error "Failed to install dependencies: ${missing[*]}"
             (( was_steamos_deps )) && steamos-readonly enable || true
             return 1
@@ -3636,9 +3674,9 @@ install_ac3_surround() {
         (( was_steamos )) && steamos-readonly enable || true
         return 1
     }
-    # Drop the obsolete named-PCM encoder from earlier builds (the profile set
+    # Drop the obsolete named-PCM encoders from earlier builds (the profile set
     # now uses the stock a52+hw: transport directly).
-    rm -f /etc/alsa/conf.d/62-bc250-ac3.conf 2>/dev/null || true
+    rm -f /etc/alsa/conf.d/62-bc250-ac3.conf /etc/alsa/conf.d/62-bc250-a52-stereo.conf 2>/dev/null || true
     print_info "Installing udev rule for ACP_PROFILE_SET=bc250-hdmi-ac3.conf..."
     echo 'SUBSYSTEM=="sound", KERNEL=="card0", ENV{ACP_PROFILE_SET}="bc250-hdmi-ac3.conf"' > "$AC3_UDEV_RULE"
     udevadm control --reload-rules 2>/dev/null || true
@@ -3936,6 +3974,7 @@ run_revert_ac3_surround() {
     # Remove our tuned AC-3 profile set and user config leftovers
     rm -f /usr/share/alsa-card-profile/mixer/profile-sets/bc250-hdmi-ac3.conf 2>/dev/null || true
     rm -f /etc/alsa/conf.d/62-bc250-ac3.conf 2>/dev/null || true
+    rm -f /etc/alsa/conf.d/62-bc250-a52-stereo.conf 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/surround-profile.conf" 2>/dev/null || true
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/ac3-profile.conf" 2>/dev/null || true
     if (( was_steamos )); then
@@ -3981,7 +4020,7 @@ dual_audio_ensure_wireplumber() {
     [[ -f "$wp" && -f "$lwp" ]] || { print_error "WP ${DUAL_AUDIO_WP_VERSION} packages not found in ${d}."; return 1; }
     confirm "Install WirePlumber ${DUAL_AUDIO_WP_VERSION}?" || { print_info "Cancelled."; return 1; }
     local was=0; is_steamos && { was=1; steamos-readonly disable || { print_error "Cannot disable RO."; return 1; }; }
-    LC_ALL=C sudo pacman -U --noconfirm --overwrite '*' "$lwp" "$wp" || {
+    run_with_retry "sudo LC_ALL=C pacman -U --noconfirm --overwrite '*' '$lwp' '$wp'" "WirePlumber ${DUAL_AUDIO_WP_VERSION} packages" || {
         (( was )) && steamos-readonly enable || true
         print_error "Failed to install WP ${DUAL_AUDIO_WP_VERSION}."; return 1; }
     (( was )) && steamos-readonly enable || true
@@ -4003,7 +4042,7 @@ install_dual_audio() {
     if (( ${#missing[@]} > 0 )); then
         print_info "Installing missing dependencies: ${missing[*]}"
         local was_deps=0; is_steamos && { was_deps=1; steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }; }
-        if ! LC_ALL=C pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+        if ! run_with_retry "pacman -S --needed --noconfirm ${missing[*]}" "Dual Audio dependencies"; then
             print_error "Failed to install dependencies: ${missing[*]}"
             (( was_deps )) && steamos-readonly enable || true
             return 1
@@ -4073,7 +4112,7 @@ run_revert_dual_audio() {
     wp_ver=$(wireplumber --version 2>/dev/null | grep -Eo '0\.5\.[0-9]+' | head -1 || true)
     if [[ "$wp_ver" != "0.5.15" ]]; then
         print_info "Restoring stock SteamOS WirePlumber 0.5.15 (was ${wp_ver:-unknown})..."
-        if ! LC_ALL=C pacman -S --noconfirm --overwrite '*' wireplumber libwireplumber 2>&1 | tail -5; then
+        if ! run_with_retry "pacman -S --noconfirm --overwrite '*' wireplumber libwireplumber" "stock WirePlumber restore"; then
             print_error "Failed to restore stock WirePlumber. Run: sudo pacman -S wireplumber libwireplumber"
         else
             print_success "Stock WirePlumber restored."
@@ -4083,7 +4122,7 @@ run_revert_dual_audio() {
     # Restore hdmi-ac3.conf profile set (removed by dual audio install)
     if [[ ! -f /usr/share/alsa-card-profile/mixer/profile-sets/hdmi-ac3.conf ]]; then
         print_info "Restoring hdmi-ac3.conf profile set..."
-        LC_ALL=C pacman -S --noconfirm --overwrite '*' alsa-card-profiles 2>&1 | tail -3 || \
+        run_with_retry "pacman -S --noconfirm --overwrite '*' alsa-card-profiles" "alsa-card-profiles restore" || \
             print_error "Failed to restore alsa-card-profiles. Run: sudo pacman -S alsa-card-profiles"
     fi
 
@@ -4174,7 +4213,7 @@ _fsr4_download_and_install() {
     mkdir -p "$dl_dir"
 
     print_info "Downloading ${proton_pkg} to ${dl_dir}..."
-    if ! LC_ALL=C pacman -Sw --noconfirm --cachedir "$dl_dir" "$proton_pkg" 2>&1 | tail -10; then
+    if ! run_with_retry "pacman -Sw --noconfirm --cachedir '$dl_dir' '$proton_pkg'" "Proton package download"; then
         print_error "Failed to download ${proton_pkg}."
         rm -rf "$dl_dir"
         return 1
@@ -4280,7 +4319,7 @@ install_fsr4_proton() {
     if (( ${#missing[@]} > 0 )); then
         print_info "Installing missing dependencies: ${missing[*]}"
         local was_deps=0; is_steamos && { was_deps=1; steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }; }
-        if ! LC_ALL=C pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+        if ! run_with_retry "pacman -S --needed --noconfirm ${missing[*]}" "FSR4 Proton dependencies"; then
             print_error "Failed to install dependencies: ${missing[*]}"
             (( was_deps )) && steamos-readonly enable || true
             return 1
@@ -4312,7 +4351,7 @@ install_fsr4_proton() {
     # Add MastaG repo temporarily and sync
     _mastag_repo_add
     print_info "Syncing MastaG repository..."
-    if ! LC_ALL=C pacman -Sy --noconfirm 2>&1 | tail -5; then
+    if ! run_with_retry "pacman -Sy --noconfirm" "MastaG repo sync"; then
         _mastag_repo_remove
         (( was )) && steamos-readonly enable || true
         print_error "Failed to sync MastaG repository."
@@ -4555,7 +4594,7 @@ gfx1013_ensure_mesa_build_deps() {
     # Drop --needed so pacman reinstalls even when the DB thinks the package
     # is already present (the local DB lists the package as fully installed
     # but the actual .pc files and headers were removed from the image).
-    LC_ALL=C sudo pacman -S --noconfirm --overwrite '*' "${pkgs[@]}" || rc=1
+    run_with_retry "sudo LC_ALL=C pacman -S --noconfirm --overwrite '*' ${pkgs[*]}" "Mesa build deps" || rc=1
     if (( was_steamos )); then
         steamos-readonly enable || true
     fi
@@ -5530,7 +5569,7 @@ install_cec_retrain() {
     local was=0; is_steamos && { was=1; steamos-readonly disable || { print_error "Could not disable read-only mode."; return 1; }; }
     if (( ${#missing[@]} > 0 )); then
         print_info "Installing missing dependencies: ${missing[*]}"
-        if ! LC_ALL=C pacman -S --needed --noconfirm "${missing[@]}" 2>&1 | tail -5; then
+        if ! run_with_retry "pacman -S --needed --noconfirm ${missing[*]}" "CEC retrain dependencies"; then
             print_error "Failed to install dependencies: ${missing[*]}"
             (( was )) && steamos-readonly enable || true
             return 1
@@ -7230,6 +7269,7 @@ run_extras_menu() {
         print_item "Z" "Toolkit SteamOS Control"      "Install Decky fan profiles and LED bar controls"
         print_item "B" "Fix GRUB Boot Hang"           "efi_uga.mod not found → boot stuck at 'Press any key to continue'"
         print_item "R" "GRUB Recovery Entries"         "Boot entries: HDMI21-DSC off + full revert + menu toggle/timeout"
+        print_item "Y" "Repair Pacman Keyring"        "Fix PGP signature/keyring errors on package installs"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -7248,6 +7288,7 @@ run_extras_menu() {
             Z) install_toolkit_steamos_control_plugin; press_enter ;;
             B) run_grub_boot_fix manual;   press_enter ;;
             R) run_recovery_menu ;;
+            Y) run_repair_pacman_keyring;  press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$extras_choice'"

@@ -37,7 +37,7 @@ done
 echo "Mesh shader mode: ${MESH_MODE}"
 
 # Check dependencies
-for cmd in meson ninja sha256sum wget cc; do
+for cmd in meson ninja sha256sum wget cc strings; do
     command -v "$cmd" >/dev/null 2>&1 || die "required command missing: $cmd"
 done
 
@@ -87,9 +87,13 @@ if [[ ! -f "$SERIES_FILE" ]]; then
     die "Mesa series file not found: $SERIES_FILE"
 fi
 
+patch_count=0
+last_patch=""
 while IFS= read -r patch_file; do
     [[ "$patch_file" =~ ^# ]] && continue
     [[ -z "$patch_file" ]] && continue
+    patch_count=$((patch_count + 1))
+    last_patch="$patch_file"
     patch_path="${PATCH_DIR}/${patch_file}"
     if [[ ! -f "$patch_path" ]]; then
         die "Patch file not found: $patch_path"
@@ -104,6 +108,14 @@ while IFS= read -r patch_file; do
         die "Patch neither applies nor reverses cleanly: $patch_file"
     fi
 done < "$SERIES_FILE"
+
+# Guard: a malformed/empty series produced stock Mesa builds twice (silent
+# failure — the build itself succeeds either way). Fail loudly instead.
+[[ "$patch_count" -gt 0 ]] || die "Series file lists no patches: $SERIES_FILE"
+if ! patch -p1 -R --dry-run -s -f < "${PATCH_DIR}/${last_patch}" >/dev/null 2>&1; then
+    die "Post-apply verification failed: $last_patch is not applied in the source tree"
+fi
+echo "Verified: $patch_count patch(es) applied"
 
 step "Configure Mesa build"
 if [[ -d build ]]; then
@@ -173,6 +185,22 @@ ninja -C build64
 
 step "Install Mesa 64-bit to ${MESA_PREFIX}"
 sudo ninja -C build64 install
+
+# Guard: confirm the installed driver actually carries the patch-set.
+# An unpatched lib is byte-plausible and version-branded — check a
+# patch-specific marker instead of trusting the build to have applied.
+if [[ "$MESH_MODE" == "mastag" ]]; then
+    if ! strings "${MESA_PREFIX}/lib/libvulkan_radeon.so" 2>/dev/null | grep -q RADV_DIRECTMESH; then
+        die "Installed libvulkan_radeon.so lacks RADV_DIRECTMESH — the DirectMesh patch was not compiled in"
+    fi
+else
+    # native-mesh adds no unique binary string; verify the patched source
+    # marker reached the build (0001 adds CHIP_GFX1013 to the threadgroup
+    # bug list — check the source that was compiled, not the binary).
+    grep -q "info->family == CHIP_GFX1013" src/amd/common/ac_gpu_info.c \
+        || die "ac_gpu_info.c lacks the GFX1013 compute-queue fix — patches were not applied"
+fi
+echo "Verified: installed Mesa carries the ${MESH_MODE} patch-set"
 
 step "Configure Mesa 32-bit build"
 CROSS_FILE="/usr/share/meson/cross/lib32"
