@@ -77,7 +77,7 @@ Debugfs knobs on the connector (`/sys/kernel/debug/dri/*/DP-1/`):
 sticky via the sticky-bpp patch), `dsc_slice_*`, `dsc_disable_passthrough`
 (PCON decodes DSC → uncompressed FRL to TV), `link_settings`.
 
-## CH7218 firmware quirk (opt-in, 2026-09-22)
+## CH7218 firmware quirk (split gates, 2026-10-11)
 Some CH7218 firmware misreports the downstream port (clears
 DP_DOWNSTREAMPORT_PRESENT or reports DP) → driver classifies the adapter
 DISPLAY_DONGLE_NONE → no FRL negotiation → 4K90/4K120 black while 4K60
@@ -85,10 +85,19 @@ works. Also observed: a *correctly-reporting* unit loses DSC_SUPPORT after
 a TV standby cycle (falls back to 4:2:2 10-bit). Ported from
 MastaG/linux-cachyos-bc250 `0012-ch7218-pcon-quirk.patch` (author
 @dejan_994), applied inside `--dsc` after the PCON patch it depends on.
-**Enable with `amdgpu.bc250_ch7218_quirk=1`** on the cmdline — off by
-default because nothing in DPCD tells a broken unit from a healthy one.
-Check detection: `dmesg | grep "CH7218 quirk"` and
-`cat /sys/kernel/debug/dri/*/DP-1/dsc_clock_en`.
+
+Two gates (upstream `0015`/`0016` split, synced 2026-10-11):
+- **DSC_SUPPORT restore: unconditional** on a detected CH7218 (under the
+  `bc250_hdmi21` master switch). Firmware clearing DP_DSC_SUPPORT while
+  returning a populated DSC block contradicts itself — restoring the bit
+  only re-states what the block already says. Recovers DSC after mode
+  change / TV standby on healthy adapters.
+- **Identity/ceiling override: stays opt-in** via
+  `amdgpu.bc250_ch7218_quirk=1` — nothing in DPCD tells a broken unit from
+  a healthy one, so it must not be forced on everyone.
+
+Check detection: `dmesg | grep "CH7218"` (log string is
+`BC-250: CH7218:`) and `cat /sys/kernel/debug/dri/*/DP-1/dsc_clock_en`.
 
 ## FRL (Fixed Rate Link)
 - FRL is HDMI 2.1's high-bandwidth transport, replacing TMDS for high-res modes

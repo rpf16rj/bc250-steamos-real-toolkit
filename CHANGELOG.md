@@ -7,6 +7,60 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.10.3 — 2026-10-12
+
+**Upstream sync (MastaG/linux-cachyos-bc250, Oct 11):**
+
+- **DirectMesh v1.3.1** — index-route storage moved VRAM→GTT; v1.3 could
+  pin up to 128MiB of the 512MiB carveout causing framebuffer pin
+  failures + GPU hang at 4K. Ported as strict opt-in
+  (`RADV_DIRECTMESH=1`) — upstream's new default-on behavior is rejected
+  per our contract. Dry-run apply/reverse verified on pristine 26.2.4.
+- **CH7218 DSC restore now unconditional** — adapters whose firmware
+  clears `DP_DSC_SUPPORT` but returns a populated DSC block now get the
+  bit restored without needing `amdgpu.bc250_ch7218_quirk=1` (upstream
+  0016 split). Fixes silent RGB→4:2:2 fallback after TV standby on
+  healthy adapters. The identity/ceiling quirk stays opt-in.
+- **CEC remote keymap** — vendored upstream `71-bc250-cec-keys.rules` +
+  `bc250-cec-keymap.sh`: TV remote OK→ENTER, Back/Exit→ESC so the remote
+  works in Steam's gamepad UI. `BC250_CEC_REMOTE_KEYS=0` opts out.
+- **Dual-audio v0.15** — holds the automatic output across native HDMI
+  hotplug (upstream 02f7319). All SteamOS adaptations preserved
+  (sink name, `node.virtual=false`, ~/.config paths, timing params).
+- **HelixSR doc fix** — upstream now defaults OptiScaler to HelixSR 1.4.3
+  (DLSS Model E); `fsr411f` is the opt-in FSR4 bridge. Launch-option
+  hints updated accordingly.
+
+**Fixes:**
+
+- **build-mesa.sh post-install guard no longer kills good builds** — the
+  `strings | grep -q RADV_DIRECTMESH` check ran under `set -o pipefail`:
+  `grep -q` exits on first match, `strings` dies on SIGPIPE, and the
+  pipeline returned 141 → FATAL even though the patched driver installed
+  correctly (leaving the 32-bit build uninstalled). Now drains grep
+  without `-q`.
+- **Prebuilt matching now fingerprints the patch set** — option 10's
+  prebuilt lookup keyed only on version+flags, so publishing a new patch
+  revision (e.g. DirectMesh v1.3.1, the CH7218 ungate) did NOT invalidate
+  the published artifacts and users reinstalled stale builds. The kernel
+  flag signature now carries `p:<sha256 of build.sh + *.patch>` and the
+  Mesa manifest carries `patches=<sha256 of build-mesa.sh + series +
+  patches>`; any patch-content change misses the prebuilt and falls back
+  to a source build until a matching artifact is published. Manifests
+  without the fingerprint never match (safe fallback).
+- **UMR database moved off the tiny /var partition** —
+  `bc250-cu-live-manager` extracted the full ~170MB UMR register
+  database (every AMD chip, plus a stale `database.tar` left by older
+  versions) into `/var/lib/umr` — on SteamOS `/var` is only ~230MB and
+  backs the `/etc` overlay, so this filled the partition and blocked
+  desktop mode until files were removed via TTY (also the root cause
+  behind issue #40). The database now extracts to
+  `/home/.steamos/offload/var/lib/umr/database` (home partition,
+  survives updates); on the next root run the service migrates the DB,
+  removes the legacy `/var/lib/umr` tree and rewrites the persisted
+  `UMR_DATABASE_PATH` in `/etc/bc250-cu-live-manager.conf`. Non-root
+  TUI sessions keep reading the existing DB — migration is root-only.
+
 ## v1.10.2 — 2026-10-06
 
 **Fixes (from GitHub issues #34, #38, #40, #41):**

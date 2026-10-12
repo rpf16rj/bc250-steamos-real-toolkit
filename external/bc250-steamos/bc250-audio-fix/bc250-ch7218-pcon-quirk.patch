@@ -1,17 +1,28 @@
 From: BC-250 SteamOS Real Toolkit
-Subject: [PATCH] drm/amd/display: opt-in CH7218 DP-to-HDMI 2.1 adapter quirk (amdgpu.bc250_ch7218_quirk)
+Subject: [PATCH] drm/amd/display: CH7218 DP-to-HDMI 2.1 adapter fixes -- always-on DSC restore, opt-in identity quirk
 
-Ported from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0012-ch7218-pcon-quirk.patch
-(patch by @dejan_994) to Valve's SteamOS kernel 7.2 tree. Applied by build.sh
-inside the --dsc block, after the DCN201 PCON HDMI 2.1 patch it depends on
-(bc250_hdmi21 plumbing + dp_hdmi21_pcon_support cap).
+Ported from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0015-ch7218-pcon-quirk.patch
+plus 0016-ch7218-dsc-restore.patch (patch by @dejan_994) to Valve's SteamOS
+kernel 7.2 tree. Applied by build.sh inside the --dsc block, after the
+DCN201 PCON HDMI 2.1 patch it depends on (bc250_hdmi21 plumbing +
+dp_hdmi21_pcon_support cap).
 
-The whole patch is runtime-gated: amdgpu.bc250_ch7218_quirk defaults to 0 and
-every entry point early-returns without it, so shipping it in the default
-build changes nothing unless the user opts in on the kernel cmdline. Enable
-with amdgpu.bc250_ch7218_quirk=1 when a CH7218-based adapter (e.g. UGREEN,
-DPCD branch OUI 2B:02:F0) is black at 4K90/4K120 but fine at 4K60, or loses
-DSC after a mode change / TV standby resume.
+Two behaviours with different gates:
+
+- The DSC decoder restore is unconditional on a detected CH7218 (upstream
+  0016, split out Oct 8): firmware that clears DP_DSC_SUPPORT while still
+  returning a populated DSC capability block contradicts itself, and setting
+  the bit back only re-states what the rest of the block already says, so it
+  can never override a truthful report. This is what recovers DSC after a
+  mode change or TV standby resume on healthy adapters. amdgpu.bc250_hdmi21=0
+  switches it off with the rest of the PCON path.
+
+- The converter-identity/ceiling override stays opt-in behind
+  amdgpu.bc250_ch7218_quirk (default 0): it overrides what the adapter says
+  about its downstream port, which a healthy adapter reports correctly, so it
+  must not be forced on everyone. Enable with amdgpu.bc250_ch7218_quirk=1 when
+  a CH7218-based adapter (e.g. UGREEN, DPCD branch OUI 2B:02:F0) is black at
+  4K90/4K120 but fine at 4K60.
 
 ---
 diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu.h b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
@@ -89,10 +100,10 @@ index b9571ba..2ef59b1 100644
  	bool skip_frl_pretraining;
  	bool use_default_clock_table;
 diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
-index 1cd17a0..da4f245 100644
+index 1cd17a0..b319015 100644
 --- a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
 +++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
-@@ -1160,18 +1160,106 @@ static void read_and_intersect_post_frl_lt_status(
+@@ -1160,18 +1160,127 @@
  	}
  }
  
@@ -108,26 +119,37 @@ index 1cd17a0..da4f245 100644
 + * Healthy CH7218 units report themselves correctly and need none of this, and
 + * nothing in the DPCD tells the two apart -- applying it unconditionally would
 + * override correct information from a working adapter. So it is opt-in:
-+ * amdgpu.bc250_ch7218_quirk defaults to 0, every entry point below starts with
-+ * the same gate, and with it unset this patch changes no behaviour at all.
++ * amdgpu.bc250_ch7218_quirk defaults to 0, the identity-forcing paths below
++ * start with the same gate, and with it unset they change nothing. The DSC
++ * decoder restore further down is the one exception: it needs no opt-in
++ * because it can never override a truthful report.
 + *
 + * bc250_hdmi21 is required as well. The quirk exists to restore HDMI 2.1 PCON
 + * ceilings, which mean nothing if PCON support is off.
 + */
 +#define BC250_CH7218_BRANCH_DEV_ID 0x2B02F0
 +
-+static bool bc250_ch7218_quirk_wanted(const struct dc_link *link)
++/*
++ * Is the link a CH7218 on a board where the PCON path is live? This says
++ * nothing about whether any workaround is wanted -- see the two callers.
++ */
++static bool bc250_ch7218_detected(const struct dc_link *link)
 +{
 +	if (!link || !link->dc)
 +		return false;
 +
-+	if (!link->dc->config.bc250_ch7218_quirk ||
-+	    !link->dc->caps.dp_hdmi21_pcon_support)
++	if (!link->dc->caps.dp_hdmi21_pcon_support)
 +		return false;
 +
 +	/* branch_dev_name is int8_t[6], so this reads exactly the array. */
 +	return link->dpcd_caps.branch_dev_id == BC250_CH7218_BRANCH_DEV_ID &&
 +	       !memcmp(link->dpcd_caps.branch_dev_name, "CH7218", 6);
++}
++
++static bool bc250_ch7218_quirk_wanted(const struct dc_link *link)
++{
++	return bc250_ch7218_detected(link) &&
++	       link->dc->config.bc250_ch7218_quirk;
 +}
 +
 +/*
@@ -155,16 +177,26 @@ index 1cd17a0..da4f245 100644
 +}
 +
 +/*
-+ * Some CH7218 firmware clears DP_DSC_SUPPORT while still returning a populated
-+ * DSC decoder capability block. Only restore the bit when the block really is
-+ * populated, so a genuinely DSC-less adapter is left alone even with the quirk
-+ * enabled.
++ * Some CH7218 firmware clears DP_DSC_SUPPORT while still returning a fully
++ * populated DSC decoder capability block -- a combination that cannot describe
++ * real hardware, since a decoder that reports its revision, slice capabilities
++ * and maximum bits per pixel is a decoder that exists. Seen on an adapter that
++ * reports everything else correctly: DSC is advertised at boot, and the bit is
++ * gone after the display returns from standby, which silently drops 4K120 from
++ * RGB to YCbCr 4:2:2 on the next link bring-up.
++ *
++ * Unlike the identity quirk above this needs no module parameter, because it
++ * cannot reach an adapter that reports its DSC support truthfully: if the bit
++ * is set there is nothing to do, and if the capability block is empty the
++ * adapter really has no decoder and is left alone. Restoring the bit only
++ * re-states what the rest of the block already says. amdgpu.bc250_hdmi21=0
++ * switches it off along with the rest of the PCON path.
 + */
 +static void bc250_ch7218_restore_dsc_support(struct dc_link *link)
 +{
 +	struct dpcd_dsc_capabilities *dsc_caps;
 +
-+	if (!bc250_ch7218_quirk_wanted(link))
++	if (!bc250_ch7218_detected(link))
 +		return;
 +
 +	dsc_caps = &link->dpcd_caps.dsc_caps;
@@ -177,7 +209,7 @@ index 1cd17a0..da4f245 100644
 +		return;
 +
 +	dsc_caps->dsc_basic_caps.fields.dsc_support.DSC_SUPPORT = true;
-+	DC_LOG_DC("BC-250: CH7218 quirk: restored cleared DSC_SUPPORT\n");
++	DC_LOG_DC("BC-250: CH7218: restored cleared DSC_SUPPORT\n");
 +}
 +
  static void get_active_converter_info(
@@ -200,7 +232,7 @@ index 1cd17a0..da4f245 100644
  		return;
  	}
  
-@@ -1203,6 +1291,9 @@ static void get_active_converter_info(
+@@ -1203,6 +1312,9 @@
  			/*Handle DP case as DONGLE_NONE*/
  			case DOWN_STREAM_DETAILED_DP:
  				link->dpcd_caps.dongle_type = DISPLAY_DONGLE_NONE;
@@ -210,7 +242,7 @@ index 1cd17a0..da4f245 100644
  				break;
  			case DOWN_STREAM_DETAILED_VGA:
  				link->dpcd_caps.dongle_type =
-@@ -1329,6 +1420,17 @@ static void get_active_converter_info(
+@@ -1329,6 +1441,17 @@
  		DC_LOG_DP2("\tdfp_cap_ext.max_video_h_active_width = %d", link->dpcd_caps.dongle_caps.dfp_cap_ext.max_video_h_active_width);
  		DC_LOG_DP2("\tdfp_cap_ext.max_video_v_active_height = %d", link->dpcd_caps.dongle_caps.dfp_cap_ext.max_video_v_active_height);
  	}
@@ -228,11 +260,11 @@ index 1cd17a0..da4f245 100644
  }
  
  static void apply_usbc_combo_phy_reset_wa(struct dc_link *link,
-@@ -2029,6 +2131,8 @@ static bool retrieve_link_cap(struct dc_link *link)
+@@ -2029,6 +2152,8 @@
  				link->dpcd_caps.dsc_caps.dsc_basic_caps.raw,
  				sizeof(link->dpcd_caps.dsc_caps.dsc_basic_caps.raw));
  		if (status == DC_OK) {
-+			/* BC-250: no-op unless amdgpu.bc250_ch7218_quirk is set. */
++			/* BC-250: only acts on a CH7218 that contradicts itself. */
 +			bc250_ch7218_restore_dsc_support(link);
  			is_fec_supported = link->dpcd_caps.fec_cap.bits.FEC_CAPABLE;
  			is_dsc_basic_supported = link->dpcd_caps.dsc_caps.dsc_basic_caps.fields.dsc_support.DSC_SUPPORT;

@@ -7,6 +7,62 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.10.3 — 2026-10-12
+
+**Sync upstream (MastaG/linux-cachyos-bc250, 11/out):**
+
+- **DirectMesh v1.3.1** — armazenamento de index-route movido de VRAM
+  para GTT; a v1.3 podia pinar até 128MiB do carveout de 512MiB causando
+  falhas de pin do framebuffer + hang da GPU em 4K. Portado como opt-in
+  estrito (`RADV_DIRECTMESH=1`) — o novo comportamento default-on do
+  upstream foi rejeitado conforme nosso contrato. Dry-run apply/reverse
+  verificado na árvore 26.2.4 pristine.
+- **Restore de DSC no CH7218 agora incondicional** — adaptadores cujo
+  firmware limpa `DP_DSC_SUPPORT` mas retorna bloco DSC populado têm o
+  bit restaurado sem precisar de `amdgpu.bc250_ch7218_quirk=1` (split
+  upstream 0016). Corrige queda silenciosa RGB→4:2:2 após standby da TV
+  em adaptadores saudáveis. O quirk de identidade/ceiling continua opt-in.
+- **Keymap do remote CEC** — vendorados `71-bc250-cec-keys.rules` +
+  `bc250-cec-keymap.sh` do upstream: OK do controle da TV→ENTER,
+  Back/Exit→ESC, fazendo o controle funcionar na UI de gamepad do Steam.
+  `BC250_CEC_REMOTE_KEYS=0` desativa.
+- **Dual-audio v0.15** — segura a saída automática através de hotplug
+  HDMI nativo (upstream 02f7319). Todas as adaptações SteamOS preservadas
+  (nome do sink, `node.virtual=false`, paths ~/.config, parâmetros de
+  timing).
+- **Correção doc HelixSR** — upstream agora usa HelixSR 1.4.3 (DLSS
+  Model E) como upscaler padrão do OptiScaler; `fsr411f` é o bridge FSR4
+  opt-in. Hints de launch options atualizados.
+
+**Correções:**
+
+- **Guard pós-install do build-mesa.sh não mata mais builds boas** — o
+  check `strings | grep -q RADV_DIRECTMESH` rodava sob `set -o pipefail`:
+  o `grep -q` sai no primeiro match, o `strings` morre com SIGPIPE e o
+  pipeline retorna 141 → FATAL mesmo com o driver patcheado instalado
+  (deixando o build 32-bit sem instalar). Agora drena o grep sem `-q`.
+- **Match de prebuilt agora inclui fingerprint do patch set** — a opção 10
+  comparava apenas versão+flags, então publicar uma revisão nova de patch
+  (ex.: DirectMesh v1.3.1, ungate do CH7218) NÃO invalidava os artefatos
+  publicados e usuários reinstalavam builds antigas. A assinatura do
+  kernel agora carrega `p:<sha256 de build.sh + *.patch>` e o manifest
+  Mesa carrega `patches=<sha256 de build-mesa.sh + series + patches>`;
+  qualquer mudança de conteúdo nos patches erra o match do prebuilt e
+  cai pro build do source até publicarmos artefato novo. Manifests sem o
+  fingerprint nunca dão match (fallback seguro).
+- **Database do UMR movida para fora da partição pequena /var** — o
+  `bc250-cu-live-manager` extraía a database completa de registradores do
+  UMR (~170MB — todos os chips AMD, mais um `database.tar` obsoleto
+  deixado por versões antigas) em `/var/lib/umr`. No SteamOS `/var` tem
+  só ~230MB e sustenta o overlay de `/etc` — a partição enchia e o modo
+  desktop não subia até apagar arquivos via TTY (mesma causa-raiz da
+  issue #40). A database agora extrai para
+  `/home/.steamos/offload/var/lib/umr/database` (partição home, sobrevive
+  a updates); na próxima execução como root o serviço migra a DB, remove
+  a árvore antiga `/var/lib/umr` e atualiza o `UMR_DATABASE_PATH`
+  persistido em `/etc/bc250-cu-live-manager.conf`. Sessões TUI sem root
+  continuam lendo a DB existente — a migração só roda como root.
+
 ## v1.10.2 — 2026-10-06
 
 **Correções (das issues #34, #38, #40, #41 do GitHub):**

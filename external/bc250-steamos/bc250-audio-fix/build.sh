@@ -517,9 +517,10 @@ DSC_PATCH=$HERE/bc250-dcn201-dsc-enable.patch
 DSC_BPP_PATCH=$HERE/bc250-dsc-debugfs-bpp-sticky.patch
 FRL_BPC_PATCH=$HERE/bc250-pcon-frl-bpc-cap.patch
 # MastaG/dejan_994 CH7218 quirk — needs the PCON patch's bc250_hdmi21 plumbing,
-# so it applies inside this block after it and reverses before it. Entirely
-# runtime-gated by amdgpu.bc250_ch7218_quirk (default 0): shipping it changes
-# nothing unless the user opts in on the cmdline.
+# so it applies inside this block after it and reverses before it. The DSC
+# decoder restore is unconditional on a detected CH7218 (it can never override
+# a truthful report); only the converter-identity override is runtime-gated by
+# amdgpu.bc250_ch7218_quirk (default 0).
 CH7218_PATCH=$HERE/bc250-ch7218-pcon-quirk.patch
 # MastaG opt-in force-DSC for PCONs hiding their decoder (Cable Matters
 # VMM7100) — amdgpu.bc250_pcon_force_dsc, default 0. Apply after CH7218.
@@ -570,7 +571,7 @@ if [ "$WITH_DSC_HDMI21" = 1 ]; then
         die "PCON FRL bpc cap patch neither applies nor reverses cleanly — tree has drifted; inspect by hand"
     fi
 
-    step "apply CH7218 PCON quirk patch (opt-in amdgpu.bc250_ch7218_quirk)"
+    step "apply CH7218 PCON quirk patch (always-on DSC restore + opt-in amdgpu.bc250_ch7218_quirk identity quirk)"
     if patch -p1 -R --dry-run --fuzz=3 -s -f < "$CH7218_PATCH" >/dev/null 2>&1; then
         echo "CH7218 PCON quirk patch already applied"
     elif patch -p1 --dry-run --fuzz=3 -s -f < "$CH7218_PATCH" >/dev/null 2>&1; then

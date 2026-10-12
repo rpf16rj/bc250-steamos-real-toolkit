@@ -45,7 +45,15 @@ applies patches, builds only the amdgpu.ko module, and installs it.
   rolling `prebuilt` GitHub release. Installs only on an EXACT kernel
   release + flag-signature match (SHA256 verified; install.sh re-checks
   vermagic/ABI). Any mismatch → normal source build. `--no-prebuilt`
-  forces a local build. `BC250_NO_PREBUILT=1` does the same via
+  forces a local build.
+  The flag signature ends with `p:<hash>` — sha256(12) of `build.sh` +
+  all `*.patch` sorted (kernel_patchset_sig; keep package-prebuilt.sh's
+  manual path in sync). Added 2026-10-11 after a stale-prebuilt incident:
+  version+flags alone didn't change when patch CONTENT did, so updated
+  patches silently reinstalled old binaries. Mesa's manifest analog is
+  `patches=<sha256(16) of build-mesa.sh + series + patch files>` in
+  `gfx1013_try_mesa_prebuilt` / `package-mesa-prebuilt.sh`; manifests
+  lacking the field never match (safe source-build fallback). `BC250_NO_PREBUILT=1` does the same via
   environment — works through `sudo BC250_NO_PREBUILT=1 ./start.sh`
   (propagated through `runuser` via `patch_env`) and also skips the Mesa
   prebuilt in `gfx1013_try_mesa_prebuilt`.
@@ -100,7 +108,7 @@ applies patches, builds only the amdgpu.ko module, and installs it.
 ### build-mesa.sh
 - Builds patched Mesa/RADV (base: `mesa-26.2.4` tarball) with GFX1013 fixes + mesh/task shader support
 - Two modes:
-  - MastaG (default): DirectMesh v1.3 (lonewolf0622) — Mesh+Task,
+  - MastaG (default): DirectMesh v1.3.1 (lonewolf0622) — Mesh+Task,
     barycentrics, no-op VRS, DGC, multiview, indexed draws; opt-in per game
     via `RADV_DIRECTMESH=1` (replaces the old GFX10.3-spoof series;
     `RADV_GFX103` no longer exists)

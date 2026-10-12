@@ -143,11 +143,12 @@ ALL patches are now individually excludable with `--no-*` flags:
 - `--dsc` / `--dsc-pcon` — DCN201 DSC + PCON HDMI 2.1 pair. Since 2026-09-22
   this block also applies, in order after the PCON patch:
   - `bc250-ch7218-pcon-quirk.patch` (ported from MastaG
-    `0012-ch7218-pcon-quirk.patch`, by @dejan_994): opt-in
-    `amdgpu.bc250_ch7218_quirk=1` quirk for CH7218 adapters (UGREEN,
-    branch OUI 2B:02:F0) that misreport their downstream port or lose
-    DSC_SUPPORT after a mode change / TV standby resume. Default off;
-    every entry point early-returns without the param.
+    `0015-ch7218-pcon-quirk.patch` + `0016-ch7218-dsc-restore.patch`, by
+    @dejan_994): CH7218 adapters (UGREEN, branch OUI 2B:02:F0). Split
+    gates since 2026-10-11 — DSC_SUPPORT restore is unconditional on a
+    detected CH7218 (fixes post-standby 4:2:2 fallback); the
+    identity/ceiling override stays opt-in via
+    `amdgpu.bc250_ch7218_quirk=1`.
   - `bc250-pcon-force-dsc.patch` (MastaG `0013-pcon-force-dsc.patch`):
     experimental opt-in `amdgpu.bc250_pcon_force_dsc=1` — treats a
     converter whose DSC capability block reads all zeros as a DSC 1.2a

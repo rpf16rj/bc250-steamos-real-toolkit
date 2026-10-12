@@ -1,0 +1,3 @@
+# Runs after 70-infrared.rules (which loads the stock rc-cec keymap) in the
+# same event, so the remap lands on top of it.
+ACTION=="add", SUBSYSTEM=="input", SUBSYSTEMS=="rc", KERNEL=="event*", ENV{.rc_sysdev}="$id", RUN+="/usr/lib/bc250-cec/bc250-cec-keymap.sh $env{.rc_sysdev}"

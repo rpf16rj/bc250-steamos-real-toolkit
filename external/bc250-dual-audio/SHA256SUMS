@@ -2,7 +2,7 @@ bf8b0336e68b8f9b6b4d327089c9897deb6726450bc7359a0e6240722fc0d256  ./check.sh
 27aa171f9bbedfc01ddbcb647bb3e685947d9771043fae597638c0689ee24418  ./etc/alsa/conf.d/61-bc250-a52.conf
 9532ed8bba6dac8b77ebb5085fbcf561631da958b9db751919756ca043e601be  ./etc/pipewire/pipewire.conf.d/60-bc250-ac3-output.conf
 7408447fe536678a86e6567766dca1dc85c45c620018456dddda97de3a032b1e  ./etc/wireplumber/wireplumber.conf.d/50-bc250-audio.conf
-9831809969270b127d59312ff860263b7635bd862cfd26be6a2bf7bae26d3803  ./install.sh
+4335c9db2da6b66214700bd063988e77649d8943f6a0c8874ae749ab0810c74c  ./install.sh
 42a199546ae84da2959e6a32022c6c81f11fd0666f0027bca304afaa73746eb9  ./rollback.sh
-3fe9a1ef48ce6670eb6febdbeb60692c50e9791a30cd6e1a2b5ea402994be058  ./usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
+aa9b94e7d8394f2ede99756e15f3093daee5bb70d64cf9c0baedc6848eecf55e  ./usr/local/share/wireplumber/scripts/90-bc250-audio-mode.lua
 f010cd2f0c56d7411b00ca15a205587eb83ff983ca94abe0cd9c1bd98f207c3d  ./usr/local/share/wireplumber/scripts/monitors/alsa.lua

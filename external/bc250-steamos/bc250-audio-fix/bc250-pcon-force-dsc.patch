@@ -88,11 +88,11 @@ index 2ef59b1..acf8a66 100644
  	bool skip_frl_pretraining;
  	bool use_default_clock_table;
 diff --git a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
-index da4f245..06e8b45 100644
+index b319015..3ed081b 100644
 --- a/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
 +++ b/drivers/gpu/drm/amd/display/dc/link/protocols/link_dp_capability.c
-@@ -1244,6 +1244,61 @@ static void bc250_ch7218_restore_dsc_support(struct dc_link *link)
- 	DC_LOG_DC("BC-250: CH7218 quirk: restored cleared DSC_SUPPORT\n");
+@@ -1265,6 +1265,61 @@
+ 	DC_LOG_DC("BC-250: CH7218: restored cleared DSC_SUPPORT\n");
  }
  
 +/*
@@ -153,9 +153,9 @@ index da4f245..06e8b45 100644
  static void get_active_converter_info(
  	uint8_t data, struct dc_link *link)
  {
-@@ -2133,6 +2188,8 @@ static bool retrieve_link_cap(struct dc_link *link)
+@@ -2154,6 +2209,8 @@
  		if (status == DC_OK) {
- 			/* BC-250: no-op unless amdgpu.bc250_ch7218_quirk is set. */
+ 			/* BC-250: only acts on a CH7218 that contradicts itself. */
  			bc250_ch7218_restore_dsc_support(link);
 +			/* BC-250: no-op unless amdgpu.bc250_pcon_force_dsc is set. */
 +			bc250_pcon_force_dsc(link);

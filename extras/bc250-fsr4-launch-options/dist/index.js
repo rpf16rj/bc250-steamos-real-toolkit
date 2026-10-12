@@ -16,13 +16,13 @@ const definePlugin = function(fn) { return function() { return fn(); }; };
 var LAUNCH_OPTIONS = [
     { label: "Disable FSR4 upgrade", cmd: "PROTON_FSR4_UPGRADE=0 %command%", desc: "Turn off FSR4 upscaling for this game" },
     { label: "FSR4 debug watermark", cmd: "BC250_FSR4_DEBUG=1 %command%", desc: "Show FSR4 watermark + OptiScaler overlay log" },
-    { label: "DirectMesh shaders", cmd: "RADV_DIRECTMESH=1 %command%", desc: "DirectMesh v1.3: mesh/task shaders, barycentrics, DGC, multiview" },
-    { label: "fsr411f RC11 (default)", cmd: 'PROTON_USE_OPTISCALER=fsr411f %command%', desc: "BC-250 fork bridge RC11 — already the default, set only to pin it" },
+    { label: "DirectMesh shaders", cmd: "RADV_DIRECTMESH=1 %command%", desc: "DirectMesh v1.3.1: mesh/task shaders, barycentrics, DGC, multiview" },
+    { label: "fsr411f RC11 (FSR4 bridge)", cmd: 'PROTON_USE_OPTISCALER=fsr411f %command%', desc: "BC-250 fork bridge RC11 — opt-in; HelixSR is the default upscaler" },
     { label: "Use AMD signed FSR4", cmd: 'PROTON_USE_OPTISCALER=signed %command%', desc: "AMD's signed 4.0.2 bridge" },
     { label: "Use fsr411b", cmd: 'PROTON_USE_OPTISCALER=fsr411b %command%', desc: "Third-party 4.1.1b, RDNA2 ghosting fix" },
     { label: "Use fsr411rc9", cmd: 'PROTON_USE_OPTISCALER=fsr411rc9 %command%', desc: "Older BC-250 fork bridge RC9" },
     { label: "Use fsr411rc10", cmd: 'PROTON_USE_OPTISCALER=fsr411rc10 %command%', desc: "Older BC-250 fork bridge RC10" },
-    { label: "HelixSR (DLSS network)", cmd: 'PROTON_USE_OPTISCALER=helixsr %command%', desc: "DLSS Model E via DX12 compute shaders — D3D12 only, needs updated Proton pkg" },
+    { label: "HelixSR (DLSS network)", cmd: 'PROTON_USE_OPTISCALER=helixsr %command%', desc: "DLSS Model E via DX12 compute shaders — D3D12 only, default upscaler in current Proton pkg" },
     { label: "Fix winmm.dll conflict", cmd: 'PROTON_OPTISCALER_NAME=dxgi.dll %command%', desc: "For games shipping own winmm.dll" },
     { label: "DLSS + Reflex spoof", cmd: 'BC250_OPTISCALER_EXTRA="Spoofing.Dxgi=true" %command%', desc: "Makes game offer DLSS/Reflex, OptiScaler translates to FSR4" },
     { label: "DLSS + Registry spoof", cmd: 'BC250_OPTISCALER_EXTRA="Spoofing.Dxgi=true;Spoofing.Registry=true" %command%', desc: "Add registry spoof if game warns about GPU/driver" }
@@ -102,7 +102,7 @@ function ControlPanel() {
                 children: SP_JSX.jsx(DFL.PanelSectionRow, {
                     children: SP_JSX.jsx("div", {
                         style: { fontSize: "12px", color: "#999", lineHeight: "1.5" },
-                        children: "FSR4 and OptiScaler are ON by default (fsr411f RC11). FSR4/OptiScaler auto-disable on EAC/BattlEye detection. Do NOT use PROTON_DLSS_UPGRADE or PROTON_XESS_UPGRADE, they will prevent the game from starting."
+                        children: "OptiScaler (HelixSR upscaler) and FSR4 upgrade are ON by default. FSR4/OptiScaler auto-disable on EAC/BattlEye detection. Do NOT use PROTON_DLSS_UPGRADE or PROTON_XESS_UPGRADE, they will prevent the game from starting."
                     })
                 })
             })
