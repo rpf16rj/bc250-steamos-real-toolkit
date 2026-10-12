@@ -144,6 +144,20 @@ measured ~232 fps on 4K60 Main10 via Zen2 CPU FFmpeg.
 The staged patch (`bc250_vcn_ungate` param, levels 1/2/3) stays in the
 tree as a diagnostic tool — inert at the default `=0`.
 
+## Upstream corroboration (2026-10-09)
+
+MastaG independently ported the PS5-Linux VCN 2.0 patch to 0x13FE in
+`linux-cachyos-bc250` (commits 44c305a..0fc58a8): one VCN instance, rings
+without doorbells, firmware `amdgpu/ps5_vcn.bin` booting the VCPU
+directly (bypasses the PSP LOAD_IP_FW 0xFFFF0008 wall we hit in Path A).
+Result on two boards: "every IP block initialises, and the first
+register read of the VCN block (`UVD_POWER_STATUS`) never returns — the
+machine freezes." Parked in `patches/linux-cachyos-rc/disabled/`.
+
+Different firmware path, identical dead wall as our Path B kill shot
+(fabric hang on first register read). The remaining blocker is the root
+isolation clamp — unchanged. **Do not port.**
+
 ## Incidents / lessons
 
 - **Unconditional ungate did not boot** (first patch version added the IP

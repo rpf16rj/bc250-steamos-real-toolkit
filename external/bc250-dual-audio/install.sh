@@ -11,7 +11,7 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$HOME/.local/state/bc250-audio-backup/$STAMP"
 mkdir -p "$BACKUP/user" "$BACKUP/system"
 
-echo "BC-250 Dual Audio v0.14 installer"
+echo "BC-250 Dual Audio v0.15 installer"
 echo "Native HDMI/DP + AC3 640 kbps"
 echo "Backup: $BACKUP"
 
@@ -33,7 +33,7 @@ fi
 if [[ -f "$STOCK_ALSA" && "${BC250_ALLOW_UNTESTED_WP:-0}" != "1" ]]; then
   STOCK_ALSA_SHA256=$(sha256sum "$STOCK_ALSA" | awk '{print $1}')
   if [[ "$STOCK_ALSA_SHA256" != "$EXPECTED_STOCK_ALSA_SHA256" ]]; then
-    echo "ERROR: distro stock alsa.lua does not match the WirePlumber 0.5.17 base used by v0.14." >&2
+    echo "ERROR: distro stock alsa.lua does not match the WirePlumber 0.5.17 base used by v0.15." >&2
     echo "Expected: $EXPECTED_STOCK_ALSA_SHA256" >&2
     echo "Found:    $STOCK_ALSA_SHA256" >&2
     echo "Refusing to install a full monitor shadow override onto an unknown base." >&2

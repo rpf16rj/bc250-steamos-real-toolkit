@@ -66,6 +66,11 @@ else
     if [ "$kmaj" -gt 7 ] 2>/dev/null || { [ "$kmaj" -eq 7 ] 2>/dev/null && [ "$kmin" -ge 2 ] 2>/dev/null; }; then
         sig=$(echo " $sig " | sed 's/ no-ss / /;s/^ //;s/ $//')
     fi
+    # Same patch-set fingerprint as patch-driver.sh's kernel_patchset_sig —
+    # keep in sync. Flags select WHICH patches apply; this detects WHEN
+    # their content changed.
+    psig=$(cd "$HERE" && { cat build.sh; ls -1 ./*.patch 2>/dev/null | LC_ALL=C sort | xargs -r cat; } | sha256sum | cut -c1-12)
+    sig="${sig:+$sig }p:$psig"
 fi
 
 mkdir -p "$OUT"

@@ -190,7 +190,9 @@ sudo ninja -C build64 install
 # An unpatched lib is byte-plausible and version-branded — check a
 # patch-specific marker instead of trusting the build to have applied.
 if [[ "$MESH_MODE" == "mastag" ]]; then
-    if ! strings "${MESA_PREFIX}/lib/libvulkan_radeon.so" 2>/dev/null | grep -q RADV_DIRECTMESH; then
+    # NOTE: no `grep -q` — under `set -o pipefail`, -q exits on first match,
+    # strings dies on SIGPIPE and the whole pipeline returns 141.
+    if ! strings "${MESA_PREFIX}/lib/libvulkan_radeon.so" 2>/dev/null | grep RADV_DIRECTMESH >/dev/null; then
         die "Installed libvulkan_radeon.so lacks RADV_DIRECTMESH — the DirectMesh patch was not compiled in"
     fi
 else

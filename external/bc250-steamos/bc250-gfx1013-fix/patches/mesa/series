@@ -6,7 +6,7 @@
 #
 # 0001: Expose ACE compute queue + async compute threadgroup workaround.
 #       Always active.
-# 0002: DirectMesh v1.3 (lonewolf0622/bc250meshtaskwork) — VK_EXT_mesh_shader
+# 0002: DirectMesh v1.3.1 (lonewolf0622/bc250meshtaskwork) — VK_EXT_mesh_shader
 #       Mesh AND Task + VK_KHR_fragment_shader_barycentric + no-op VRS +
 #       VK_EXT_device_generated_commands + multiview + indexed Mesh draws.
 #       Replaces the old GFX10.3-spoof path (0002-0004 in the previous

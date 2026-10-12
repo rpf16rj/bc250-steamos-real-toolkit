@@ -53,6 +53,25 @@ GLIBC_VER=$(echo "$GLIBC_VER" | grep -oE '[0-9]+\.[0-9]+' | head -n1)
 ASSET="mesa-${MESA_VER}-bc250.${VERSION}-${MESH_MODE}"
 mkdir -p "$OUT"
 
+# Patch-series fingerprint — same computation as start.sh's
+# gfx1013_try_mesa_prebuilt. A client running a different patch revision
+# must not match this tarball. Keep in sync.
+case "$MESH_MODE" in
+    native) pdir=mesa-native-mesh ;;
+    *)      pdir=mesa ;;
+esac
+SERIES="$HERE/patches/$pdir/series"
+[ -f "$SERIES" ] || die "patch series not found: $SERIES"
+PHASH=$(cd "$HERE/patches/$pdir" && {
+    cat "$HERE/build-mesa.sh"
+    cat series
+    while IFS= read -r p; do
+        case "$p" in ''|\#*) continue ;; esac
+        [ -f "$p" ] || die "patch listed in series missing: $p"
+        cat -- "$p"
+    done < series
+} | sha256sum | cut -c1-16)
+
 echo "==> packing $MESA_PREFIX → $OUT/$ASSET.tar.zst"
 # -C / keeps the opt/bc250-gfx1013/<VERSION>/... paths absolute-inside-tar;
 # --owner/group so the extracted tree is root-owned even though we read as
@@ -61,7 +80,7 @@ tar --owner=root --group=root -C / -cf - "opt/bc250-gfx1013/${VERSION}" | zstd -
 
 (cd "$OUT" && sha256sum "$ASSET.tar.zst" > "$ASSET.tar.zst.sha256")
 cat > "$OUT/$ASSET.flags" <<EOF
-mesa=$MESA_VER mesh=$MESH_MODE glibc=$GLIBC_VER lib32=$([ -d "$MESA_PREFIX/lib32" ] && echo yes || echo no)
+mesa=$MESA_VER mesh=$MESH_MODE glibc=$GLIBC_VER lib32=$([ -d "$MESA_PREFIX/lib32" ] && echo yes || echo no) patches=$PHASH
 EOF
 
 echo "packaged: $OUT/$ASSET.tar.zst ($(du -h "$OUT/$ASSET.tar.zst" | cut -f1))"

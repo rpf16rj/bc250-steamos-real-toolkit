@@ -195,6 +195,14 @@ done
 #   amdgpu-<uname -r>.ko.zst.sha256 checksum (verified before install)
 #   amdgpu-<uname -r>.flags         the normalized flag signature
 # install.sh then re-verifies vermagic + task_struct ABI before touching /usr.
+# Patch-set fingerprint: hash of build.sh plus every *.patch in this dir
+# (sorted). Flags select WHICH patches apply; the fingerprint detects WHEN
+# their content changes — a new patch revision must not reuse a prebuilt
+# module built from the old one. Keep in sync with package-prebuilt.sh.
+kernel_patchset_sig() {
+    (cd "$HERE" && { cat build.sh; ls -1 ./*.patch 2>/dev/null | LC_ALL=C sort | xargs -r cat; } | sha256sum | cut -c1-12)
+}
+
 kernel_flags_sig() {
     local sig="" kmaj kmin
     [ ${#WITH_AUDIO[@]} -gt 0 ] && sig="$sig audio"
@@ -214,6 +222,7 @@ kernel_flags_sig() {
     [ ${#NO_TTM[@]} -gt 0 ] && sig="$sig no-ttm"
     [ ${#NO_SCLK[@]} -gt 0 ] && sig="$sig no-sclk"
     [ ${#NO_KFD[@]} -gt 0 ] && sig="$sig no-kfd"
+    sig="$sig p:$(kernel_patchset_sig)"
     echo "${sig# }"
 }
 

@@ -35,7 +35,13 @@ DISCLAIMER_NONINTERACTIVE_SHOWN=0
 UMR_INSTALL_OFFERED=0
 UMR_INSTANCE_ARGS=()
 
-UMR_DB_DIR="${UMR_DB_DIR:-/var/lib/umr/database}"
+# /var is a ~230MB partition on SteamOS (and backs the /etc overlay) — the
+# full UMR register database (~170MB extracted + archive) must not live
+# there; it previously filled /var and blocked desktop mode. The SteamOS
+# offload tree lives on the big home partition and survives updates.
+UMR_DB_DIR="${UMR_DB_DIR:-/home/.steamos/offload/var/lib/umr/database}"
+UMR_DB_DIR="${UMR_DB_DIR%/}"
+UMR_DB_LEGACY_DIR="/var/lib/umr"
 UMR_DB_TAR="${UMR_DB_TAR:-/usr/share/umr/database/database.tar.zst}"
 UMR_DATABASE_PATH="${UMR_DATABASE_PATH:-}"
 
@@ -80,6 +86,25 @@ extract_umr_database() {
 
 ensure_umr_database() {
 	[ -f "$UMR_DB_TAR" ] || return 0
+	# Migrate the legacy /var/lib/umr extraction off the small /var
+	# partition: extract fresh to UMR_DB_DIR first, and only remove the
+	# legacy tree once the new copy is proven readable. Root-only — the
+	# systemd service does the migration; a non-root TUI keeps reading the
+	# existing database instead of dying at need_root.
+	if [[ $EUID -eq 0 && -d $UMR_DB_LEGACY_DIR && $UMR_DB_DIR != "$UMR_DB_LEGACY_DIR" && $UMR_DB_DIR != "$UMR_DB_LEGACY_DIR"/* ]]; then
+		info "Moving UMR database off /var (small partition) to $UMR_DB_DIR..."
+		extract_umr_database
+		if umr_test_read; then
+			rm -rf "$UMR_DB_LEGACY_DIR"
+			info "UMR database migrated; removed legacy $UMR_DB_LEGACY_DIR"
+			# Keep the persisted boot profile consistent with the new dir.
+			if [[ -f $SERVICE_CONF ]] && grep -q "^UMR_DATABASE_PATH=$UMR_DB_LEGACY_DIR" "$SERVICE_CONF"; then
+				sed -i "s|^UMR_DATABASE_PATH=.*|UMR_DATABASE_PATH=$UMR_DB_DIR|" "$SERVICE_CONF"
+			fi
+			return 0
+		fi
+		die "UMR still cannot read registers after extracting database"
+	fi
 	if [ -n "$UMR_DATABASE_PATH" ] && [ -d "$UMR_DATABASE_PATH" ]; then
 		return 0
 	fi

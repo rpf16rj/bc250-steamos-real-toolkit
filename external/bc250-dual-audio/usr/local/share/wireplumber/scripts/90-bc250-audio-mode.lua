@@ -1,6 +1,6 @@
 -- BC-250 global native-HDMI / realtime Dolby encoder arbiter
 -- Target: WirePlumber 0.5.17
--- BC-250 policy revision: v0.14
+-- BC-250 policy revision: v0.15
 --
 -- User-visible model:
 --   * stock/native HDMI/DP sink (ACP, EDID/ELD driven)
@@ -18,6 +18,8 @@
 --     waits a guard interval + PipeWire sync before taking hardware ownership
 --   * AC3 uses ALSA a52 @ 640 kbps
 --   * rapid native/AC3 changes are serialized; newest desired mode wins
+--   * without a configured default, the automatic choice is learned once with
+--     native HDMI present and held across native HDMI hotplug (v0.15)
 
 local lutils = require ("linking-utils")
 local log = Log.open_topic ("s-bc250-audio")
@@ -91,6 +93,19 @@ local startup_settle_source = nil
 local desired_mode = "other"      -- "native", "ac3", "other"
 local desired_native_name = nil
 local generation = 0
+
+-- v0.15: automatic authority must be stable across native HDMI hotplug.
+-- Without a configured default, WirePlumber re-elects the freshly recreated
+-- native node as the effective default on every reprobe (screen wake, session
+-- switch, TV power cycle) and drops back to the permanent encoded frontend
+-- whenever the native node vanishes. Neither is a user choice, but before
+-- v0.15 both were treated as one, so a board with no configured default
+-- oscillated: screen off -> AC-3, wake -> native, and the AC-3 bridge that
+-- applications were routed to was torn down mid-session. Remember the
+-- automatic choice made while the native node was present and hold it.
+local automatic_mode = nil
+local automatic_native_name = nil
+local last_authority = nil
 
 -- Effective target is what normal app streams are allowed to use RIGHT NOW.
 -- During transitions it intentionally stays on a safe encoded null frontend.
@@ -915,6 +930,50 @@ local function refresh_desired_from_authority (force)
     native_name = name
   else
     mode = "other"
+  end
+
+  if authority ~= last_authority then
+    if authority == "automatic/effective" then
+      -- Entering automatic authority (startup, or the user cleared the
+      -- configured default): learn the automatic choice afresh.
+      automatic_mode = nil
+      automatic_native_name = nil
+    end
+    last_authority = authority
+  end
+
+  if authority == "automatic/effective" then
+    local native_present = #get_native_nodes () > 0
+
+    if native_present then
+      if mode == "other" then
+        -- A sink that is not ours (USB DAC, Bluetooth headset) took the
+        -- default. That is not graph churn: follow it, and keep the learned
+        -- BC-250 choice for when it goes away again.
+      elseif automatic_mode == nil then
+        automatic_mode = mode
+        automatic_native_name = native_name
+        log:notice ("automatic output learned with native HDMI present: " ..
+            tostring (mode))
+      elseif mode ~= automatic_mode then
+        -- WirePlumber re-elected after the native node came back. That is
+        -- graph churn, not a user request: hold the learned choice.
+        log:notice ("automatic re-election to " .. tostring (name) ..
+            " after native HDMI hotplug ignored; holding " ..
+            tostring (automatic_mode))
+        mode = automatic_mode
+        native_name = automatic_native_name
+      elseif mode == "native" then
+        automatic_native_name = native_name
+      end
+    elseif is_encoded_mode (desired_mode) and mode ~= "other" then
+      -- Native HDMI is absent (hotplug window, screen off, TV gone) and the
+      -- encoded frontend we are on is permanent: nothing to re-elect.
+      return
+    end
+    -- Native mode with its node gone: follow the fallback election so
+    -- streams have a sink; automatic_mode stays native and is restored when
+    -- the node returns.
   end
 
   if mode == desired_mode and native_name == desired_native_name then

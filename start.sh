@@ -4080,7 +4080,7 @@ dual_audio_ensure_wireplumber() {
 }
 
 install_dual_audio() {
-    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.14)"
+    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.15)"
     echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3 640 kbps)${RESET}"
     echo ""
     dual_audio_installed && { print_info "Already installed."; return 0; }
@@ -4139,7 +4139,7 @@ install_dual_audio() {
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     sleep 4
-    print_success "Dual-output audio v0.14 installed! Reboot before use."
+    print_success "Dual-output audio v0.15 installed! Reboot before use."
     persist_state_add "dual_audio"
 }
 
@@ -4440,18 +4440,18 @@ install_fsr4_proton() {
     for t in $installed_tools; do
         echo -e "  ${DIM}     ${t}${RESET}"
     done
-    echo -e "  ${DIM}  3. FSR4 and OptiScaler are ON by default${RESET}"
+    echo -e "  ${DIM}  3. OptiScaler (HelixSR upscaler) and FSR4 upgrade are ON by default${RESET}"
     echo ""
     echo -e "  ${BOLD}Launch options (optional, per-game):${RESET}"
     echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%            # disable FSR4 upgrade${RESET}"
     echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%               # FSR4 watermark + OptiScaler log${RESET}"
     echo -e "  ${DIM}  RADV_DIRECTMESH=1 %command%                # enable mesh/task shaders${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411f %command%   # default bridge: BC-250 fork RC11 (no need to set)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411f %command%   # FSR4 bridge: BC-250 fork RC11 (set to opt back in)${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=signed %command%     # AMD's signed 4.0.2 bridge${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411b %command%     # third-party 4.1.1b, RDNA2 ghosting fix${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411rc9 %command%   # older fork bridge RC9${RESET}"
     echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411rc10 %command%  # older fork bridge RC10${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=helixsr %command%     # DLSS Model E via DX12 compute (D3D12 only)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=helixsr %command%     # default upscaler: DLSS Model E via DX12 compute (D3D12 only)${RESET}"
     echo -e "  ${DIM}  PROTON_OPTISCALER_NAME=dxgi.dll %command%  # fix for games shipping own winmm.dll${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true\" %command%  # enable DLSS+Reflex via OptiScaler${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true;Spoofing.Registry=true\" %command%${RESET}"
@@ -4526,7 +4526,8 @@ revert_fsr4_proton() {
 
 # Tries to install a prebuilt patched Mesa tarball from the rolling `prebuilt`
 # GitHub release instead of compiling. Requires an exact match of Mesa
-# version + toolkit VERSION + mesh mode, and a host glibc >= the build's
+# version + toolkit VERSION + mesh mode + patch-series fingerprint
+# (patches=<sha256>), and a host glibc >= the build's
 # (glibc is forward-compatible — the manifest stores the minimum). Any
 # mismatch returns non-zero and the caller falls back to a local build.
 # A Mesa that fails its checks is never installed: a broken RADV would take
@@ -4536,16 +4537,29 @@ gfx1013_try_mesa_prebuilt() {
     [ "${BC250_NO_PREBUILT:-0}" = "1" ] && return 1
     command -v curl >/dev/null || return 1
     command -v zstd >/dev/null || return 1
-    local version mesa_ver mesh glibc_have asset base dl manifest glibc_need lowest
+    local version mesa_ver mesh glibc_have asset base dl manifest glibc_need lowest pdir series phash p
     version=$(<"$mesa_dir/VERSION") || return 1
     mesa_ver=$(sed -n 's/^MESA_VERSION=//p' "$mesa_dir/build-mesa.sh" | head -n1)
     # capture ldd fully first — `ldd | head` under pipefail dies on SIGPIPE
     glibc_have=$(ldd --version)
     glibc_have=$(echo "$glibc_have" | grep -oE '[0-9]+\.[0-9]+' | head -n1)
     case "$mesh_flag" in
-        *native*) mesh=native ;;
-        *)        mesh=mastag ;;
+        *native*) mesh=native; pdir=mesa-native-mesh ;;
+        *)        mesh=mastag; pdir=mesa ;;
     esac
+    # Patch-series fingerprint — a new patch revision must not reuse a
+    # tarball built from the old series. Keep in sync with
+    # package-mesa-prebuilt.sh.
+    series="$mesa_dir/patches/$pdir/series"
+    [ -f "$series" ] || return 1
+    phash=$(cd "$mesa_dir/patches/$pdir" && {
+        cat "$mesa_dir/build-mesa.sh"
+        cat series
+        while IFS= read -r p; do
+            case "$p" in ''|\#*) continue ;; esac
+            cat -- "$p" || return 1
+        done < series
+    } | sha256sum | cut -c1-16) || return 1
     [ -n "$mesa_ver" ] && [ -n "$glibc_have" ] || return 1
 
     asset="mesa-${mesa_ver}-bc250.${version}-${mesh}"
@@ -4558,6 +4572,7 @@ gfx1013_try_mesa_prebuilt() {
     # exact fields
     [[ "$manifest" == *"mesa=${mesa_ver} "* || "$manifest" == *"mesa=${mesa_ver}" ]] || return 1
     [[ "$manifest" == *"mesh=${mesh} "*  || "$manifest" == *"mesh=${mesh}"  ]] || return 1
+    [[ "$manifest" == *"patches=${phash} "* || "$manifest" == *"patches=${phash}" ]] || return 1
     # glibc minimum: need <= have
     glibc_need=$(echo "$manifest" | grep -oE 'glibc=[0-9]+\.[0-9]+' | cut -d= -f2)
     [ -n "$glibc_need" ] || return 1
@@ -5589,7 +5604,7 @@ run_cec_control() {
 CEC_RETRAIN_DIR_NAME="bc250-cec-retrain"
 
 cec_retrain_installed() {
-    [[ -f /etc/systemd/system/bc250-cec.service ]]
+    [[ -f /etc/systemd/system/bc250-cec.service && -f /etc/udev/rules.d/71-bc250-cec-keys.rules ]]
 }
 
 install_cec_retrain() {
@@ -5605,15 +5620,16 @@ install_cec_retrain() {
 
     fixes_repo_sync || return 1
     local src_dir="$FIXES_REPO_DIR/$CEC_RETRAIN_DIR_NAME"
-    if [[ ! -f "$src_dir/bc250-cec-daemon.sh" || ! -f "$src_dir/bc250-cec.service" ]]; then
+    if [[ ! -f "$src_dir/bc250-cec-daemon.sh" || ! -f "$src_dir/bc250-cec.service" || ! -f "$src_dir/bc250-cec-keymap.sh" || ! -f "$src_dir/71-bc250-cec-keys.rules" ]]; then
         fail_with_log "CEC retrain files not found in the fixes repository." "CEC Link-Retrain — missing files"
         return 1
     fi
 
-    # Deps: cec-ctl (v4l-utils) for the CEC bus work; python + python-evdev
-    # only for the opt-in wake-keypress hook (off by default).
+    # Deps: cec-ctl + ir-keytable (v4l-utils) for the CEC bus work and the
+    # remote keymap; python + python-evdev only for the opt-in wake-keypress
+    # hook (off by default).
     local missing=()
-    command -v cec-ctl >/dev/null 2>&1 || missing+=("v4l-utils")
+    { command -v cec-ctl >/dev/null 2>&1 && command -v ir-keytable >/dev/null 2>&1; } || missing+=("v4l-utils")
     command -v python3 >/dev/null 2>&1 || missing+=("python")
     python3 -c "import evdev" 2>/dev/null || missing+=("python-evdev")
 
@@ -5632,6 +5648,16 @@ install_cec_retrain() {
         (( was )) && steamos-readonly enable || true
         return 1
     }
+    install -Dm755 "$src_dir/bc250-cec-keymap.sh" /usr/lib/bc250-cec/bc250-cec-keymap.sh || {
+        print_error "Failed to install remote keymap script."
+        (( was )) && steamos-readonly enable || true
+        return 1
+    }
+    install -Dm644 "$src_dir/71-bc250-cec-keys.rules" /etc/udev/rules.d/71-bc250-cec-keys.rules || {
+        print_error "Failed to install CEC keys udev rule."
+        (( was )) && steamos-readonly enable || true
+        return 1
+    }
     [[ -f /etc/bc250-cec.conf ]] || install -m644 "$src_dir/bc250-cec.conf" /etc/bc250-cec.conf
     install -m644 "$src_dir/bc250-cec.service" /etc/systemd/system/bc250-cec.service || {
         print_error "Failed to install service unit."
@@ -5644,18 +5670,28 @@ install_cec_retrain() {
         (( was )) && steamos-readonly enable || true
         return 1
     fi
+    # The udev rule only fires for rc devices that appear later; remap any
+    # CEC remote that already exists right now (upstream post_install).
+    udevadm control --reload 2>/dev/null || true
+    local rc
+    for rc in /sys/class/rc/rc*; do
+        [[ -e "$rc" ]] && /usr/lib/bc250-cec/bc250-cec-keymap.sh "${rc##*/}" || true
+    done
     (( was )) && steamos-readonly enable || true
 
     persist_state_add "cec_retrain"
     print_success "CEC link-retrain daemon installed and running."
     echo -e "  ${DIM}  No CEC adapter attached? It waits quietly — check: cec-ctl --list-devices${RESET}"
+    echo -e "  ${DIM}  TV remote keys: OK→Enter, Back→Esc for Steam UI (BC250_CEC_REMOTE_KEYS=0 opts out)${RESET}"
     echo -e "  ${DIM}  Tunables: /etc/bc250-cec.conf — live log: journalctl -u bc250-cec -f${RESET}"
 }
 
 revert_cec_retrain() {
     print_step "R-CEC" "Revert CEC Link-Retrain Daemon"
 
-    if ! cec_retrain_installed; then
+    # Gate on artifact presence, not cec_retrain_installed: a legacy install
+    # (service only, no keymap) must still be revertable.
+    if [[ ! -f /etc/systemd/system/bc250-cec.service && ! -f /etc/udev/rules.d/71-bc250-cec-keys.rules && ! -d /usr/lib/bc250-cec ]]; then
         print_info "Not installed."
         return 0
     fi
@@ -5664,8 +5700,10 @@ revert_cec_retrain() {
     local was=0; is_steamos && { was=1; steamos-readonly disable || return 1; }
     systemctl disable --now bc250-cec.service 2>/dev/null || true
     rm -f /etc/systemd/system/bc250-cec.service /etc/bc250-cec.conf
+    rm -f /etc/udev/rules.d/71-bc250-cec-keys.rules
     rm -rf /usr/lib/bc250-cec
     systemctl daemon-reload
+    udevadm control --reload 2>/dev/null || true
     (( was )) && steamos-readonly enable || true
 
     persist_state_remove "cec_retrain"
@@ -6924,7 +6962,7 @@ run_status() {
 
     local dual_icon dual_color dual_label
     if dual_audio_installed; then
-        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.14)"
+        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.15)"
     else
         dual_icon="$DIM"; dual_color="$DIM"; dual_label="not installed"
     fi
@@ -7057,7 +7095,7 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
-        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.14) — requires WP 0.5.17"
+        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.15) — requires WP 0.5.17"
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "13"  "Install FSR4 Proton (MastaG)"     "Pre-built Proton + OptiScaler + FSR4 + fakenvapi — 3 variants (GE/Native/SLR)"
         print_item "13R" "Revert FSR4 Proton"              "Remove FSR4 Proton compatibility tool"
@@ -8062,7 +8100,9 @@ EOF
 /etc/systemd/system/bc250-cec.service
 /etc/systemd/system/graphical.target.wants/bc250-cec.service
 /etc/bc250-cec.conf
+/etc/udev/rules.d/71-bc250-cec-keys.rules
 /usr/lib/bc250-cec/bc250-cec-daemon.sh
+/usr/lib/bc250-cec/bc250-cec-keymap.sh
 /etc/atomic-update.conf.d/bc250-toolkit.conf
 EOF
     chown "$REAL_USER":"$REAL_USER" "$PERSIST_KEEP_FILE" 2>/dev/null || true

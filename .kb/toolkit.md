@@ -79,6 +79,14 @@ extras/                           # Optional add-ons (not in start.sh)
   atomic-update keep list). Complementary to cecd, not conflicting — it
   claims a second logical address (`--playback`, "SteamOS") purely for
   detection; never transmits standby/active-source by default.
+  The package also ships a remote keymap (upstream @dd37c19, synced
+  2026-10-11): `/etc/udev/rules.d/71-bc250-cec-keys.rules` +
+  `/usr/lib/bc250-cec/bc250-cec-keymap.sh` remap CEC OK→KEY_ENTER and
+  Back/Exit (0x0d/0x4c)→KEY_ESC so the TV remote works in Steam's
+  gamepad UI (stock rc-cec emits KEY_OK/KEY_BACK which Steam ignores).
+  `BC250_CEC_REMOTE_KEYS=0` in `/etc/bc250-cec.conf` opts out.
+  `cec_retrain_installed` requires the rules file, so pre-keymap installs
+  re-run install to pick it up.
 - **VA-API Video Driver** — simpmix/bc250-encoding-decoding-fix; since v0.5.0 a
   full suite: H.264/HEVC encode + bit-exact H.264/HEVC decode (incl. Main10,
   `VAEntrypointVLD`) + VideoProc scaling, via Vulkan compute + threaded CPU

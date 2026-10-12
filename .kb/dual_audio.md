@@ -4,9 +4,9 @@ Source: `external/bc250-dual-audio/` (vendored from https://github.com/MastaG/bc
 
 ## Current state
 
-- **Upstream version tracked:** v0.14
-- **Local revision:** v0.14 (SteamOS-adapted)
-- **E-AC-3:** removed entirely (matches upstream v0.14)
+- **Upstream version tracked:** v0.15 (commit 02f7319)
+- **Local revision:** v0.15 (SteamOS-adapted)
+- **E-AC-3:** removed entirely (still absent upstream v0.15)
 - **AC-3 bitrate:** 640 kbps (ALSA a52 `bitrate 640`)
 - **WirePlumber required:** 0.5.17 (stock SteamOS ships 0.5.15; toolkit installs the CachyOS 0.5.17 packages from `deps/`)
 
@@ -20,11 +20,12 @@ These differ from upstream CachyOS and are intentional for SteamOS:
 4. **Audio positions:** `audio.position = [ FL FR RL RR FC LFE ]` (ALSA 5.1 order for the a52 encoder). This matches upstream and must NOT be changed.
 5. **steamos-readonly trap:** `install.sh` and `rollback.sh` disable steamos-readonly in a trap and re-enable on EXIT.
 
-## Timing parameters (v0.14, aligned with upstream)
+## Timing parameters (unchanged v0.14→v0.15, aligned with upstream)
 
-These were restored from v0.13's reduced values to fix intermittent sync loss / clipping:
+These were restored from v0.13's reduced values to fix intermittent sync loss / clipping.
+Upstream v0.15 did not touch `50-bc250-audio.conf`; values carry over:
 
-| Parameter | v0.13 (old) | v0.14 (current) | Purpose |
+| Parameter | v0.13 (old) | v0.14/v0.15 (current) | Purpose |
 |---|---|---|---|
 | `switch-delay-ms` | 500 | **1000** | Guard interval between native HDMI releasing hw and AC-3 backend opening hw:Generic,3 |
 | `api-alsa-start-delay` | 1024 | **1536** | ALSA startup delay before opening the PCM |
@@ -39,9 +40,9 @@ The v0.13 values were too short and likely caused EBUSY races / clipping when th
 | `61-bc250-a52.conf` | `/etc/alsa/conf.d/` | ALSA a52 PCM, `bitrate 640`, IEC61937 channel status |
 | `60-bc250-ac3-output.conf` | `~/.config/pipewire/pipewire.conf.d/` | NULL sink `dolby_digital_ac3`, SteamOS visibility workaround |
 | `50-bc250-audio.conf` | `~/.config/wireplumber/wireplumber.conf.d/` | WirePlumber policy, timing params, schema settings |
-| `90-bc250-audio-mode.lua` | `/usr/local/share/wireplumber/scripts/` | Arbiter (1196 lines, AC-3 only) |
+| `90-bc250-audio-mode.lua` | `/usr/local/share/wireplumber/scripts/` | Arbiter (1255 lines, AC-3 only) |
 | `monitors/alsa.lua` | `/usr/local/share/wireplumber/scripts/monitors/` | Patched ALSA monitor with BC-250 hardware lock |
-| `install.sh` | — | Installer, v0.14, no ffmpeg/aplay/dd deps |
+| `install.sh` | — | Installer, v0.15, no ffmpeg/aplay/dd deps |
 | `rollback.sh` | — | Restores backup, cleans EAC3 leftovers |
 | `check.sh` | — | Diagnostics (AC-3 only, no EAC3 sections) |
 
@@ -66,12 +67,30 @@ Required commands: `pactl wpctl pw-metadata sha256sum grep tr awk`
 
 Removed (were only needed for E-AC-3): `ffmpeg aplay dd stat`
 
+## v0.15 upstream change ("hold the automatic output across native HDMI hotplug")
+
+Only `90-bc250-audio-mode.lua` changed functionally. In
+`refresh_desired_from_authority()`, when authority is `automatic/effective`
+(no `default.configured.audio.sink` user pick):
+
+- New state: `automatic_mode`, `automatic_native_name`, `last_authority`.
+- On entering automatic authority, the learned choice is reset.
+- While the native node is present: `mode == "other"` (USB DAC/BT default) is
+  still followed; first election is learned; a re-election to a different mode
+  after hotplug is ignored (`automatic re-election … ignored; holding …`).
+- While the native node is absent: an encoded mode is kept (frontend is
+  permanent, `return` early); native mode still follows the fallback so
+  streams have a sink and is restored on return.
+
+Our three adaptation hunks (sink name `dolby_digital_ac3`, backend name,
+READY log line) are untouched — the upstream diff applied cleanly.
+
 ## start.sh integration
 
-- `install_dual_audio()` — installs files, prints "v0.14", "AC3 640 kbps"
+- `install_dual_audio()` — installs files, prints "v0.15", "AC3 640 kbps"
 - `run_revert_dual_audio()` — removes files, cleans EAC3 leftovers
-- Status line shows `installed (v0.14)`
-- Menu item 12 description: `MastaG v0.14`
+- Status line shows `installed (v0.15)`
+- Menu item 12 description: `MastaG v0.15`
 - `dual_audio_installed()` detects via presence of `50-bc250-audio.conf` in `~/.config/wireplumber/`
 
 ## Known symptoms addressed
