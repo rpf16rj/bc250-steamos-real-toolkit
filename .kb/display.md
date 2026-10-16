@@ -99,6 +99,19 @@ Two gates (upstream `0015`/`0016` split, synced 2026-10-11):
 Check detection: `dmesg | grep "CH7218"` (log string is
 `BC-250: CH7218:`) and `cat /sys/kernel/debug/dri/*/DP-1/dsc_clock_en`.
 
+### Upstream firmware fix (NOT integrated — user's call, 2026-10-12)
+
+MastaG ships `bc250-ch7218-fw` (pkgrel 3+) in his repo: UGREEN's updater
++ 5 images. `tmds-69` (UGREEN 07.00.69 + 1-byte TMDS watchdog NOP) passed
+4 upstream tests (replug TV-off, 30min Netflix/ARC, 30min other input,
+30min all-off) — one setup only (adapter→Denon AVR→LG TV), "possibly
+fixed" not "fixed". Would fix the adapter's one-shot TMDS watchdog
+black-screen at the root (our CEC retrain daemon treats the symptom).
+Manual only: `sudo pacman -Syu bc250-ch7218-fw` then
+`sudo bc250-ch7218-flash flash tmds-69` from SSH; rollback =
+`flash original`. Deliberately not in toolkit — firmware flash can brick
+the adapter; users who want it install from MastaG's repo by hand.
+
 ## FRL (Fixed Rate Link)
 - FRL is HDMI 2.1's high-bandwidth transport, replacing TMDS for high-res modes
 - CH7218 supports FRL up to 48 Gbps (4 lanes × 12 Gbps)

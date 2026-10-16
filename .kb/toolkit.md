@@ -179,3 +179,22 @@ extras/                           # Optional add-ons (not in start.sh)
 - `develop` is where work happens
 - `main` only receives merges at release time (GitFlow)
 - `.kb/` is local-only (in .gitignore)
+
+## Persist re-apply (root context) — gotchas
+- `bc250-toolkit-persist.service` runs **as root**: `REAL_USER` resolves to
+  root and `REAL_HOME`=/root, so all `/home`-derived state would be missed.
+  `reapply_resolve_state_dir()` scans `/home/*/.bc250-toolkit` for
+  `installed-components`, re-derives REAL_USER/REAL_HOME from the home owner,
+  then calls `derive_home_state_paths()` — **every REAL_HOME/PERSIST_STATE_DIR
+  global must be assigned inside that function**, never scattered at source
+  time, or re-apply will silently use /root paths.
+- **AUR package cache**: `$PERSIST_STATE_DIR/aur-packages` holds the last
+  built `.pkg.tar.zst` per package so re-apply reinstalls via `pacman -U`
+  (seconds, no toolchain/helper needed). Stored after every successful
+  `aur_install`; `aur_remove` deletes it. Archive identity is verified via
+  `bsdtar -xOf pkg .PKGINFO` — filename globs are unsafe (split `-debug`
+  packages collide on prefix; helpers clone by pkgbase, e.g. xone-dkms
+  builds in `clone/xone`).
+- `aur_needs_build_deps` gates `ensure_build_deps` when AUTO=1 and cache
+  satisfies the install (GPU governor site only; DKMS paths still need the
+  toolchain).

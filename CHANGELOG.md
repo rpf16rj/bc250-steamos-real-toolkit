@@ -7,6 +7,41 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.10.4 — 2026-10-17
+
+**Fixes:**
+
+- **Post-update AUR reinstalls are now near-instant** — SteamOS atomic
+  updates wipe `/usr`, deleting every AUR package (GPU governor,
+  CoolerControl, xone, OpenLinkHub). The re-apply pass used to rebuild
+  each from source: the GPU governor alone pulled ~370MB of Rust
+  toolchain and compiled for minutes — interruptible (`Aborted by user`)
+  and impossible if the AUR helper itself was wiped. Every successful
+  `aur_install` now caches the built `.pkg.tar.zst` under
+  `~/.bc250-toolkit/aur-packages` (persistent home storage), and
+  unattended re-apply reinstalls it with `pacman -U` in seconds — no
+  helper, no toolchain, no makepkg deps (`ensure_build_deps` is skipped
+  when the cache satisfies the governor install). Cache misses or
+  `pacman -U` failures fall back to a normal AUR build; `aur_remove`
+  cleans the cache entry. Manual installs still fetch the latest AUR
+  version.
+- **Re-apply actually finds the persisted state as root** — the persist
+  service runs as root, so `REAL_HOME` resolved to `/root` and
+  `~/.bc250-toolkit/installed-components` was looked up in the wrong
+  home: re-apply printed "No persisted toolkit state" and silently did
+  nothing. It now scans `/home/*/.bc250-toolkit` for the state file and
+  re-derives `REAL_USER`/`REAL_HOME` from it.
+- **Long commands stream their output live** — `run_with_retry` captured all
+  command output and only printed it after completion, so multi-minute
+  AUR/Rust builds showed a frozen "[starting...]" line and users Ctrl+C'd a
+  healthy compile (`Aborted by user`, rc=130 — the reported GPU governor
+  install failure). Output now streams through `tee` while still being
+  captured for the keyring/disk/network error detectors.
+- **Persistence discoverability hint** — installing a component on
+  SteamOS without the persist service now prints a one-per-run note
+  pointing at menu option P, instead of letting users learn post-update
+  that nothing was re-applied.
+
 ## v1.10.3 — 2026-10-12
 
 **Upstream sync (MastaG/linux-cachyos-bc250, Oct 11):**
