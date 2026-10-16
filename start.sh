@@ -77,9 +77,29 @@ PERSIST_STATE_DIR="${REAL_HOME}/.bc250-toolkit"
 PERSIST_STATE_FILE="$PERSIST_STATE_DIR/installed-components"
 PERSIST_KEEP_FILE="$PERSIST_STATE_DIR/bc250-toolkit-keep.conf"
 
+# Every global derived from REAL_HOME / PERSIST_STATE_DIR lives here so the
+# root-run persist service can re-derive them all at once after
+# reapply_resolve_state_dir points REAL_HOME at the real user's home.
+derive_home_state_paths() {
+    AUR_PKG_CACHE="$PERSIST_STATE_DIR/aur-packages"
+    AC3_WP_CONF_DIR="${REAL_HOME}/.config/wireplumber/wireplumber.conf.d"
+    AC3_WP_CONF="$AC3_WP_CONF_DIR/ac3-profile.conf"
+    STEAM_COMPAT_DIR="$REAL_HOME/.local/share/Steam/compatibilitytools.d"
+    RECOVERY_MENU_CONF="$PERSIST_STATE_DIR/recovery-menu.conf"
+    RECOVERY_CTL="$PERSIST_STATE_DIR/bc250-recovery-ctl.sh"
+    RECOVERY_TOOLKIT_PATH_FILE="$PERSIST_STATE_DIR/toolkit-path"
+}
+derive_home_state_paths
+
+_persist_hint_shown=0
 persist_state_add() {
     local c="$1"
     mkdir -p "$PERSIST_STATE_DIR"
+    if [[ "$AUTO" != "1" && $_persist_hint_shown -eq 0 ]] && is_steamos 2>/dev/null \
+        && [[ ! -f /etc/systemd/system/bc250-toolkit-persist.service ]]; then
+        _persist_hint_shown=1
+        print_info "Tip: menu option P re-applies installed components after SteamOS updates (packages in /usr are wiped)."
+    fi
     if [[ -f "$PERSIST_STATE_FILE" ]]; then
         grep -Fxq "$c" "$PERSIST_STATE_FILE" 2>/dev/null && return 0
     fi
@@ -662,11 +682,17 @@ run_with_retry() {
         cmd="LC_ALL=C $cmd"
     fi
     print_info "[${context}] starting..."
-    local keyring_repaired=0
+    local keyring_repaired=0 output_tmp
     while true; do
-        output="$(eval "$cmd" 2>&1)"
-        rc=$?
-        echo "$output"
+        # Stream the command's output live (a multi-minute AUR/rust build
+        # otherwise looks frozen and gets Ctrl+C'd — seen in the field as
+        # 'Aborted by user' with rc=130) while still capturing it all for the
+        # error detectors below. PIPESTATUS keeps the real command rc.
+        output_tmp=$(mktemp)
+        eval "$cmd" 2>&1 | tee "$output_tmp"
+        rc=${PIPESTATUS[0]}
+        output=$(<"$output_tmp")
+        rm -f "$output_tmp"
         if [[ $rc -eq 0 ]]; then
             print_info "[${context}] completed."
             return 0
@@ -750,8 +776,68 @@ ensure_build_deps() {
     print_info "Build dependencies installed."
 }
 
+# Persistent cache of built AUR packages (path set in derive_home_state_paths).
+# SteamOS atomic updates wipe /usr, so every AUR package disappears after an
+# update and the re-apply pass would otherwise rebuild from source (the GPU
+# governor alone pulls ~370MB of Rust toolchain and compiles for minutes —
+# interruptible and useless if the AUR helper itself was wiped). The cache
+# lives in the persistent home dir, so a re-apply can reinstall with
+# pacman -U in seconds.
+
+# Filename globs can't be trusted: a build dir may also contain split packages
+# with a colliding prefix (e.g. coolercontrold-bin ships
+# coolercontrold-bin-debug-*.pkg.tar.zst next to the real archive). Verify the
+# pkgname inside the archive before treating a file as a match.
+aur_pkg_name_verified() {
+    bsdtar -xOf "$1" .PKGINFO 2>/dev/null | grep -qxF "pkgname = $2"
+}
+
+aur_pkg_cache_find() {
+    local package="$1" f
+    while IFS= read -r f; do
+        [[ $f == *.sig ]] && continue
+        aur_pkg_name_verified "$f" "$package" && { printf '%s\n' "$f"; return 0; }
+    done < <(ls -1t "$AUR_PKG_CACHE"/"${package}"-*.pkg.tar.* 2>/dev/null)
+    return 1
+}
+
+aur_pkg_cache_store() {
+    # Copy the freshly built package out of the helper's build dir into the
+    # persistent cache. Helpers clone by pkgbase (xone-dkms builds inside
+    # clone/xone), so scan every clone dir and verify pkgname. No-op when
+    # nothing verifies (e.g. shelly builds elsewhere).
+    local package="$1" d f newest=""
+    for d in "${REAL_HOME}"/.cache/paru/clone/*/ "${REAL_HOME}"/.cache/yay/*/; do
+        for f in "$d""${package}"-*.pkg.tar.*; do
+            [[ -f $f && $f != *.sig ]] || continue
+            aur_pkg_name_verified "$f" "$package" || continue
+            [[ -z $newest || $f -nt $newest ]] && newest=$f
+        done
+    done
+    [[ -n $newest ]] || return 0
+    mkdir -p "$AUR_PKG_CACHE" || return 0
+    cp -f "$newest" "$AUR_PKG_CACHE/" || return 0
+    chown -R "$REAL_USER":"$REAL_USER" "$AUR_PKG_CACHE" 2>/dev/null || true
+    print_info "Cached built package for re-apply: ${newest##*/}"
+}
+
+aur_needs_build_deps() {
+    # Returns false when an unattended re-apply will be satisfied by the
+    # package cache — then no makepkg toolchain is needed at all.
+    [[ "$AUTO" != "1" ]] && return 0
+    [[ -z "$(aur_pkg_cache_find "$1")" ]]
+}
+
 aur_install() {
-    local package="$1" helper
+    local package="$1" helper cached rc
+    if [[ "$AUTO" == "1" ]] && cached="$(aur_pkg_cache_find "$package")" && [[ -n "$cached" ]]; then
+        print_info "Reinstalling $package from toolkit package cache (${cached##*/})..."
+        if LC_ALL=C pacman -U --needed --noconfirm "$cached"; then
+            return 0
+        fi
+        print_error "Cached package reinstall failed — falling back to a fresh AUR build."
+        rm -f "$cached"
+    fi
     if ! helper="$(aur_helper)"; then
         print_error "No AUR helper found (shelly, paru, or yay). Please install one first."
         return 1
@@ -762,6 +848,9 @@ aur_install() {
         paru)   sudo -u "$REAL_USER" env LC_ALL=C paru -S --noconfirm "$package" ;;
         yay)    sudo -u "$REAL_USER" env LC_ALL=C yay -S --noconfirm "$package" ;;
     esac
+    rc=$?
+    [[ $rc -eq 0 ]] && aur_pkg_cache_store "$package"
+    return $rc
 }
 
 aur_clean_cache() {
@@ -790,6 +879,7 @@ aur_remove() {
         paru)   LC_ALL=C paru -Rns --noconfirm "$package" 2>/dev/null || true ;;
         yay)    LC_ALL=C yay -Rns --noconfirm "$package" 2>/dev/null || true ;;
     esac
+    rm -f "$AUR_PKG_CACHE"/"${package}"-*.pkg.tar.* 2>/dev/null || true
 }
 
 # ==============================================================================
@@ -1120,7 +1210,9 @@ run_gpu_governor() {
     fi
 
     print_info "Installing cyan-skillfish-governor-smu via AUR helper..."
-    ensure_build_deps || return 1
+    if aur_needs_build_deps cyan-skillfish-governor-smu; then
+        ensure_build_deps || return 1
+    fi
     aur_clean_cache cyan-skillfish-governor-smu
     steamos_writable 'aur_install cyan-skillfish-governor-smu' || {
         fail_with_log "Failed to install GPU governor." "GPU Governor Install — aur_install"
@@ -3412,8 +3504,8 @@ run_revert_ds5_bridge_fix() {
 # a52 ALSA plugin. Zero latency, minimal CPU overhead (libavcodec a52enc).
 # Requires: alsa-plugins (a52 plugin), ffmpeg (libavcodec for encoding).
 AC3_UDEV_RULE="/etc/udev/rules.d/91-ac3-audio.rules"
-AC3_WP_CONF_DIR="${REAL_HOME}/.config/wireplumber/wireplumber.conf.d"
-AC3_WP_CONF="$AC3_WP_CONF_DIR/ac3-profile.conf"
+# AC3_WP_CONF_DIR / AC3_WP_CONF are set in derive_home_state_paths() (top of
+# file) so the root-run persist re-apply can re-derive them for the real user.
 
 ac3_surround_installed() {
     [[ -f "$AC3_UDEV_RULE" ]] && [[ -f "$AC3_WP_CONF" ]]
@@ -4192,7 +4284,8 @@ run_revert_dual_audio() {
 MASTAG_REPO_URL="https://github.com/MastaG/linux-cachyos-bc250/releases/download/repo"
 MASTAG_REPO_NAME="bc250-cachyos"
 MASTAG_PROTON_PACKAGES=("protonge-latest-bc250" "proton-cachyos-native-bc250" "proton-cachyos-slr-bc250")
-STEAM_COMPAT_DIR="$REAL_HOME/.local/share/Steam/compatibilitytools.d"
+# STEAM_COMPAT_DIR is set in derive_home_state_paths() (top of file) so the
+# root-run persist re-apply can re-derive it for the real user.
 
 fsr4_proton_installed() {
     [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]] && \
@@ -7415,11 +7508,11 @@ RECOVERY_GRUB_SCRIPT="/etc/grub.d/42_bc250-recovery"
 # so the entries are reachable at boot. Visibility and timeout are user prefs
 # stored in RECOVERY_MENU_CONF — the generated script parses that file at
 # grub-mkconfig time, so toggling only needs an update-grub, and the prefs
-# survive SteamOS updates (they live in the user's home).
-RECOVERY_MENU_CONF="$PERSIST_STATE_DIR/recovery-menu.conf"
+# survive SteamOS updates (they live in the user's home). RECOVERY_MENU_CONF,
+# RECOVERY_CTL and RECOVERY_TOOLKIT_PATH_FILE are set in
+# derive_home_state_paths() (top of file) so the root-run persist re-apply can
+# re-derive them for the real user.
 RECOVERY_MENU_TIMEOUT_DEFAULT=1
-RECOVERY_CTL="$PERSIST_STATE_DIR/bc250-recovery-ctl.sh"
-RECOVERY_TOOLKIT_PATH_FILE="$PERSIST_STATE_DIR/toolkit-path"
 RECOVERY_REVERT_UNIT="/etc/systemd/system/bc250-recovery-revert.service"
 RECOVERY_REVERT_WANTS="/etc/systemd/system/multi-user.target.wants/bc250-recovery-revert.service"
 
@@ -7962,10 +8055,39 @@ steam_repair_pinned_libcurl() {
     done
 }
 
+# The persist service runs as root: REAL_USER resolves to root and the state
+# dir would default to /root/.bc250-toolkit, while the state actually lives
+# in the installing user's home. Re-derive it from /home so the state file,
+# snapshots and the AUR package cache are found.
+reapply_resolve_state_dir() {
+    [[ -f $PERSIST_STATE_FILE ]] && return 0
+    [[ $EUID -ne 0 ]] && return 0
+    local d owner user_home
+    for d in /home/*/.bc250-toolkit; do
+        [[ -f $d/installed-components ]] || continue
+        owner=$(stat -c %U "${d%/.*}" 2>/dev/null || true)
+        if [[ -n $owner && $owner != root ]]; then
+            user_home=$(getent passwd "$owner" | cut -d: -f6)
+            if [[ -n $user_home && -d $user_home ]]; then
+                REAL_USER=$owner
+                REAL_HOME=$user_home
+            fi
+        fi
+        PERSIST_STATE_DIR="$d"
+        PERSIST_STATE_FILE="$d/installed-components"
+        PERSIST_KEEP_FILE="$d/bc250-toolkit-keep.conf"
+        # Re-derive every global that was bound to /root at source time.
+        derive_home_state_paths
+        print_info "Re-apply: using toolkit state from $d"
+        return 0
+    done
+}
+
 reapply_installed_components() {
     print_step "RAP" "Re-applying toolkit settings after SteamOS update"
     run_grub_boot_fix
     steam_repair_pinned_libcurl
+    reapply_resolve_state_dir
     local component
     if [[ ! -f "$PERSIST_STATE_FILE" ]]; then
         print_info "No persisted toolkit state to re-apply."
@@ -8019,6 +8141,8 @@ install_persistence() {
     fi
 
     mkdir -p "$PERSIST_STATE_DIR"
+    # Don't hint about option P while the user is literally enabling it.
+    _persist_hint_shown=1
     persist_detect_and_record_installed
 
     local reapply_script="$PERSIST_STATE_DIR/bc250-toolkit-reattach.sh"

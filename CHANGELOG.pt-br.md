@@ -7,6 +7,41 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.10.4 — 2026-10-17
+
+**Correções:**
+
+- **Reinstalação de pacotes AUR pós-update agora é quase instantânea** —
+  o update atômico do SteamOS varre `/usr`, apagando todo pacote AUR
+  (GPU governor, CoolerControl, xone, OpenLinkHub). O re-apply rebuildava
+  cada um do zero: só o GPU governor baixava ~370MB de toolchain Rust e
+  compilava por minutos — interrompível (`Aborted by user`) e impossível
+  se o próprio AUR helper tivesse sido varrido. Todo `aur_install` com
+  sucesso agora cacheia o `.pkg.tar.zst` buildado em
+  `~/.bc250-toolkit/aur-packages` (armazenamento persistente no /home), e
+  o re-apply reinstala com `pacman -U` em segundos — sem helper, sem
+  toolchain, sem deps de makepkg (`ensure_build_deps` é pulado quando o
+  cache resolve o governor). Cache vazio ou falha no `pacman -U` cai pro
+  build AUR normal; `aur_remove` limpa o cache. Instalações manuais
+  continuam buscando a versão mais nova do AUR.
+- **Re-apply agora acha o estado persistido rodando como root** — o
+  serviço de persistência roda como root, então `REAL_HOME` resolvia pra
+  `/root` e o `installed-components` era procurado no home errado:
+  o re-apply imprimia "No persisted toolkit state" e saía sem fazer
+  nada. Agora ele varre `/home/*/.bc250-toolkit` atrás do state file e
+  re-deriva `REAL_USER`/`REAL_HOME` a partir dele.
+- **Comandos longos agora mostram progresso ao vivo** — `run_with_retry`
+  capturava todo o output e só imprimia no fim, então builds AUR/Rust de
+  vários minutos pareciam travados numa linha "[starting...]" e usuários
+  apertavam Ctrl+C num compile saudável (`Aborted by user`, rc=130 — a
+  falha reportada na instalação do GPU governor). O output agora flui ao
+  vivo via `tee` e continua capturado pros detectores de erro
+  (keyring/disco/rede).
+- **Hint de descoberta da persistência** — instalar um componente no
+  SteamOS sem o serviço de persistência agora mostra um aviso (uma vez
+  por execução) apontando pra opção P do menu, em vez do usuário descobrir
+  só depois do update que nada foi reaplicado.
+
 ## v1.10.3 — 2026-10-12
 
 **Sync upstream (MastaG/linux-cachyos-bc250, 11/out):**
