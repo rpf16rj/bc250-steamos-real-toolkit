@@ -111,6 +111,25 @@ Manual only: `sudo pacman -Syu bc250-ch7218-fw` then
 `sudo bc250-ch7218-flash flash tmds-69` from SSH; rollback =
 `flash original`. Deliberately not in toolkit — firmware flash can brick
 the adapter; users who want it install from MastaG's repo by hand.
+Oct-24 update: upstream evidence strengthened — a second user ran
+tmds-69 long-term with no issues, and plain 07.00.69 still lost the
+picture after a long off (the watchdog NOP is what fixes it). Also note:
+fw 69 drops Adaptive-Sync reporting — upstream's opt-in
+`amdgpu.bc250_ch7218_vrr=1` patch restores VRR bits in memory after the
+PCON read (patch 0022 upstream; not ported — only relevant if flashing).
+
+### Kernel ≥7.3 watch item (from Oct-24 upstream sync)
+
+Upstream (CachyOS 7.3) needed two NEW patches we must NOT need on Valve
+7.2 but must re-check if SteamOS ever ships a 7.3-based neptune kernel:
+
+- `0017-ch7218-vrr-allowlist` — CachyOS 7.3 dropped CH7218 (2B02F0) from
+  `dm_freesync_pcon_whitelist`; Valve 7.2 still has it
+  (`ddc_service_types.h`, `amdgpu_dm_helpers.c`).
+- `0019-pcon-vrr-hf-vsdb` — on 7.3 the AMD-VSDB path defers to
+  DMUB/DMCU which DCN201 lacks, so every PCON-attached display got
+  vrr_capable=0; fallback takes vrr range from HF-VSDB. Valve 7.2 parses
+  HDMI VRR in software inside `pcon_allowed` already.
 
 ## FRL (Fixed Rate Link)
 - FRL is HDMI 2.1's high-bandwidth transport, replacing TMDS for high-res modes

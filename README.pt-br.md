@@ -43,7 +43,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 ### Drivers & Correções
 
 - **Correção da fila de compute GFX1013** — compute assíncrono + Mesa/RADV patchadas com DirectMesh (mesh/task shaders via `RADV_DIRECTMESH=1`) e suporte a FSR4 V3
-- **FSR4 Proton** — variantes Proton pré-compiladas do MastaG com FSR4 (GE-Proton, CachyOS native/SLR) com manifest OptiScaler pinado, provider FSR4 e o upscaler padrão HelixSR (DLSS Model E em compute DX12, só jogos D3D12; `PROTON_USE_OPTISCALER=fsr411f` volta pro bridge FSR4)
+- **FSR4 Proton** — variantes Proton pré-compiladas do MastaG com FSR4 (GE-Proton, CachyOS native/SLR) com manifest OptiScaler pinado, provider FSR4 e o HelixSR Scaler 1.1.0 padrão (OptiScaler com HelixSR 2.0.0 — upscaling/frame-gen DLSS em compute DX12, só jogos D3D12; `PROTON_USE_OPTISCALER=fsr411f` volta pro bridge FSR4, `helixsr-ffx` pro Model E puro)
 - **Correção de estados de energia ACPI** — tabelas ACPI C-/P-state corretas (compatíveis com 6c e 8c)
 - **Drivers WiFi/BT AIC8800** — suporte atual ao AIC8800D80 e perfil legacy-MCU1 explícito para dongles WiFi AIC8800DC/DW mais antigos
 - **Firmware BE200 Wi-Fi 7** — para placas PCIe Intel BE200/BE201 sem ucode
@@ -57,6 +57,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 - **Integração com CoolerControl** — curvas de fan personalizadas via interface web
 - **Suporte OpenLinkHub** — controle opcional do Corsair iCUE LINK Hub (RGB, fans, AIO) via interface web
 - **Plugin Decky pré-compilado** — Toolkit SteamOS Control com controles de Pump Fan, perfis de quatro pontos e controles opcionais da LED bar
+- **Plugins Decky opcionais** (`extras/`) — FSR4 Launch Options (cola pronta de launch options) e Launch Coach (dialog na primeira abertura do jogo que grava as opções Proton escolhidas direto nas opções de arranque do Steam, com reconfiguração pelo QAM)
 - **CU/WGP Live Manager** — habilitar/desabilitar CU/WGP em tempo real sem reiniciar
 
 ### Qualidade de Vida
