@@ -7,6 +7,39 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.10.5 — 2026-10-24
+
+**New:**
+
+- **BC-250 Launch Coach** (`extras/bc250-launch-coach`) — new optional
+  Decky plugin. On a game's first launch it opens a checkbox dialog of
+  the BC-250 Proton launch options (OptiScaler variants incl. HelixSR
+  Scaler/`helixsr-ffx`, FreeFG, DirectMesh, debug, anti-cheat override);
+  "Save & Restart" writes them as native Steam launch options
+  (Properties → Launch Options) via `SetAppLaunchOptions` and relaunches
+  the game so they take effect. Configured/dismissed games stay silent;
+  the QAM panel offers Edit/Forget per game plus a "configure current
+  game" shortcut. Pre-existing non-managed launch options are preserved
+  on reconfigure.
+
+**Docs (upstream sync, Oct 12–24):**
+
+- **Proton variant docs updated for HelixSR 2.0.0** — MastaG bumped the
+  pinned HelixSR 1.4.3 → 1.9.0 → 2.0.0 (DLSS upscaling *and* DLSS frame
+  generation in one DLL) and changed variant semantics: `helixsr` now
+  means **HelixSR Scaler 1.1.0** (OptiScaler + HelixSR, in-game Insert
+  menu); the pure DLSS-Model-E path moved to **`helixsr-ffx`** (opt-in).
+  New variants `freefg`/`freefg-helixsr` (XeSS frame-gen + VRR pacing)
+  and `BC250_FSR4_IGNORE_ANTICHEAT=1` documented in the FSR4 hints and
+  Decky plugin. Launch-option docs updated; no install-path change —
+  option 13 already pulls the newest packages.
+- **No kernel/Mesa ports this round** — upstream moved to Linux 7.3 and
+  Mesa 26.2.5; our Valve 7.2 tree already contains what upstream's two
+  new PCON/VRR patches restore, and the 26.2.5 DirectMesh padding fix is
+  only needed if we bump the Mesa pin (recorded in `.kb/`). MastaG's VCN
+  attempt was parked upstream after hitting the same dead-hardware wall
+  documented in `.kb/vcn.md`.
+
 ## v1.10.4 — 2026-10-17
 
 **Fixes:**

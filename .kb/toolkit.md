@@ -57,9 +57,15 @@ extras/                           # Optional add-ons (not in start.sh)
 - **FSR4 Proton** — MastaG's prebuilt Proton packages (protonge /
   proton-cachyos native/slr) pulled from his pacman repo, extracted to
   `~/.local/share/Steam/compatibilitytools.d`. Ship pinned OptiScaler
-  manifest + FSR4 provider + **HelixSR** variant
-  (`PROTON_USE_OPTISCALER=helixsr` — DLSS Model E as DX12 compute,
-  D3D12 only, opt-in; needs pkgs built ≥ Oct-2026)
+  manifest + FSR4 provider. Upstream pin is now **HelixSR 2.0.0** (DLSS
+  upscale + DLSS FG in one DLL). Variant semantics changed Oct-19:
+  `PROTON_USE_OPTISCALER=helixsr` = **HelixSR Scaler 1.1.0** (OptiScaler
+  with HelixSR inside, in-game Insert menu, FG selectable) — the pure
+  DLSS-Model-E DX12-compute path moved to **`helixsr-ffx`** (opt-in).
+  Also `freefg`/`freefg-helixsr` (XeSS FG + VRR pacing) and
+  `BC250_FSR4_IGNORE_ANTICHEAT=1`. Preset is seed-once — overlay saves
+  persist; HelixSR FG ships OFF on fresh installs (enable via overlay or
+  `BC250_OPTISCALER_EXTRA="FrameGen.Enabled=true"`).
 - **Combined Fix** — single kernel build with selectable: audio + gfx1013 + vrr + allm
 - **EDID Override** — HF-VSDB for HDMI 2.1 PCON (FRL 48G, VRR 48-120, ALLM)
 - **AC-3 Surround** — HDMI/DP Dolby Digital 5.1 via eARC (a52 @ 640 kbps).

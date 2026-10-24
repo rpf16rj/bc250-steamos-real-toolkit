@@ -1,0 +1,10 @@
+{
+  "name": "BC-250 Launch Coach",
+  "author": "rpf16rj",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "fsr4", "proton", "bc250"],
+    "description": "Asks once per game which BC-250 Proton launch options to enable, then applies them as native Steam launch options."
+  }
+}
