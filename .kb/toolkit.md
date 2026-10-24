@@ -164,7 +164,6 @@ extras/                           # Optional add-ons (not in start.sh)
 - `/opt/bc250-gfx1013/` — patched Mesa installation
 
 ## State Tracking
-- `persist_state_add` / `persist_state_remove` — track installed components
 - `INSTALL_ALL_PROGRESS` — resume interrupted Install All
 - `/usr/lib/modules/*/updates/.bc250-audio-fix` — module install marker
 - `/usr/lib/modules/*/updates/.bc250-metrics-fix` — metrics-aware build marker
@@ -186,21 +185,17 @@ extras/                           # Optional add-ons (not in start.sh)
 - `main` only receives merges at release time (GitFlow)
 - `.kb/` is local-only (in .gitignore)
 
-## Persist re-apply (root context) — gotchas
-- `bc250-toolkit-persist.service` runs **as root**: `REAL_USER` resolves to
-  root and `REAL_HOME`=/root, so all `/home`-derived state would be missed.
-  `reapply_resolve_state_dir()` scans `/home/*/.bc250-toolkit` for
-  `installed-components`, re-derives REAL_USER/REAL_HOME from the home owner,
-  then calls `derive_home_state_paths()` — **every REAL_HOME/PERSIST_STATE_DIR
-  global must be assigned inside that function**, never scattered at source
-  time, or re-apply will silently use /root paths.
-- **AUR package cache**: `$PERSIST_STATE_DIR/aur-packages` holds the last
-  built `.pkg.tar.zst` per package so re-apply reinstalls via `pacman -U`
-  (seconds, no toolchain/helper needed). Stored after every successful
-  `aur_install`; `aur_remove` deletes it. Archive identity is verified via
-  `bsdtar -xOf pkg .PKGINFO` — filename globs are unsafe (split `-debug`
-  packages collide on prefix; helpers clone by pkgbase, e.g. xone-dkms
-  builds in `clone/xone`).
-- `aur_needs_build_deps` gates `ensure_build_deps` when AUTO=1 and cache
-  satisfies the install (GPU governor site only; DKMS paths still need the
-  toolchain).
+## Persistence — REMOVED (Oct 24)
+- The `bc250-toolkit-persist` re-apply service, option P, `--reapply-all`,
+  `persist_state_*` tracking and the AUR package cache were **removed from
+  the toolkit entirely** (user decision): the service ran on every boot, and
+  in AUTO mode it auto-confirmed the reinstall prompt → `aur_remove` deleted
+  the package + cache → paru's internal `sudo` failed without TTY → GPU
+  governor left uninstalled after reboot. Normal reboots never needed it;
+  SteamOS updates still wipe `/usr` → reinstall components manually.
+- `~/.bc250-toolkit/` still exists on systems that had it — it also holds
+  the GRUB recovery-entry files (`recovery-menu.conf`, `bc250-recovery-ctl.sh`,
+  `toolkit-path`) which remain supported via `derive_home_state_paths()`.
+- `bc250-recovery-revert.service` / `--revert-all` / the AUTO gate in
+  `confirm`/`press_enter`/`pick_items`/`prompt_retry_or_abort` are the
+  GRUB-recovery feature — kept.
