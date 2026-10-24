@@ -64,7 +64,6 @@ A friendly, menu-driven toolkit for the AMD BC-250 (Cyan Skillfish / GFX1013) bo
 
 - **One-click install** — automatic desktop shortcut, versioned releases with changelog
 - **Everything is fully revertible** — revert individual components or all at once
-- **SteamOS update persistence** — tracks installed components and re-applies after system updates
 
 ## Compatible System
 

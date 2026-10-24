@@ -7,6 +7,22 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.11.0 — 2026-10-24
+
+**Removido:**
+
+- **Persistência de update do SteamOS removida por completo** (opção P, o
+  serviço `bc250-toolkit-persist`, `--reapply-all`, o cache de pacotes AUR
+  e todo o rastreamento `persist_state_*`). O serviço de re-apply rodava em
+  *todo* boot — não só após updates — e em modo não-interativo confirmava
+  sozinho o prompt "reinstalar?", apagava o pacote do governor e o arquivo
+  cacheado via `aur_remove`, e então falhava na reinstalação porque o
+  `sudo` interno do paru não tem TTY sob um serviço do sistema — deixando
+  o GPU governor desinstalado após reiniciar. Removido por decisão do
+  usuário. Reboots normais nunca foram afetados — units systemd e pacotes
+  AUR persistem nativamente; só um update do SteamOS apaga `/usr`, e nesse
+  caso é só re-rodar a opção de instalação no menu (~1 min).
+
 ## v1.10.5 — 2026-10-24
 
 **Novo:**

@@ -7,6 +7,22 @@ before the toolkit adopted numbered releases.
 
 🇧🇷 Prefere português? Leia o [CHANGELOG.pt-br.md](./CHANGELOG.pt-br.md).
 
+## v1.11.0 — 2026-10-24
+
+**Removed:**
+
+- **SteamOS update persistence removed entirely** (option P, the
+  `bc250-toolkit-persist` service, `--reapply-all`, the AUR package cache
+  and all `persist_state_*` tracking). The re-apply service ran on *every*
+  boot — not just after updates — and in unattended mode it auto-confirmed
+  the interactive "reinstall?" prompt, deleted the governor package and
+  its cached archive via `aur_remove`, then failed to reinstall because
+  paru's internal `sudo` has no TTY under a system service — leaving the
+  GPU governor uninstalled after reboot. Removed per user decision.
+  Normal reboots were never affected — systemd units and AUR packages
+  persist natively; only a SteamOS update wipes `/usr`, in which case
+  re-run the install option from the menu (~1 min).
+
 ## v1.10.5 — 2026-10-24
 
 **New:**

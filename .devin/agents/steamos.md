@@ -25,11 +25,10 @@ What you know cold:
   → write → `steamos-readonly enable` (see the `was` flag pattern in
   start.sh). In failure paths, ALWAYS re-enable before returning.
 - **Atomic updates**: rootfs is replaced on OS updates. Survivors: `/home`,
-  `/var/lib`, `/etc` via the atomic-update keep list
-  (`/etc/atomic-update.conf.d/bc250-toolkit.conf` + the keep list embedded
-  in `install_persistence()`), `/efi`, `/boot`. New system components MUST
-  be registered in `persist_detect_and_record_installed`, the `reapply`
-  case switch, and the keep list.
+  `/var/lib`, `/etc` (default merge), `/efi`, `/boot`. The old
+  persistence/re-apply feature was REMOVED (see `.kb/toolkit.md`) — after an
+  update, users re-run the relevant install option; do NOT reintroduce
+  auto-reapply machinery.
 - **pacman on holo**: repo db can be stale; `pacman -Sy` needed after adding
   temp repos; SigLevel handling; offline builds prefer `--no-build-isolation`
   with the pipx shared venv seeded (see `cpu_governor_seed_shared`).

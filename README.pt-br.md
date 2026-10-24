@@ -64,7 +64,6 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 - **Instalação em um clique** — atalho de área de trabalho automático, lançamentos versionados com changelog
 - **Tudo totalmente reversível** — reverte componentes individuais ou tudo de uma vez
-- **Persistência após atualizações do SteamOS** — rastreia componentes instalados e reaplica após atualizações do sistema
 
 ## Sistema Compatível
 

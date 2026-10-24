@@ -69,19 +69,15 @@ if [[ ! -d "$SCRIPT_DIR/.git" && ! -d "$EXTERNAL_DIR/bc250_smu_oc" ]]; then
 fi
 
 # Set to 1 when the toolkit is running unattended after a SteamOS update
-# re-apply pass. In AUTO mode all confirmations/pauses are skipped.
+# --revert-all pass. In AUTO mode all confirmations/pauses are skipped.
 AUTO="${AUTO:-0}"
 
-# State used to re-apply installed components after a SteamOS atomic update.
+# Toolkit state dir — hosts GRUB recovery-entry preferences and helpers.
 PERSIST_STATE_DIR="${REAL_HOME}/.bc250-toolkit"
-PERSIST_STATE_FILE="$PERSIST_STATE_DIR/installed-components"
-PERSIST_KEEP_FILE="$PERSIST_STATE_DIR/bc250-toolkit-keep.conf"
 
-# Every global derived from REAL_HOME / PERSIST_STATE_DIR lives here so the
-# root-run persist service can re-derive them all at once after
-# reapply_resolve_state_dir points REAL_HOME at the real user's home.
+# Every global derived from REAL_HOME / PERSIST_STATE_DIR lives here so
+# they can be re-derived in one place if REAL_HOME changes.
 derive_home_state_paths() {
-    AUR_PKG_CACHE="$PERSIST_STATE_DIR/aur-packages"
     AC3_WP_CONF_DIR="${REAL_HOME}/.config/wireplumber/wireplumber.conf.d"
     AC3_WP_CONF="$AC3_WP_CONF_DIR/ac3-profile.conf"
     STEAM_COMPAT_DIR="$REAL_HOME/.local/share/Steam/compatibilitytools.d"
@@ -91,116 +87,6 @@ derive_home_state_paths() {
 }
 derive_home_state_paths
 
-_persist_hint_shown=0
-persist_state_add() {
-    local c="$1"
-    mkdir -p "$PERSIST_STATE_DIR"
-    if [[ "$AUTO" != "1" && $_persist_hint_shown -eq 0 ]] && is_steamos 2>/dev/null \
-        && [[ ! -f /etc/systemd/system/bc250-toolkit-persist.service ]]; then
-        _persist_hint_shown=1
-        print_info "Tip: menu option P re-applies installed components after SteamOS updates (packages in /usr are wiped)."
-    fi
-    if [[ -f "$PERSIST_STATE_FILE" ]]; then
-        grep -Fxq "$c" "$PERSIST_STATE_FILE" 2>/dev/null && return 0
-    fi
-    printf '%s\n' "$c" >> "$PERSIST_STATE_FILE"
-    chown "$REAL_USER":"$REAL_USER" "$PERSIST_STATE_FILE" 2>/dev/null || true
-}
-
-persist_state_remove() {
-    local c="$1" tmp
-    [[ -f "$PERSIST_STATE_FILE" ]] || return 0
-    tmp=$(mktemp)
-    grep -Fxv "$c" "$PERSIST_STATE_FILE" > "$tmp" || true
-    mv -f "$tmp" "$PERSIST_STATE_FILE"
-    chown "$REAL_USER":"$REAL_USER" "$PERSIST_STATE_FILE" 2>/dev/null || true
-}
-
-persist_state_has() {
-    [[ -f "$PERSIST_STATE_FILE" ]] && grep -Fxq "$1" "$PERSIST_STATE_FILE" 2>/dev/null
-}
-
-# Scan the current system and retroactively record any toolkit components that
-# are already installed, so enabling persistence does not lose them.
-persist_detect_and_record_installed() {
-    cpu_governor_installed 2>/dev/null && persist_state_add "cpu"
-    gpu_governor_installed 2>/dev/null && persist_state_add "gpu"
-    mitigations_currently_off && persist_state_add "mitigations"
-    [[ -f /etc/sysctl.d/99-swappiness.conf || -f /home/swapfile || -f /swapfile ]] && persist_state_add "swap"
-    [[ -f /etc/default/grub.zram.bak ]] && persist_state_add "zswap"
-    acpi_fix_installed 2>/dev/null && persist_state_add "acpi"
-    if aic8800_installed 2>/dev/null; then
-        if [[ -f /etc/bc250-aic8800-profile ]] \
-            && [[ "$(< /etc/bc250-aic8800-profile)" == "legacy-mcu1" ]]; then
-            persist_state_remove "aic8800"
-            persist_state_add "aic8800_legacy_mcu1"
-        else
-            persist_state_remove "aic8800_legacy_mcu1"
-            persist_state_add "aic8800"
-        fi
-    fi
-    be200_firmware_installed 2>/dev/null && persist_state_add "be200_fw"
-    lsmod 2>/dev/null | grep -qE 'nct6687|nct6686' && persist_state_add "sensors"
-    coolercontrol_installed 2>/dev/null && persist_state_add "coolercontrol"
-    openlinkhub_installed 2>/dev/null && persist_state_add "openlinkhub"
-    xone_installed 2>/dev/null && persist_state_add "xbox"
-    cec_control_installed 2>/dev/null && persist_state_add "cec"
-    cec_retrain_installed 2>/dev/null && persist_state_add "cec_retrain"
-    [[ -f /etc/bc250-cu-live-manager.conf ]] && persist_state_add "cu"
-    core_unlock_persist_installed 2>/dev/null && persist_state_add "core_unlock"
-    ram_split_installed 2>/dev/null && persist_state_add "ram_split"
-    if find "/lib/modules/$(uname -r)/updates" -name 'amdgpu.ko*' 2>/dev/null | grep -q .; then
-        persist_state_add "audio"
-    fi
-    ac3_surround_installed 2>/dev/null && persist_state_add "ac3"
-    vaapi_driver_installed 2>/dev/null && persist_state_add "vaapi"
-    dual_audio_installed 2>/dev/null && persist_state_add "dual_audio"
-    ds5_bridge_fix_installed 2>/dev/null && persist_state_add "ds5_bridge"
-    ds5_chord_vdf_patched 2>/dev/null && persist_state_add "ds5_chord_vdf"
-    recovery_entries_installed 2>/dev/null && persist_state_add "recovery_entries"
-    if compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 \
-       && grep -q "VK_DRIVER_FILES=.*bc250-gfx1013" /etc/environment 2>/dev/null; then
-        persist_state_add "gfx1013"
-    fi
-}
-
-# Snapshots of /etc configuration files (custom CoolerControl curves, CPU/GPU
-# overclock configs, etc.) so they survive a SteamOS atomic update.
-persist_snapshot_configs() {
-    local component="$1"
-    shift
-    local src relpath dest="$PERSIST_STATE_DIR/config-snapshots/$component"
-    rm -rf "$dest"
-    mkdir -p "$dest"
-    for src in "$@"; do
-        if [[ -e "$src" ]]; then
-            relpath="${src#/}"
-            mkdir -p "$(dirname "$dest/$relpath")"
-            cp -a "$src" "$dest/$relpath"
-        fi
-    done
-    chown -R "$REAL_USER":"$REAL_USER" "$PERSIST_STATE_DIR/config-snapshots" 2>/dev/null || true
-}
-
-persist_restore_all_configs() {
-    local snapshot_dir="$PERSIST_STATE_DIR/config-snapshots"
-    [[ -d "$snapshot_dir" ]] || return 0
-    local component_dir top base
-    for component_dir in "$snapshot_dir"/*; do
-        [[ -d "$component_dir" ]] || continue
-        for top in "$component_dir"/*; do
-            [[ -e "$top" ]] || continue
-            base="${top##*/}"
-            if [[ -d "$top" ]]; then
-                mkdir -p "/$base"
-                cp -aT "$top" "/$base" 2>/dev/null || true
-            else
-                cp -a "$top" "/$base" 2>/dev/null || true
-            fi
-        done
-    done
-    chown -R "$REAL_USER":"$REAL_USER" "$PERSIST_STATE_DIR/config-snapshots" 2>/dev/null || true
-}
 
 # ==============================================================================
 # EXECUTION LOGGING
@@ -776,68 +662,8 @@ ensure_build_deps() {
     print_info "Build dependencies installed."
 }
 
-# Persistent cache of built AUR packages (path set in derive_home_state_paths).
-# SteamOS atomic updates wipe /usr, so every AUR package disappears after an
-# update and the re-apply pass would otherwise rebuild from source (the GPU
-# governor alone pulls ~370MB of Rust toolchain and compiles for minutes —
-# interruptible and useless if the AUR helper itself was wiped). The cache
-# lives in the persistent home dir, so a re-apply can reinstall with
-# pacman -U in seconds.
-
-# Filename globs can't be trusted: a build dir may also contain split packages
-# with a colliding prefix (e.g. coolercontrold-bin ships
-# coolercontrold-bin-debug-*.pkg.tar.zst next to the real archive). Verify the
-# pkgname inside the archive before treating a file as a match.
-aur_pkg_name_verified() {
-    bsdtar -xOf "$1" .PKGINFO 2>/dev/null | grep -qxF "pkgname = $2"
-}
-
-aur_pkg_cache_find() {
-    local package="$1" f
-    while IFS= read -r f; do
-        [[ $f == *.sig ]] && continue
-        aur_pkg_name_verified "$f" "$package" && { printf '%s\n' "$f"; return 0; }
-    done < <(ls -1t "$AUR_PKG_CACHE"/"${package}"-*.pkg.tar.* 2>/dev/null)
-    return 1
-}
-
-aur_pkg_cache_store() {
-    # Copy the freshly built package out of the helper's build dir into the
-    # persistent cache. Helpers clone by pkgbase (xone-dkms builds inside
-    # clone/xone), so scan every clone dir and verify pkgname. No-op when
-    # nothing verifies (e.g. shelly builds elsewhere).
-    local package="$1" d f newest=""
-    for d in "${REAL_HOME}"/.cache/paru/clone/*/ "${REAL_HOME}"/.cache/yay/*/; do
-        for f in "$d""${package}"-*.pkg.tar.*; do
-            [[ -f $f && $f != *.sig ]] || continue
-            aur_pkg_name_verified "$f" "$package" || continue
-            [[ -z $newest || $f -nt $newest ]] && newest=$f
-        done
-    done
-    [[ -n $newest ]] || return 0
-    mkdir -p "$AUR_PKG_CACHE" || return 0
-    cp -f "$newest" "$AUR_PKG_CACHE/" || return 0
-    chown -R "$REAL_USER":"$REAL_USER" "$AUR_PKG_CACHE" 2>/dev/null || true
-    print_info "Cached built package for re-apply: ${newest##*/}"
-}
-
-aur_needs_build_deps() {
-    # Returns false when an unattended re-apply will be satisfied by the
-    # package cache — then no makepkg toolchain is needed at all.
-    [[ "$AUTO" != "1" ]] && return 0
-    [[ -z "$(aur_pkg_cache_find "$1")" ]]
-}
-
 aur_install() {
-    local package="$1" helper cached rc
-    if [[ "$AUTO" == "1" ]] && cached="$(aur_pkg_cache_find "$package")" && [[ -n "$cached" ]]; then
-        print_info "Reinstalling $package from toolkit package cache (${cached##*/})..."
-        if LC_ALL=C pacman -U --needed --noconfirm "$cached"; then
-            return 0
-        fi
-        print_error "Cached package reinstall failed — falling back to a fresh AUR build."
-        rm -f "$cached"
-    fi
+    local package="$1" helper
     if ! helper="$(aur_helper)"; then
         print_error "No AUR helper found (shelly, paru, or yay). Please install one first."
         return 1
@@ -848,9 +674,6 @@ aur_install() {
         paru)   sudo -u "$REAL_USER" env LC_ALL=C paru -S --noconfirm "$package" ;;
         yay)    sudo -u "$REAL_USER" env LC_ALL=C yay -S --noconfirm "$package" ;;
     esac
-    rc=$?
-    [[ $rc -eq 0 ]] && aur_pkg_cache_store "$package"
-    return $rc
 }
 
 aur_clean_cache() {
@@ -879,7 +702,6 @@ aur_remove() {
         paru)   LC_ALL=C paru -Rns --noconfirm "$package" 2>/dev/null || true ;;
         yay)    LC_ALL=C yay -Rns --noconfirm "$package" 2>/dev/null || true ;;
     esac
-    rm -f "$AUR_PKG_CACHE"/"${package}"-*.pkg.tar.* 2>/dev/null || true
 }
 
 # ==============================================================================
@@ -1154,7 +976,6 @@ run_cpu_governor() {
 
     cpu_governor_setup || return 1
     print_success "CPU Governor installed successfully!"
-    persist_state_add "cpu"
 }
 
 gpu_governor_installed() {
@@ -1210,9 +1031,7 @@ run_gpu_governor() {
     fi
 
     print_info "Installing cyan-skillfish-governor-smu via AUR helper..."
-    if aur_needs_build_deps cyan-skillfish-governor-smu; then
-        ensure_build_deps || return 1
-    fi
+    ensure_build_deps || return 1
     aur_clean_cache cyan-skillfish-governor-smu
     steamos_writable 'aur_install cyan-skillfish-governor-smu' || {
         fail_with_log "Failed to install GPU governor." "GPU Governor Install — aur_install"
@@ -1221,7 +1040,6 @@ run_gpu_governor() {
 
     gpu_governor_setup || return 1
     print_success "GPU Governor installed and started successfully!"
-    persist_state_add "gpu"
 }
 
 run_revert_cpu_governor() {
@@ -1246,7 +1064,6 @@ run_revert_cpu_governor() {
     pipx uninstall bc250-smu-oc 2>/dev/null || true
     [[ -f /etc/bc250-smu-oc.conf ]] && rm -f /etc/bc250-smu-oc.conf
     print_success "CPU governor removed successfully."
-    persist_state_remove "cpu"
 }
 
 run_revert_gpu_governor() {
@@ -1267,7 +1084,6 @@ run_revert_gpu_governor() {
     systemctl disable cyan-skillfish-governor-smu.service 2>/dev/null || true
     steamos_writable 'aur_remove cyan-skillfish-governor-smu' || true
     print_success "GPU governor removed successfully."
-    persist_state_remove "gpu"
 }
 
 # ==============================================================================
@@ -1423,7 +1239,6 @@ EOF
     else
         print_info "Auto-reboot is OFF: after a cold power-off, run 'sudo reboot' yourself once status shows 'still 6c/12t'."
     fi
-    persist_state_add "core_unlock"
 }
 
 # ==============================================================================
@@ -1549,7 +1364,6 @@ install_ram_split() {
     }
 
     print_success "RAM/VRAM split configured! UMA_SIZE=${RAM_SPLIT_DEFAULT_UMA_MB}MB (CMOS), ttm.pages_limit=$RAM_SPLIT_DEFAULT_TTM_PAGES (~12GB dynamic ceiling). Reboot required."
-    persist_state_add "ram_split"
     print_info "After reboot verify: ${CYAN}free -h${RESET} and ${CYAN}cat /sys/class/drm/card0/device/mem_info_vram_total${RESET}"
 }
 
@@ -1585,7 +1399,6 @@ run_revert_ram_split() {
     }
 
     print_success "RAM/VRAM split reverted to stock ${RAM_SPLIT_STOCK_UMA_MB}MB split. Reboot to apply."
-    persist_state_remove "ram_split"
 }
 
 run_revert_core_unlock() {
@@ -1606,7 +1419,6 @@ run_revert_core_unlock() {
     systemctl daemon-reload
 
     print_success "CPU core unlock boot service removed. The extra cores remain active until the next cold power-off."
-    persist_state_remove "core_unlock"
 }
 
 # ==============================================================================
@@ -1773,7 +1585,6 @@ run_disable_mitigations() {
     }
 
     print_success "CPU mitigations disabled. Reboot to apply."
-    persist_state_add "mitigations"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
 
@@ -1811,7 +1622,6 @@ run_revert_mitigations() {
     }
 
     print_success "CPU mitigations re-enabled. Reboot to apply."
-    persist_state_remove "mitigations"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
 
@@ -1932,7 +1742,6 @@ run_configure_swap() {
     sysctl -p "$SWAPPINESS_CONF" >/dev/null
 
     print_success "Swap configured! Current swap:"
-    persist_state_add "swap"
     echo ""
     swapon --show | sed 's/^/    /'
 }
@@ -1967,7 +1776,6 @@ run_revert_swap() {
     sysctl vm.swappiness=60 >/dev/null 2>&1 || true
 
     print_success "Swap reverted to SteamOS default (${SWAPFILE_STOCK_SIZE_MB}M, swappiness=60)."
-    persist_state_remove "swap"
 }
 
 run_zram_zswap_toggle() {
@@ -2018,7 +1826,6 @@ run_zram_zswap_toggle() {
     zswap_enable_runtime
 
     print_success "ZRAM disabled and ZSWAP enabled."
-    persist_state_add "zswap"
     print_info "Verify with: sudo cat /sys/module/zswap/parameters/enabled"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
@@ -2061,7 +1868,6 @@ run_revert_zram_zswap() {
     }
 
     print_success "ZRAM/ZSWAP reverted to SteamOS default. Reboot to apply."
-    persist_state_remove "zswap"
     print_info "Backup saved at $GRUB_DEFAULT.bak"
 }
 
@@ -2201,7 +2007,6 @@ install_sensors_pwm() {
     fi
 
     print_success "NCT6687 PWM fan control driver installed and loaded!"
-    persist_state_add "sensors"
     print_info "Sensors report as ${CYAN}nct6686-isa-0a20${RESET}. Run 'sensors' to view readings."
     print_info "PWM control: /sys/class/hwmon/*/pwmN and pwmN_enable (writable)."
     print_info "${YELLOW}Note:${RESET} this module is rebuilt against the current kernel; a kernel update may require reinstalling it."
@@ -2241,7 +2046,6 @@ run_revert_sensors() {
     fi
 
     print_success "Sensor driver configuration removed."
-    persist_state_remove "sensors"
 }
 
 # Check if NCT6686/87 SuperIO hardware is present
@@ -2410,10 +2214,6 @@ install_coolercontrol() {
     }
 
     print_success "CoolerControl installed and running!"
-    persist_state_add "coolercontrol"
-    if [[ "$AUTO" != "1" ]]; then
-        persist_snapshot_configs "coolercontrol" /etc/coolercontrol /etc/coolercontrold
-    fi
     print_info "Web UI: ${CYAN}https://localhost:11987${RESET}"
     if coolercontrol_gui_installed; then
         print_info "Desktop GUI installed — launch 'CoolerControl' from your app menu."
@@ -2442,7 +2242,6 @@ run_revert_coolercontrol() {
     steamos_writable 'aur_remove coolercontrold' || true
 
     print_success "CoolerControl removed successfully."
-    persist_state_remove "coolercontrol"
 }
 
 coolercontrol_status_label() {
@@ -2561,7 +2360,6 @@ install_xbox_adapter() {
     modprobe xone 2>/dev/null || true
 
     print_success "Xbox Wireless Adapter driver installed!"
-    persist_state_add "xbox"
     print_info "Unplug and replug the adapter if the controller doesn't pair right away."
 }
 
@@ -2593,7 +2391,6 @@ run_revert_xbox_adapter() {
     fi
 
     print_success "Xbox Wireless Adapter driver removed."
-    persist_state_remove "xbox"
 }
 
 xbox_adapter_status_label() {
@@ -2827,7 +2624,6 @@ EOF
     fi
 
     print_success "ACPI fix installed! Reboot required to activate CPU C-states/P-states."
-    persist_state_add "acpi"
     print_info "After reboot verify: ${CYAN}ls /sys/devices/system/cpu/cpu0/cpuidle/${RESET} and ${CYAN}cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies${RESET}"
 }
 
@@ -2862,7 +2658,6 @@ run_revert_acpi_fix() {
     fi
 
     print_success "ACPI fix removed. Reboot to fully revert to stock C/P-state behavior."
-    persist_state_remove "acpi"
 }
 
 # --- shared kernel-headers-package helpers ----------------------------------
@@ -3240,7 +3035,6 @@ install_audio_fix() {
     print_success "DisplayPort audio/video fix installed! Reboot required."
     # Kernel module was replaced — make sure the GRUB recovery entries exist.
     install_recovery_entries auto || true
-    persist_state_add "audio"
     print_info "After reboot, verify DisplayPort video/audio play back at normal speed."
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
 
@@ -3277,7 +3071,6 @@ run_revert_audio_fix() {
     fi
 
     print_success "DisplayPort audio/video fix reverted to stock amdgpu.ko. Reboot to apply."
-    persist_state_remove "audio"
 
     if audio_fix_hpd_debounce_grub_installed; then
         if confirm "Also remove amdgpu.hdmi_hpd_debounce_delay_ms=1500 from GRUB?"; then
@@ -3403,7 +3196,6 @@ run_install_ds5_chord_vdf() {
     fi
 
     install_ds5_chord_vdf "$fix_dir"
-    persist_state_add "ds5_chord_vdf"
     print_success "DS5 Chord Config installed! Restart Steam (or reboot) to apply."
 }
 
@@ -3421,7 +3213,6 @@ run_revert_ds5_chord_vdf() {
     fi
 
     revert_ds5_chord_vdf
-    persist_state_remove "ds5_chord_vdf"
     print_success "DS5 Chord Config reverted. Restart Steam (or reboot) to apply."
 }
 
@@ -3459,7 +3250,6 @@ install_ds5_bridge_fix() {
     fi
 
     print_success "DS5 Bridge PS Button fix installed! Reboot required."
-    persist_state_add "ds5_bridge"
 
     print_info "After reboot, connect the DS5 Bridge and verify:"
     print_info "  ${CYAN}lsmod | grep hid_playstation${RESET}    (should show 1 user)"
@@ -3492,7 +3282,6 @@ run_revert_ds5_bridge_fix() {
     fi
 
     print_success "DS5 Bridge PS Button fix reverted to stock hid-playstation.ko. Reboot to apply."
-    persist_state_remove "ds5_bridge"
 }
 
 # --- HDMI AC-3 Surround Encoding (Dolby Digital via eARC) --------------------
@@ -3505,7 +3294,7 @@ run_revert_ds5_bridge_fix() {
 # Requires: alsa-plugins (a52 plugin), ffmpeg (libavcodec for encoding).
 AC3_UDEV_RULE="/etc/udev/rules.d/91-ac3-audio.rules"
 # AC3_WP_CONF_DIR / AC3_WP_CONF are set in derive_home_state_paths() (top of
-# file) so the root-run persist re-apply can re-derive them for the real user.
+# file) so they can be re-derived for the real user when running as root.
 
 ac3_surround_installed() {
     [[ -f "$AC3_UDEV_RULE" ]] && [[ -f "$AC3_WP_CONF" ]]
@@ -3528,7 +3317,7 @@ AC3_USER_SCRIPT="$SCRIPT_DIR/extras/hdmi-ac3-encoding/ac3-user-setup.sh"
 # encode AND decode (H.264/HEVC incl. Main10, VideoProc scaling) implemented
 # with Vulkan compute shaders + threaded CPU wavefront/SIMD.
 # Driver + shaders live in /var/lib/bc250 (survives SteamOS A/B updates); only
-# the env files live in /etc and are rewritten by the persistence re-apply.
+# the env files live in /etc (also survives updates).
 # NOTE: the upstream bundle also ships a DKMS audio module (bc250_audio_fix) —
 # we deliberately do NOT install it; audio is handled by the toolkit's own fixes.
 VAAPI_STATE_DIR="/var/lib/bc250"
@@ -3627,16 +3416,6 @@ EOF
     chmod 644 "$VAAPI_ENV_CONF" "$VAAPI_ENV_PROFILE"
 }
 
-vaapi_reapply_env() {
-    if [[ -f "$VAAPI_STATE_DIR/dri/bc250_drv_video.so" ]]; then
-        vaapi_write_env
-        vaapi_ensure_runtime_deps
-        print_success "VA-API driver env restored (driver files in /var/lib survived the update)."
-    else
-        install_vaapi_driver auto
-    fi
-}
-
 install_vaapi_driver() {
     local auto="${1:-}"
     print_step "VAAPI" "Install VA-API Video Driver (H.264/HEVC encode+decode via Vulkan compute)"
@@ -3698,7 +3477,6 @@ install_vaapi_driver() {
     install -m 0644 "$work/bc250-driver/shaders"/*.spv /usr/local/share/bc250/shaders/ 2>/dev/null || true
 
     vaapi_write_env
-    persist_state_add "vaapi"
     rm -rf "$work"
 
     print_success "VA-API video driver installed (driver + shaders in $VAAPI_STATE_DIR)."
@@ -3728,7 +3506,6 @@ run_revert_vaapi_driver() {
     rm -f "$VAAPI_ENV_CONF" "$VAAPI_ENV_PROFILE" /etc/profile.d/bc250-vaapi.sh
     rm -f /usr/local/lib/dri/bc250_drv_video.so 2>/dev/null || true
     rm -rf /usr/local/share/bc250 2>/dev/null || true
-    persist_state_remove "vaapi"
 
     print_success "VA-API video driver removed."
     print_info "Start a new session (or reboot) to clear LIBVA_DRIVER_NAME from the environment."
@@ -3851,7 +3628,6 @@ install_ac3_surround() {
         return 1
     fi
 
-    persist_state_add "ac3"
 
     # Post-install audio test
     ac3_post_install_test "$card_name" "$ac3_sink"
@@ -4011,13 +3787,7 @@ ac3_generate_diagnostic_log() {
         echo "Kernel build: $(uname -v 2>/dev/null || echo 'N/A')"
         echo "GCC: $(gcc --version 2>/dev/null | head -1 || echo 'N/A')"
         echo ""
-        echo "== Installed Toolkit Components =="
-        if [[ -f "$PERSIST_STATE_FILE" ]]; then
-            cat "$PERSIST_STATE_FILE"
-        else
-            echo "(none recorded)"
-        fi
-        echo ""
+
         echo "== Audio Card / PipeWire / WirePlumber (user session) =="
         local uid
         uid=$(id -u "$REAL_USER")
@@ -4134,7 +3904,6 @@ run_revert_ac3_surround() {
     echo "$revert_output" | grep -v "^REVERTED$" || true
 
     print_success "AC-3 Surround Encoding reverted. HDMI stereo profile restored."
-    persist_state_remove "ac3"
 }
 
 DUAL_AUDIO_DIR="$SCRIPT_DIR/external/bc250-dual-audio"
@@ -4232,7 +4001,6 @@ install_dual_audio() {
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     sleep 4
     print_success "Dual-output audio v0.15 installed! Reboot before use."
-    persist_state_add "dual_audio"
 }
 
 run_revert_dual_audio() {
@@ -4275,7 +4043,6 @@ run_revert_dual_audio() {
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user daemon-reload 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     print_success "Dual-output audio reverted. Reboot to apply."
-    persist_state_remove "dual_audio"
 }
 
 # ---------------------------------------------------------------------------
@@ -4284,8 +4051,8 @@ run_revert_dual_audio() {
 MASTAG_REPO_URL="https://github.com/MastaG/linux-cachyos-bc250/releases/download/repo"
 MASTAG_REPO_NAME="bc250-cachyos"
 MASTAG_PROTON_PACKAGES=("protonge-latest-bc250" "proton-cachyos-native-bc250" "proton-cachyos-slr-bc250")
-# STEAM_COMPAT_DIR is set in derive_home_state_paths() (top of file) so the
-# root-run persist re-apply can re-derive it for the real user.
+# STEAM_COMPAT_DIR is set in derive_home_state_paths() (top of file) so it
+# can be re-derived for the real user when running as root.
 
 fsr4_proton_installed() {
     [[ -f "$STEAM_COMPAT_DIR/.bc250-fsr4-marker" ]] && \
@@ -4560,7 +4327,6 @@ install_fsr4_proton() {
     echo -e "  ${YELLOW}DLSS spoof:${RESET} BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true\" makes games offer DLSS/Reflex"
     echo -e "  which OptiScaler translates to FSR4. Add Spoofing.Registry=true if game warns about GPU/driver."
     echo ""
-    persist_state_add "fsr4_proton"
 }
 
 revert_fsr4_proton() {
@@ -4614,9 +4380,6 @@ revert_fsr4_proton() {
         print_success "Removed: ${tool}"
     done
 
-    if ! fsr4_proton_installed; then
-        persist_state_remove "fsr4_proton"
-    fi
     print_info "Restart Steam to apply."
 }
 
@@ -4880,7 +4643,6 @@ install_gfx1013_fix() {
     print_success "GFX1013 compute queue fix installed! Reboot required."
     # Kernel module was replaced — make sure the GRUB recovery entries exist.
     install_recovery_entries auto || true
-    persist_state_add "gfx1013"
     print_info "After reboot, async compute queues are enabled on the BC-250 GPU."
     print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
     print_info "${YELLOW}If anything misbehaves:${RESET} use the Revert option, then reboot."
@@ -4925,10 +4687,6 @@ run_revert_gfx1013_fix() {
     audio_fix_remove_hpd_debounce_grub_param
     audio_fix_remove_cs_legacy_grub_param
     audio_fix_cleanup_legacy_edid
-
-    # Remove persist states
-    persist_state_remove "gfx1013"
-    persist_state_remove "audio"
 
     print_success "Combined fix fully reverted: stock amdgpu.ko + all GRUB/modprobe configs removed. Reboot to apply."
 }
@@ -5105,8 +4863,6 @@ install_combined_fix() {
         # Kernel module was replaced — make sure the GRUB recovery entries
         # (incl. the pre-install snapshot entry) exist and the menu is on.
         install_recovery_entries auto || true
-        [[ $do_audio -eq 1 ]] && persist_state_add "audio"
-        [[ $do_gfx -eq 1 ]] && persist_state_add "gfx1013"
         [[ $do_gfx -eq 1 ]] && print_info "Patched Mesa installed to /opt/bc250-gfx1013/"
         if [[ $do_vcn -eq 1 ]]; then
             echo ""
@@ -5308,8 +5064,6 @@ EOF
         fail_with_log "Failed to record the selected AIC8800 profile." "AIC8800 WiFi — profile marker"
         return 1
     }
-    persist_state_remove "aic8800_legacy_mcu1"
-    persist_state_add "aic8800"
     print_success "AIC8800 WiFi/BT driver installed!"
     print_info "Check with: ${CYAN}ip link${RESET} (WiFi) and ${CYAN}bluetoothctl${RESET} (Bluetooth)."
     print_info "${YELLOW}Note:${RESET} rebuild after each SteamOS update — safe to re-run this option any time."
@@ -5461,8 +5215,6 @@ EOF
             -M "555342431234567800000000000010fd0000000000000000000000000000f2" -R 2>/dev/null || true
     fi
 
-    persist_state_remove "aic8800"
-    persist_state_add "aic8800_legacy_mcu1"
     print_success "AIC8800DC/DW legacy-MCU1 WiFi driver installed!"
     print_info "Cold-unplug the adapter for 10 seconds if it previously timed out while starting firmware."
     print_info "Verify with: ${CYAN}iw dev${RESET} and ${CYAN}nmcli device wifi list${RESET}."
@@ -5504,8 +5256,6 @@ run_revert_aic8800_wifi() {
     fi
 
     print_success "AIC8800 driver configuration removed."
-    persist_state_remove "aic8800"
-    persist_state_remove "aic8800_legacy_mcu1"
 }
 
 # --- Intel BE200 Wi-Fi 7 firmware -------------------------------------------
@@ -5616,7 +5366,6 @@ install_be200_firmware() {
     modprobe iwlwifi 2>/dev/null || true
 
     print_success "Intel BE200 firmware installed!"
-    persist_state_add "be200_fw"
     print_info "Check with: ${CYAN}dmesg | grep iwlwifi${RESET} — should show 'loaded firmware version'"
     print_info "If the card was not detected at boot, a reboot may be needed: ${CYAN}sudo reboot${RESET}"
     print_info "${YELLOW}Note:${RESET} SteamOS updates may overwrite these files — re-run this option if WiFi stops working after an update."
@@ -5644,7 +5393,6 @@ run_revert_be200_firmware() {
     modprobe iwlwifi 2>/dev/null || true
 
     print_success "BE200 firmware files removed."
-    persist_state_remove "be200_fw"
 }
 
 # --- HDMI-CEC / TV Control (bc250-cec.sh) -----------------------------------
@@ -5695,7 +5443,7 @@ run_cec_control() {
 # gamescope/KDE, unlike the old full replug (still selectable via
 # RELINK_METHOD=hotplug in /etc/bc250-cec.conf). Detection-only by default:
 # never transmits standby/active-source. Waits quietly when no CEC adapter
-# exists. Installs to the root fs, so it is persisted across SteamOS updates.
+# exists. Installs to the root fs (wiped by SteamOS updates — reinstall via menu).
 
 CEC_RETRAIN_DIR_NAME="bc250-cec-retrain"
 
@@ -5775,7 +5523,6 @@ install_cec_retrain() {
     done
     (( was )) && steamos-readonly enable || true
 
-    persist_state_add "cec_retrain"
     print_success "CEC link-retrain daemon installed and running."
     echo -e "  ${DIM}  No CEC adapter attached? It waits quietly — check: cec-ctl --list-devices${RESET}"
     echo -e "  ${DIM}  TV remote keys: OK→Enter, Back→Esc for Steam UI (BC250_CEC_REMOTE_KEYS=0 opts out)${RESET}"
@@ -5802,7 +5549,6 @@ revert_cec_retrain() {
     udevadm control --reload 2>/dev/null || true
     (( was )) && steamos-readonly enable || true
 
-    persist_state_remove "cec_retrain"
     print_success "CEC link-retrain daemon removed."
 }
 
@@ -6433,7 +6179,6 @@ oc_edit_cpu_config_nano() {
         systemctl restart "$CPU_SERVICE"
         if systemctl is-active --quiet "$CPU_SERVICE"; then
             print_success "CPU service restarted successfully."
-            persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
         else
             print_error "CPU service failed to start! Check: journalctl -u $CPU_SERVICE"
         fi
@@ -6453,7 +6198,6 @@ oc_edit_gpu_config_nano() {
         systemctl restart "$GPU_SERVICE"
         if systemctl is-active --quiet "$GPU_SERVICE"; then
             print_success "GPU service restarted successfully."
-            persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
         else
             print_error "GPU service failed to start! Check: journalctl -u $GPU_SERVICE"
         fi
@@ -6531,7 +6275,6 @@ oc_run_bc250_detect() {
             fail_with_log "Failed to enable/restart the CPU governor service." "bc250-detect — enable service"
             return 1
         }
-        persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
         print_success "CPU governor updated with the new bc250-detect profile."
     else
         cd - >/dev/null || true
@@ -6679,7 +6422,6 @@ oc_apply_preset() {
 
     echo ""
     print_success "Preset '${name}' applied!"
-    persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
     echo -e "  ${CYAN}CPU${RESET}  $(awk -F'= ' '/^frequency/{print $2}' "$CPU_DEST" | tr -d ' ')MHz"
     echo -e "  ${CYAN}GPU${RESET}  $(awk -F'= ' '/^frequency/{print $2}' "$GPU_DEST" | tr -d ' ' | tail -1)MHz"
     echo -e "  ${CYAN}TMP${RESET}  $(awk -F'= ' '/^max_temperature/{print $2}' "$CPU_DEST" | tr -d ' ')°C"
@@ -6764,7 +6506,6 @@ oc_apply_custom() {
 
     echo ""
     print_success "Custom profile applied!"
-    persist_snapshot_configs "performance" "$CPU_DEST" "$GPU_DEST"
     echo -e "  ${CYAN}CPU${RESET}  $(awk -F'= ' '/^frequency/{print $2}' "$CPU_DEST" | tr -d ' ')MHz  /  max $(awk -F'= ' '/^max_temperature/{print $2}' "$CPU_DEST" | tr -d ' ')°C"
     echo -e "  ${CYAN}GPU${RESET}  $(awk -F'= ' '/^frequency/{print $2}' "$GPU_DEST" | tr -d ' ' | tail -1)MHz  /  throttle $(awk -F'= ' '/^throttling /{print $2}' "$GPU_DEST" | tr -d ' ')°C"
     echo ""
@@ -6975,21 +6716,18 @@ run_status() {
     fi
     echo -e "  ${CYAN}DP Audio/Video Fix${RESET} ${audio_icon} ${audio_color}${audio_label}${RESET}"
 
-    # The kernel side has no runtime marker to check (unlike the upstream
-    # Fedora installer, our direct module-replace approach doesn't add a
-    # /proc/cmdline flag or /sys/module note), so kernel status relies on
-    # persist_state (set by install_gfx1013_fix / detected retroactively by
-    # persist_detect_and_record_installed). Mesa status is verified directly
-    # from disk since the ICD json is a reliable on-disk signal.
-    local gfx1013_icon gfx1013_color gfx1013_label gfx1013_mesa_ok=0
+    # Kernel side: VK_DRIVER_FILES pointing at bc250-gfx1013 is the marker
+    # written by the gfx1013 install (audio-only fixes don't set it).
+    local gfx1013_icon gfx1013_color gfx1013_label gfx1013_mesa_ok=0 gfx1013_kernel_ok=0
     compgen -G "/opt/bc250-gfx1013/*/share/vulkan/icd.d/radeon_icd.x86_64.json" >/dev/null 2>&1 && gfx1013_mesa_ok=1
-    if persist_state_has "gfx1013" && (( gfx1013_mesa_ok )); then
+    grep -q "VK_DRIVER_FILES=.*bc250-gfx1013" /etc/environment 2>/dev/null && gfx1013_kernel_ok=1
+    if (( gfx1013_kernel_ok && gfx1013_mesa_ok )); then
         if [[ "$resolved_amdgpu" == *"/updates/"* ]]; then
             gfx1013_icon="$ICON_OK"; gfx1013_color="$GREEN"; gfx1013_label="kernel + Mesa/RADV active"
         else
             gfx1013_icon="$ICON_WARN"; gfx1013_color="$YELLOW"; gfx1013_label="installed — reboot pending"
         fi
-    elif persist_state_has "gfx1013" || (( gfx1013_mesa_ok )); then
+    elif (( gfx1013_kernel_ok || gfx1013_mesa_ok )); then
         gfx1013_icon="$ICON_WARN"; gfx1013_color="$YELLOW"; gfx1013_label="incomplete (kernel or Mesa half missing)"
     else
         gfx1013_icon="$DIM"; gfx1013_color="$DIM"; gfx1013_label="not installed"
@@ -7162,6 +6900,12 @@ run_revert_all() {
     run_revert_aic8800_wifi
     echo ""
     uninstall_recovery_entries
+
+    # Purge leftovers of the removed persistence feature on older installs.
+    systemctl disable --now bc250-toolkit-persist.service 2>/dev/null || true
+    rm -f /etc/systemd/system/bc250-toolkit-persist.service           /etc/systemd/system/multi-user.target.wants/bc250-toolkit-persist.service           /usr/local/bin/bc250-toolkit-reattach.sh           /etc/atomic-update.conf.d/bc250-toolkit.conf           "$PERSIST_STATE_DIR"/installed-components           "$PERSIST_STATE_DIR"/bc250-toolkit-keep.conf           "$PERSIST_STATE_DIR"/bc250-toolkit-reattach.sh           "$PERSIST_STATE_DIR"/bc250-toolkit-persist.service 2>/dev/null
+    rm -rf "$PERSIST_STATE_DIR"/aur-packages "$PERSIST_STATE_DIR"/config-snapshots 2>/dev/null
+    systemctl daemon-reload 2>/dev/null || true
 }
 
 run_install_manual() {
@@ -7383,7 +7127,6 @@ install_openlinkhub() {
     }
 
     print_success "OpenLinkHub installed and running!"
-    persist_state_add "openlinkhub"
     print_info "Web UI: ${CYAN}http://localhost:27003${RESET}"
     print_info "${YELLOW}Tip:${RESET} For Steam Gaming Mode control, install the Decky plugin 'bc250-commander-control'."
 }
@@ -7406,7 +7149,6 @@ run_revert_openlinkhub() {
     steamos_writable 'aur_remove openlinkhub-git' || true
 
     print_success "OpenLinkHub removed successfully."
-    persist_state_remove "openlinkhub"
 }
 
 install_toolkit_steamos_control_plugin() {
@@ -7451,7 +7193,6 @@ run_extras_menu() {
         print_item "F" "Sensors & Fan Control"        "NCT6686D sensors / NCT6687 PWM fan control"
         print_item "H" "HDMI-CEC"                      "TV/receiver control + link-retrain daemon (fixes no-signal after AVR/TV switch)"
         print_item "K" "CoolerControl"                "Install/revert CoolerControl fan-curve daemon + GUI"
-        print_item "P" "Enable SteamOS Update Persistence" "Re-apply toolkit settings after SteamOS updates"
         print_item "D" "DS5 Bridge PS Button Fix"    "Install/revert patched hid-playstation.ko — DualSense PS button chord combos"
         print_item "X" "Xbox Wireless Adapter"        "Install/revert xone driver for Xbox One/Series controllers"
         print_item "O" "OpenLinkHub"                  "Install/revert Corsair iCUE LINK Hub control — status: $(openlinkhub_status_label)"
@@ -7470,7 +7211,6 @@ run_extras_menu() {
             F) run_sensors_menu ;;
             H) run_cec_menu ;;
             K) run_coolercontrol_menu ;;
-            P) install_persistence;       press_enter ;;
             D) run_ds5_bridge_menu ;;
             X) run_xbox_adapter_menu ;;
             O) install_openlinkhub;        press_enter ;;
@@ -7513,8 +7253,8 @@ RECOVERY_GRUB_SCRIPT="/etc/grub.d/42_bc250-recovery"
 # grub-mkconfig time, so toggling only needs an update-grub, and the prefs
 # survive SteamOS updates (they live in the user's home). RECOVERY_MENU_CONF,
 # RECOVERY_CTL and RECOVERY_TOOLKIT_PATH_FILE are set in
-# derive_home_state_paths() (top of file) so the root-run persist re-apply can
-# re-derive them for the real user.
+# derive_home_state_paths() (top of file) so they can be re-derived for the
+# real user when running as root.
 RECOVERY_MENU_TIMEOUT_DEFAULT=1
 RECOVERY_REVERT_UNIT="/etc/systemd/system/bc250-recovery-revert.service"
 RECOVERY_REVERT_WANTS="/etc/systemd/system/multi-user.target.wants/bc250-recovery-revert.service"
@@ -7652,7 +7392,7 @@ cmd_revert() {
     if [[ -n $toolkit && -f $toolkit ]]; then
         echo "running toolkit revert-all via $toolkit"
         # The toolkit re-resolves its state dir from SUDO_USER — hand it the
-        # owner of the state dir so persist files land in the right home.
+        # owner of the state dir so recovery files land in the right home.
         local owner
         owner=$(stat -c %U "$state_dir" 2>/dev/null || true)
         [[ -n $owner && $owner != root ]] && export SUDO_USER=$owner
@@ -7897,7 +7637,6 @@ install_recovery_entries() {
         steamos-readonly enable || true
     fi
 
-    persist_state_add "recovery_entries"
     if [[ $RECOVERY_MENU == "on" ]]; then
         print_info "They appear in the GRUB menu, shown for ${RECOVERY_TIMEOUT}s at boot."
     else
@@ -7924,7 +7663,6 @@ uninstall_recovery_entries() {
     # invoked *by* that script (via --revert-all), and deleting a running bash
     # script can corrupt its incremental read. Without the unit it's inert.
     rm -f "$RECOVERY_TOOLKIT_PATH_FILE" "$RECOVERY_MENU_CONF"
-    persist_state_remove "recovery_entries"
     print_success "Recovery boot entries removed."
 }
 
@@ -8018,12 +7756,6 @@ run_recovery_menu() {
     done
 }
 
-# ==============================================================================
-# STEAMOS UPDATE PERSISTENCE
-# ==============================================================================
-# Track which components have been installed and automatically re-apply them
-# after a SteamOS atomic update wipes /etc and /usr/lib/modules.
-
 # SteamOS/Steam-client updates can leave the scout-runtime pinned libcurl
 # pointing at the bundled ubuntu12_32 copy while new system binaries
 # (flatpak, AppImages like ES-DE, git) need CURL_OPENSSL_4 versioned
@@ -8033,7 +7765,7 @@ run_recovery_menu() {
 # 3.9.2). Repoint the pin at the host lib when the pin resolves into the
 # bundled runtime and the host lib carries the version node.
 steam_repair_pinned_libcurl() {
-    # Glob /home/* too: reapply runs as root under the persist service, where
+    # Glob /home/* too: the recovery-revert service runs this as root, where
     # REAL_USER resolves to root and $REAL_HOME has no Steam dir.
     local rt home arch pin syslib target owner
     for home in "$REAL_HOME" /home/*; do
@@ -8058,256 +7790,6 @@ steam_repair_pinned_libcurl() {
     done
 }
 
-# The persist service runs as root: REAL_USER resolves to root and the state
-# dir would default to /root/.bc250-toolkit, while the state actually lives
-# in the installing user's home. Re-derive it from /home so the state file,
-# snapshots and the AUR package cache are found.
-reapply_resolve_state_dir() {
-    [[ -f $PERSIST_STATE_FILE ]] && return 0
-    [[ $EUID -ne 0 ]] && return 0
-    local d owner user_home
-    for d in /home/*/.bc250-toolkit; do
-        [[ -f $d/installed-components ]] || continue
-        owner=$(stat -c %U "${d%/.*}" 2>/dev/null || true)
-        if [[ -n $owner && $owner != root ]]; then
-            user_home=$(getent passwd "$owner" | cut -d: -f6)
-            if [[ -n $user_home && -d $user_home ]]; then
-                REAL_USER=$owner
-                REAL_HOME=$user_home
-            fi
-        fi
-        PERSIST_STATE_DIR="$d"
-        PERSIST_STATE_FILE="$d/installed-components"
-        PERSIST_KEEP_FILE="$d/bc250-toolkit-keep.conf"
-        # Re-derive every global that was bound to /root at source time.
-        derive_home_state_paths
-        print_info "Re-apply: using toolkit state from $d"
-        return 0
-    done
-}
-
-reapply_installed_components() {
-    print_step "RAP" "Re-applying toolkit settings after SteamOS update"
-    run_grub_boot_fix
-    steam_repair_pinned_libcurl
-    reapply_resolve_state_dir
-    local component
-    if [[ ! -f "$PERSIST_STATE_FILE" ]]; then
-        print_info "No persisted toolkit state to re-apply."
-        return 0
-    fi
-    while IFS= read -r component; do
-        [[ -n "$component" ]] || continue
-        print_info "Re-applying component: $component"
-        case "$component" in
-            cpu)        run_cpu_governor || print_error "CPU governor reapply failed" ;;
-            gpu)        run_gpu_governor || print_error "GPU governor reapply failed" ;;
-            mitigations) run_disable_mitigations auto || print_error "Mitigations reapply failed" ;;
-            swap)       run_configure_swap auto || print_error "Swap reapply failed" ;;
-            zswap)      run_zram_zswap_toggle auto || print_error "ZSWAP reapply failed" ;;
-            acpi)       install_acpi_fix || print_error "ACPI fix reapply failed" ;;
-            audio)      install_audio_fix || print_error "DP audio fix reapply failed" ;;
-            ac3)        install_ac3_surround || print_error "AC-3 surround reapply failed" ;;
-            vaapi)      vaapi_reapply_env || print_error "VA-API driver reapply failed" ;;
-            dual_audio) install_dual_audio || print_error "Dual-output audio reapply failed" ;;
-            ds5_bridge) install_ds5_bridge_fix || print_error "DS5 Bridge fix reapply failed" ;;
-            ds5_chord_vdf) run_install_ds5_chord_vdf || print_error "DS5 Chord VDF reapply failed" ;;
-            cu)         print_info "CU Live Manager skipped in unattended re-apply." ;;
-            core_unlock) print_info "CPU Core Unlock boot service persists via the atomic-update keep list — skipped in unattended re-apply." ;;
-            ram_split)  print_info "RAM/VRAM split persists on its own (CMOS is hardware state; GRUB config is in the atomic-update keep list) — skipped in unattended re-apply." ;;
-            aic8800)    install_aic8800_wifi || print_error "AIC8800 WiFi reapply failed" ;;
-            aic8800_legacy_mcu1) install_aic8800_legacy_mcu1 || print_error "AIC8800 legacy-MCU1 WiFi reapply failed" ;;
-            sensors)    install_sensors_pwm || print_error "Sensors PWM reapply failed" ;;
-            coolercontrol) install_coolercontrol || print_error "CoolerControl reapply failed" ;;
-            openlinkhub)   install_openlinkhub || print_error "OpenLinkHub reapply failed" ;;
-            xbox)       install_xbox_adapter || print_error "Xbox adapter reapply failed" ;;
-            cec_retrain) install_cec_retrain || print_error "CEC retrain daemon reapply failed" ;;
-            persistence) install_persistence || print_error "Persistence reapply failed" ;;
-            recovery_entries) install_recovery_entries auto || print_error "Recovery entries reapply failed" ;;
-            *)          print_info "Unknown persisted component: $component" ;;
-        esac
-        echo ""
-    done < "$PERSIST_STATE_FILE"
-    persist_restore_all_configs
-    systemctl daemon-reload 2>/dev/null || true
-    systemctl restart bc250-smu-oc.service cyan-skillfish-governor-smu.service coolercontrold.service openlinkhub.service 2>/dev/null || true
-    install_all_progress_clear 2>/dev/null || true
-    print_success "Toolkit re-apply completed."
-}
-
-install_persistence() {
-    print_step "PST" "Enable SteamOS update persistence"
-
-    if ! is_steamos; then
-        print_info "Persistence is only meaningful on SteamOS; nothing to do."
-        return 0
-    fi
-
-    mkdir -p "$PERSIST_STATE_DIR"
-    # Don't hint about option P while the user is literally enabling it.
-    _persist_hint_shown=1
-    persist_detect_and_record_installed
-
-    local reapply_script="$PERSIST_STATE_DIR/bc250-toolkit-reattach.sh"
-    cat > "$reapply_script" <<EOF
-#!/usr/bin/env bash
-# Auto-generated by bc250-steamos-real-toolkit
-set -euo pipefail
-export AUTO=1
-exec "$SCRIPT_PATH" --reapply-all
-EOF
-    chmod +x "$reapply_script"
-    chown "$REAL_USER":"$REAL_USER" "$reapply_script" 2>/dev/null || true
-
-    local tmp_unit="$PERSIST_STATE_DIR/bc250-toolkit-persist.service"
-    cat > "$tmp_unit" <<EOF
-[Unit]
-Description=Re-apply BC-250 SteamOS Real Toolkit settings after updates
-After=network-online.target multi-user.target
-Wants=network-online.target
-ConditionKernelCommandLine=!steamos-recovery
-
-[Service]
-Type=oneshot
-ExecStart=$reapply_script
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    chown "$REAL_USER":"$REAL_USER" "$tmp_unit" 2>/dev/null || true
-
-    cat > "$PERSIST_KEEP_FILE" <<'EOF'
-# Toolkit state preserved across SteamOS atomic updates
-# generated by bc250-steamos-real-toolkit
-/etc/default/grub
-/etc/bc250-aic8800-profile
-/etc/modprobe.d/aic8800.conf
-/etc/modprobe.d/sensors.conf
-/etc/modules-load.d/99-sensors.conf
-/etc/sysctl.d/99-swappiness.conf
-/etc/udev/rules.d/40-aic8800-modeswitch.rules
-/etc/usb_modeswitch.d/1111:1111
-/etc/bc250-smu-oc.conf
-/etc/cyan-skillfish-governor-smu
-/etc/cyan-skillfish-governor-smu/config.toml
-/etc/dbus-1/system.d/com.cyan.SkillFishGovernor.conf
-/etc/bc250-cu-live-manager.conf
-/etc/bc250-control
-/etc/coolercontrol
-/etc/coolercontrold
-/var/lib/toolkit-steamos-control
-/etc/systemd/system/toolkit-steamos-fan.service
-/etc/systemd/system/steamos-led.service.d/toolkit-steamos-control.conf
-/etc/systemd/system/bc250-smu-oc.service
-/etc/systemd/system/cyan-skillfish-governor-smu.service
-/etc/systemd/system/bc250-acpi-heal.service
-/etc/systemd/system/bc250-cpufreq.service
-/etc/systemd/system/bc250-gpu-freq-restore.service
-/etc/systemd/system/bc250-cu-live-manager.service
-/etc/systemd/system/bc250-core-unlock.service
-/etc/bc250-core-unlock.conf
-/etc/systemd/system/aic8800-modules.service
-/etc/systemd/system/bc250-toolkit-persist.service
-/etc/systemd/system/multi-user.target.wants/bc250-smu-oc.service
-/etc/systemd/system/multi-user.target.wants/cyan-skillfish-governor-smu.service
-/etc/systemd/system/multi-user.target.wants/bc250-acpi-heal.service
-/etc/systemd/system/multi-user.target.wants/bc250-cpufreq.service
-/etc/systemd/system/multi-user.target.wants/bc250-gpu-freq-restore.service
-/etc/systemd/system/multi-user.target.wants/bc250-cu-live-manager.service
-/etc/systemd/system/multi-user.target.wants/bc250-core-unlock.service
-/etc/systemd/system/multi-user.target.wants/aic8800-modules.service
-/etc/systemd/system/multi-user.target.wants/bc250-toolkit-persist.service
-/etc/systemd/system/bc250-recovery-revert.service
-/etc/systemd/system/multi-user.target.wants/bc250-recovery-revert.service
-/etc/grub.d/42_bc250-recovery
-/etc/systemd/system-sleep/bc250-cec-amp.sh
-/etc/systemd/system/bc250-cec-poweroff-standby.service
-/etc/systemd/system/multi-user.target.wants/bc250-cec-poweroff-standby.service
-/etc/systemd/system/bc250-cec.service
-/etc/systemd/system/graphical.target.wants/bc250-cec.service
-/etc/bc250-cec.conf
-/etc/udev/rules.d/71-bc250-cec-keys.rules
-/usr/lib/bc250-cec/bc250-cec-daemon.sh
-/usr/lib/bc250-cec/bc250-cec-keymap.sh
-/etc/atomic-update.conf.d/bc250-toolkit.conf
-EOF
-    chown "$REAL_USER":"$REAL_USER" "$PERSIST_KEEP_FILE" 2>/dev/null || true
-
-    local keep=/etc/atomic-update.conf.d/bc250-toolkit.conf
-    steamos_writable "install -D -m 644 -o root -g root '$PERSIST_KEEP_FILE' '$keep' && install -D -m 644 -o root -g root '$tmp_unit' '/etc/systemd/system/bc250-toolkit-persist.service' && install -D -m 755 -o root -g root '$reapply_script' '/usr/local/bin/bc250-toolkit-reattach.sh' && systemctl daemon-reload && systemctl enable bc250-toolkit-persist.service" || {
-        fail_with_log "Failed to install SteamOS update persistence files." "Persistence Install"
-        return 1
-    }
-
-    if [[ "$AUTO" != "1" ]]; then
-        persist_snapshot_configs "global" \
-            /etc/bc250-smu-oc.conf \
-            /etc/cyan-skillfish-governor-smu/config.toml \
-            /etc/cyan-skillfish-governor-smu/freq-state \
-            /etc/coolercontrol \
-            /etc/coolercontrold \
-            /etc/bc250-aic8800-profile \
-            /etc/modprobe.d/aic8800.conf \
-            /etc/modprobe.d/sensors.conf \
-            /etc/modules-load.d/99-sensors.conf \
-            /etc/sysctl.d/99-swappiness.conf \
-            /etc/udev/rules.d/40-aic8800-modeswitch.rules \
-            /etc/usb_modeswitch.d/1111:1111
-    fi
-    persist_state_add "persistence"
-    print_success "SteamOS update persistence enabled. Toolkit settings will be re-applied after system updates."
-}
-
-run_show_persistence_list() {
-    print_banner
-    print_section "Persistence List"
-    persist_detect_and_record_installed
-    if [[ ! -f "$PERSIST_STATE_FILE" ]]; then
-        print_info "No persisted components recorded yet."
-        echo ""
-        return 0
-    fi
-    echo -e "  ${DIM}Components recorded in $PERSIST_STATE_FILE:${RESET}"
-    while IFS= read -r component; do
-        [[ -n "$component" ]] && echo -e "    - ${CYAN}${component}${RESET}"
-    done < "$PERSIST_STATE_FILE"
-    echo ""
-    if [[ -d "$PERSIST_STATE_DIR/config-snapshots" ]]; then
-        echo -e "  ${DIM}Saved config snapshots:${RESET}"
-        for snapshot in "$PERSIST_STATE_DIR/config-snapshots"/*; do
-            [[ -e "$snapshot" ]] || continue
-            echo -e "    - $(basename "$snapshot")"
-        done
-    else
-        echo -e "  ${DIM}No saved config snapshots yet.${RESET}"
-    fi
-    echo ""
-}
-
-run_persistence_menu() {
-    while true; do
-        print_banner
-        print_section "SteamOS Update Persistence"
-        echo ""
-        print_item "E" "Enable / Update Persistence" "Track & re-apply toolkit settings after SteamOS updates"
-        print_item "V" "View Persistence List"       "Show installed components and saved config snapshots"
-        print_item "0" "Back"                      ""
-        echo ""
-        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
-        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" persist_choice
-
-        case "${persist_choice^^}" in
-            E) install_persistence;       press_enter ;;
-            V) run_show_persistence_list; press_enter ;;
-            0) return 0 ;;
-            *)
-                print_error "Invalid selection: '$persist_choice'"
-                sleep 1
-                ;;
-        esac
-    done
-}
 
 show_menu() {
     print_banner
@@ -8317,13 +7799,12 @@ show_menu() {
     print_item  "2"  "Install / Revert Manual" "Same as Install All, one component at a time"
     print_item  "3"  "Performance Profiles"  "CPU & GPU performance profiles"
     print_item  "4"  "Revert / Uninstall All" "Undo everything back to SteamOS defaults"
-    print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC, AIC8800 WiFi, persistence"
+    print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC, AIC8800 WiFi"
     echo ""
     print_section "System"
     print_item  "V"  "Verify My Setup"       "Current system summary"
     print_item  "G"  "Changelog"             "Open the README changelog on GitHub"
     print_item  "I"  "Help"                  "Open the repository (usage & troubleshooting)"
-    print_item  "P"  "SteamOS Update Persistence" "Track, view and re-apply after any SteamOS update (recommended)"
     print_item  "0"  "Exit"                  ""
     echo ""
     echo -e "  ${DIM}${TOOLKIT_VERSION} — ${REPO_URL}${RESET}"
@@ -8332,12 +7813,9 @@ show_menu() {
 
 ensure_desktop_shortcut || true
 
-# Non-interactive re-apply mode used by the persistence service after SteamOS updates.
-if [[ "${1:-}" == "--reapply-all" ]]; then
-    AUTO=1
-    reapply_installed_components
-    exit 0
-fi
+# Stale persistence artifacts (removed feature): a leftover reattach script or
+# service calling this must exit immediately, never reach the interactive menu.
+[[ "${1:-}" == "--reapply-all" ]] && exit 0
 
 # Non-interactive full revert used by bc250.revert_all=1 on the kernel cmdline
 # (manual flag only — no GRUB menu entry sets it anymore).
@@ -8446,7 +7924,6 @@ while true; do
         V) run_status;            press_enter ;;
         G) run_changelog;         press_enter ;;
         I) run_help;              press_enter ;;
-        P) run_persistence_menu;  press_enter ;;
         0)
             echo -e "\n  ${DIM}Goodbye.${RESET}\n"
             echo -e "  ${DIM}Press Enter to close...${RESET}"
