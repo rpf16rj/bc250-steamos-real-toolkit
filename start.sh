@@ -132,16 +132,41 @@ MAGENTA="\e[35m"
 ICON_OK="${GREEN}✓${RESET}"
 ICON_WARN="${YELLOW}⚠${RESET}"
 
+# Terminal width cap for box-drawing output — a hardcoded 69-char box wraps and
+# garbles on narrow terminals (issue #51: "unusable in this state").
+tty_cols() {
+    local c; c=$(tput cols 2>/dev/null || true)
+    [[ "$c" =~ ^[0-9]+$ ]] && (( c > 0 )) && { echo "$c"; return; }
+    echo 80
+}
+
 print_banner() {
-    clear
-    echo -e "${BOLD}${CYAN}"
-    echo "  ╔═════════════════════════════════════════════════════════════════════╗"
-    echo "  ║                                                                     ║"
-    echo "  ║               BC-250 SteamOS Real Toolkit ${TOOLKIT_VERSION}               ║"
-    echo "  ║               CPU/GPU Governors & Performance Profiles              ║"
-    echo "  ║                                                                     ║"
-    echo "  ╚═════════════════════════════════════════════════════════════════════╝"
-    echo -e "${RESET}"
+    # Same escape as `clear` but without the terminfo dependency — on a terminal
+    # where `clear` is a no-op (TERM=dumb, some ssh/serial contexts) the old
+    # screen stays visible under the banner and looks corrupt.
+    printf '\033[2J\033[H'
+    local cols; cols=$(tty_cols)
+    local w=$(( cols - 6 )); (( w > 71 )) && w=71
+    local title="BC-250 SteamOS Real Toolkit ${TOOLKIT_VERSION}"
+    local sub="CPU/GPU Governors & Performance Profiles"
+    local inner=$(( w - 2 ))
+    local eq="═════════════════════════════════════════════════════════════════════"
+    if (( w < ${#sub} + 4 )); then
+        echo -e "  ${BOLD}${CYAN}${title}${RESET}"
+        echo -e "  ${BOLD}${CYAN}${sub}${RESET}"
+    else
+        local t l r
+        echo -e "${BOLD}${CYAN}"
+        echo "  ╔${eq:0:$inner}╗"
+        printf "  ║%s║\n" "$(printf '%*s' "$inner" '')"
+        t=$(( inner - ${#title} )); l=$(( t / 2 )); r=$(( t - l ))
+        printf "  ║%*s%s%*s║\n" "$l" '' "$title" "$r" ''
+        t=$(( inner - ${#sub} )); l=$(( t / 2 )); r=$(( t - l ))
+        printf "  ║%*s%s%*s║\n" "$l" '' "$sub" "$r" ''
+        printf "  ║%s║\n" "$(printf '%*s' "$inner" '')"
+        echo "  ╚${eq:0:$inner}╝"
+        echo -e "${RESET}"
+    fi
     echo -e "  ${BOLD}${YELLOW}⚠  SteamOS update notice:${RESET}"
     echo -e "  ${YELLOW}SteamOS updates may require reinstalling toolkit components. Check the toolkit status${RESET}"
     echo -e "  ${YELLOW}after every update, especially when using the Beta channel.${RESET}"
@@ -152,7 +177,9 @@ print_banner() {
 
 print_section() {
     echo -e "  ${BOLD}${YELLOW}$1${RESET}"
-    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────────${RESET}"
+    local cols w; cols=$(tty_cols); w=$(( cols - 6 )); (( w > 69 )) && w=69
+    local eq="─────────────────────────────────────────────────────────────────────"
+    echo -e "  ${DIM}${eq:0:$w}${RESET}"
 }
 
 print_item() {
@@ -715,6 +742,10 @@ aur_remove() {
 # (203/EXEC on the venv interpreter). /var is writable and survives updates
 # (the VA-API driver already lives in /var/lib/bc250).
 BC250_PIPX_HOME="/var/lib/bc250/pipx"
+# Plain-venv home for bc250-smu-oc — replaces the pipx install path (issue #41:
+# pipx's shared-venv pip bootstrap keeps breaking across Python bumps; a plain
+# venv has no moving parts and survives updates the same way).
+BC250_SMU_VENV="/var/lib/bc250/smu-oc-venv"
 BC250_PIPX_BIN_DIR="/var/lib/bc250/bin"
 # Self-contained pipx venv, also on the persistent volume — last-resort
 # fallback when pacman is unavailable, and it survives A/B updates.
@@ -773,18 +804,23 @@ cpu_governor_seed_shared() {
     "$shared_py" -c 'import setuptools.build_meta' &>/dev/null
 }
 
-# Install the governor. When pipx's shared venv can see setuptools, force a
-# fully local build (--system-site-packages + --no-build-isolation) so pip
-# never touches PyPI — otherwise fall back to a normal isolated install.
-cpu_governor_pipx_install() {
-    if cpu_governor_seed_shared && \
-       bc250_pipx install --help 2>&1 | grep -q 'system-site-packages'; then
-        # NOTE: --pip-args must use '=' form — argparse rejects values that
-        # start with '--' when passed as a separate argument.
-        bc250_pipx install --force --system-site-packages --pip-args="--no-build-isolation" . && return 0
+# Install the governor into a plain venv on the persistent /var volume. The
+# source is copied to a scratch dir first: stale root-owned build/ or egg-info
+# artifacts in the vendored tree make the in-tree wheel build fail with a
+# confusing Permission denied, and building out-of-tree keeps git status clean.
+cpu_governor_venv_install() {
+    local tmp; tmp=$(mktemp -d /var/lib/bc250/smu-oc-build.XXXXXX) || return 1
+    cp -a ./. "$tmp/" || { rm -rf "$tmp"; return 1; }
+    python3 -m venv --clear --system-site-packages "$BC250_SMU_VENV" || { rm -rf "$tmp"; return 1; }
+    # --no-build-isolation uses the system setuptools (no PyPI); fall back to
+    # the normal isolated build if the system lacks it.
+    if ! "$BC250_SMU_VENV/bin/python" -m pip install -q --no-build-isolation --force-reinstall "$tmp"; then
         print_info "Local-build install failed — retrying with standard isolated install..."
+        "$BC250_SMU_VENV/bin/python" -m pip install -q --force-reinstall "$tmp" || { rm -rf "$tmp"; return 1; }
     fi
-    bc250_pipx install --force .
+    rm -rf "$tmp"
+    mkdir -p "$BC250_PIPX_BIN_DIR"
+    ln -sf "$BC250_SMU_VENV"/bin/bc250-* "$BC250_PIPX_BIN_DIR/"
 }
 
 # Older installs left pipx shims in /root/.local/bin pointing at the wiped
@@ -807,6 +843,7 @@ cpu_governor_clean_stale_shims() {
 
 cpu_governor_installed() {
     systemctl is-enabled bc250-smu-oc.service &>/dev/null || \
+        [[ -x "$BC250_SMU_VENV/bin/bc250-detect" ]] || \
         bc250_pipx list 2>&1 | grep -q 'bc250-smu-oc'
 }
 
@@ -843,9 +880,7 @@ cpu_governor_ensure_pipx() {
 
 cpu_governor_repair_venv() {
     print_info "bc250-detect venv is broken (likely after SteamOS update). Reinstalling..."
-    cpu_governor_ensure_pipx || return 1
-    # NOTE: 'pipx reinstall' cannot handle packages installed from a local
-    # path — go straight to uninstall + install.
+    # Migrate any legacy pipx install away, then rebuild the plain venv.
     bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
     local cpu_gov_dir="$EXTERNAL_DIR/bc250_smu_oc"
     if [[ ! -d "$cpu_gov_dir" ]]; then
@@ -853,8 +888,8 @@ cpu_governor_repair_venv() {
         return 1
     fi
     pushd "$cpu_gov_dir" >/dev/null || return 1
-    run_with_retry "cpu_governor_pipx_install" "pipx install bc250_smu_oc" || {
-        fail_with_log "Failed to reinstall bc250_smu_oc via pipx." "CPU Governor — pipx reinstall"
+    run_with_retry "cpu_governor_venv_install" "venv install bc250_smu_oc" || {
+        fail_with_log "Failed to reinstall bc250_smu_oc into the venv." "CPU Governor — venv reinstall"
         popd >/dev/null || true
         return 1
     }
@@ -938,12 +973,11 @@ run_cpu_governor() {
         fi
     fi
 
-    print_info "Installing dependencies: pipx, setuptools, stress"
-    cpu_governor_ensure_pipx || return 1
-    # setuptools enables the PyPI-free pipx build; stress is optional (stress
-    # helper). Both best-effort — their absence is not fatal.
+    print_info "Installing dependencies: setuptools, stress"
+    # setuptools enables the PyPI-free --no-build-isolation build; stress is
+    # optional (stress helper). Both best-effort — their absence is not fatal.
     steamos_writable 'pacman -S --noconfirm --needed python-setuptools stress' || \
-        print_warning "Could not install python-setuptools/stress — continuing (pipx will fetch build deps from PyPI)."
+        print_warning "Could not install python-setuptools/stress — continuing (pip will fetch build deps from PyPI)."
 
     # A half-interrupted pacman run can leave a corrupt stress binary
     # (Exec format error when bc250-detect forks it). Verify it runs;
@@ -962,15 +996,15 @@ run_cpu_governor() {
     fi
     print_info "Using vendored bc250_smu_oc repository..."
     pushd "$CPU_GOVERNOR_DIR" >/dev/null || return 1
-    print_info "Installing via pipx..."
+    print_info "Installing into $BC250_SMU_VENV (plain venv — no pipx)..."
     bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
-    run_with_retry "cpu_governor_pipx_install" "pipx install bc250_smu_oc" || { fail_with_log "Failed to install via pipx." "CPU Governor Install — pipx install"; popd >/dev/null || true; return 1; }
+    run_with_retry "cpu_governor_venv_install" "venv install bc250_smu_oc" || { fail_with_log "Failed to install into the venv." "CPU Governor Install — venv install"; popd >/dev/null || true; return 1; }
     popd >/dev/null || true
     cpu_governor_clean_stale_shims
     export PATH="$BC250_PIPX_BIN_DIR:$PATH"
 
     if ! cpu_governor_venv_healthy; then
-        print_info "pipx install completed but bc250-detect is still not working. Attempting reinstall..."
+        print_info "venv install completed but bc250-detect is still not working. Attempting reinstall..."
         cpu_governor_repair_venv || return 1
     fi
 
@@ -980,7 +1014,8 @@ run_cpu_governor() {
 
 gpu_governor_installed() {
     systemctl is-enabled cyan-skillfish-governor-smu.service &>/dev/null || \
-        pacman -Qq cyan-skillfish-governor-smu &>/dev/null
+        pacman -Qq cyan-skillfish-governor-smu &>/dev/null || \
+        [[ -x /usr/bin/cyan-skillfish-governor-smu ]]
 }
 
 gpu_governor_setup() {
@@ -1014,6 +1049,50 @@ gpu_governor_setup() {
     print_success "GPU Governor configuration applied successfully!"
 }
 
+GPU_GOVERNOR_VER="0.4.15"
+GPU_GOVERNOR_SHA256="69e6a9eb485cce7db98a7e03189d68c30b987dbcac6e810c428ea170778f0822"
+GPU_GOVERNOR_RAW="https://raw.githubusercontent.com/filippor/cyan-skillfish-governor/v${GPU_GOVERNOR_VER}"
+
+# Prebuilt-binary install — the AUR PKGBUILD compiles with cargo and the Rust
+# toolchain segfaults on a number of SteamOS installs (issues #45/#49/#54),
+# often mid-build while the user watches a dead screen. Upstream publishes a
+# signed tarball; we fetch it plus the unit/dbus/udev/perf-mode files from the
+# same git tag. Layout matches the PKGBUILD package() step.
+gpu_governor_install_prebuilt() {
+    local tb="cyan-skillfish-governor-smu-v${GPU_GOVERNOR_VER}-x86_64-linux.tar.gz"
+    local url="https://github.com/filippor/cyan-skillfish-governor/releases/download/v${GPU_GOVERNOR_VER}/${tb}"
+    local tmp; tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' RETURN
+
+    print_info "Downloading prebuilt governor v${GPU_GOVERNOR_VER} (no Rust build)..."
+    curl -fSL --progress-bar -o "$tmp/$tb" "$url" || {
+        fail_with_log "Failed to download the governor tarball." "GPU Governor — download"; return 1; }
+    echo "${GPU_GOVERNOR_SHA256}  $tmp/$tb" | sha256sum -c - >/dev/null || {
+        fail_with_log "Governor tarball checksum mismatch." "GPU Governor — sha256"; return 1; }
+    tar -xzf "$tmp/$tb" -C "$tmp" || { fail_with_log "Could not extract governor tarball." "GPU Governor — extract"; return 1; }
+    local root="$tmp/cyan-skillfish-governor-smu-v${GPU_GOVERNOR_VER}-x86_64-linux"
+
+    install -Dm0755 "$root/cyan-skillfish-governor-smu" /usr/bin/cyan-skillfish-governor-smu
+    [[ -f "$GPU_DEST" ]] || install -Dm0644 "$root/config.toml" "$GPU_DEST"
+    install -Dm0644 "$root/70-cyan-skillfish-governor.rules" /usr/lib/udev/rules.d/70-cyan-skillfish-governor.rules
+    # Files missing from the release tarball — fetch from the same git tag
+    curl -fsSL -o /usr/lib/systemd/system/cyan-skillfish-governor-smu.service \
+        "$GPU_GOVERNOR_RAW/cyan-skillfish-governor-smu.service" || {
+        fail_with_log "Could not fetch the upstream service unit." "GPU Governor — unit"; return 1; }
+    curl -fsSL -o /usr/share/dbus-1/system.d/com.cyanskillfish.Governor.conf \
+        "$GPU_GOVERNOR_RAW/com.cyanskillfish.Governor.conf" || {
+        fail_with_log "Could not fetch the D-Bus policy." "GPU Governor — dbus"; return 1; }
+    curl -fsSL -o /usr/bin/cyan-skillfish-performance-mode \
+        "$GPU_GOVERNOR_RAW/scripts/cyan-skillfish-performance-mode" || {
+        fail_with_log "Could not fetch cyan-skillfish-performance-mode." "GPU Governor — perf-mode"; return 1; }
+    chmod 755 /usr/bin/cyan-skillfish-performance-mode
+
+    systemctl daemon-reload
+    # NOTE: deliberately no `udevadm trigger --subsystem-match=drm` — re-probing
+    # the drm device mid-session is a suspect for the black/green-screen reports;
+    # the rule takes effect on next boot/device event anyway.
+}
+
 run_gpu_governor() {
     print_step "02" "Installing GPU Governor"
 
@@ -1023,6 +1102,7 @@ run_gpu_governor() {
             systemctl stop cyan-skillfish-governor-smu.service 2>/dev/null || true
             systemctl disable cyan-skillfish-governor-smu.service 2>/dev/null || true
             steamos_writable 'aur_remove cyan-skillfish-governor-smu' || true
+            run_revert_gpu_governor_files 2>/dev/null || true
         else
             print_info "Keeping existing installation — running configuration setup instead..."
             gpu_governor_setup
@@ -1030,13 +1110,16 @@ run_gpu_governor() {
         fi
     fi
 
-    print_info "Installing cyan-skillfish-governor-smu via AUR helper..."
-    ensure_build_deps || return 1
-    aur_clean_cache cyan-skillfish-governor-smu
-    steamos_writable 'aur_install cyan-skillfish-governor-smu' || {
-        fail_with_log "Failed to install GPU governor." "GPU Governor Install — aur_install"
-        return 1
-    }
+    print_info "Installing cyan-skillfish-governor-smu (prebuilt upstream binary)..."
+    if ! steamos_writable 'gpu_governor_install_prebuilt'; then
+        print_error "Prebuilt install failed — falling back to the AUR source build (needs cargo)..."
+        ensure_build_deps || return 1
+        aur_clean_cache cyan-skillfish-governor-smu
+        steamos_writable 'aur_install cyan-skillfish-governor-smu' || {
+            fail_with_log "Failed to install GPU governor." "GPU Governor Install — prebuilt+AUR"
+            return 1
+        }
+    fi
 
     gpu_governor_setup || return 1
     print_success "GPU Governor installed and started successfully!"
@@ -1046,6 +1129,7 @@ run_revert_cpu_governor() {
     print_step "R-1" "Revert CPU Governor — Removing bc250-smu-oc"
 
     if ! systemctl is-enabled bc250-smu-oc.service &>/dev/null && \
+       [[ ! -x "$BC250_SMU_VENV/bin/bc250-detect" ]] && \
        ! bc250_pipx list 2>/dev/null | grep -q 'bc250-smu-oc' && \
        ! pipx list 2>/dev/null | grep -q 'bc250-smu-oc'; then
         print_info "CPU governor does not appear to be installed — nothing to revert."
@@ -1059,6 +1143,8 @@ run_revert_cpu_governor() {
 
     systemctl stop bc250-smu-oc.service 2>/dev/null || true
     systemctl disable bc250-smu-oc.service 2>/dev/null || true
+    rm -rf "$BC250_SMU_VENV"
+    rm -f "$BC250_PIPX_BIN_DIR"/bc250-apply "$BC250_PIPX_BIN_DIR"/bc250-detect
     bc250_pipx uninstall bc250-smu-oc 2>/dev/null || true
     # Also clear any legacy venv under the default pipx home (/root/.local)
     pipx uninstall bc250-smu-oc 2>/dev/null || true
@@ -1070,7 +1156,8 @@ run_revert_gpu_governor() {
     print_step "R-2" "Revert GPU Governor — Removing cyan-skillfish-governor-smu"
 
     if ! systemctl is-enabled cyan-skillfish-governor-smu.service &>/dev/null && \
-       ! pacman -Qq cyan-skillfish-governor-smu &>/dev/null; then
+       ! pacman -Qq cyan-skillfish-governor-smu &>/dev/null && \
+       [[ ! -x /usr/bin/cyan-skillfish-governor-smu ]]; then
         print_info "GPU governor does not appear to be installed — nothing to revert."
         return 0
     fi
@@ -1083,7 +1170,20 @@ run_revert_gpu_governor() {
     systemctl stop cyan-skillfish-governor-smu.service 2>/dev/null || true
     systemctl disable cyan-skillfish-governor-smu.service 2>/dev/null || true
     steamos_writable 'aur_remove cyan-skillfish-governor-smu' || true
+    run_revert_gpu_governor_files
     print_success "GPU governor removed successfully."
+}
+
+# Removes files laid down by the prebuilt-binary install path (kept separate so
+# reinstalls can clean the same footprint). Leaves config.toml in place — it is
+# user-edited (backup= in the PKGBUILD) and harmless without the daemon.
+run_revert_gpu_governor_files() {
+    steamos_writable 'rm -f /usr/bin/cyan-skillfish-governor-smu \
+        /usr/bin/cyan-skillfish-performance-mode \
+        /usr/lib/systemd/system/cyan-skillfish-governor-smu.service \
+        /usr/share/dbus-1/system.d/com.cyanskillfish.Governor.conf \
+        /usr/lib/udev/rules.d/70-cyan-skillfish-governor.rules' || true
+    systemctl daemon-reload 2>/dev/null || true
 }
 
 # ==============================================================================
@@ -1878,6 +1978,8 @@ run_revert_zram_zswap() {
 SENSORS_MODPROBE_CONF="/etc/modprobe.d/sensors.conf"
 SENSORS_MODULES_LOAD_CONF="/etc/modules-load.d/99-sensors.conf"
 NCT6687D_DIR="$EXTERNAL_DIR/nct6687d"
+BC250_VRM_DIR="$EXTERNAL_DIR/bc250-vrm"
+VRM_MODULES_LOAD_CONF="/etc/modules-load.d/bc250-vrm.conf"
 
 sensors_driver_loaded() {
     [[ -d /sys/module/nct6683 || -d /sys/module/nct6687 ]]
@@ -2135,6 +2237,75 @@ validate_core_unlock() {
     fi
 }
 
+bc250_vrm_installed() {
+    lsmod 2>/dev/null | grep -q '^bc250_vrm' || [[ -f "$VRM_MODULES_LOAD_CONF" ]]
+}
+
+install_bc250_vrm() {
+    print_step "VRM" "Installing BC-250 VRM Telemetry Driver"
+
+    if bc250_vrm_installed; then
+        print_info "bc250_vrm already installed."
+        return 0
+    fi
+
+    print_info "bc250_vrm reads CPU/GPU rail voltage, current, temp and power"
+    print_info "through the NCT6687 SMBus master (no wiring mod). It shares the"
+    print_info "chip with the nct6687 sensor driver — report any odd readings."
+
+    require_kernel_version || return 1
+    local headers_pkg
+    if ! headers_pkg="$(detect_kernel_headers_package)"; then
+        fail_with_log "Could not determine the running kernel package for header lookup." "VRM Install — kernel detection"
+        return 1
+    fi
+    ensure_build_deps || return 1
+    steamos_writable "pacman -Syu --noconfirm '$headers_pkg'" || {
+        fail_with_log "Failed to install kernel headers ($headers_pkg)." "VRM Install — headers"
+        return 1
+    }
+    [[ -d "/usr/lib/modules/$(uname -r)/build" ]] || {
+        fail_with_log "Kernel build directory not found after installing headers." "VRM Install — build dir missing"
+        return 1
+    }
+    [[ -d "$BC250_VRM_DIR" ]] || {
+        fail_with_log "Vendored bc250-vrm not found at $BC250_VRM_DIR." "VRM Install — missing vendored repo"
+        return 1
+    }
+
+    print_info "Building bc250_vrm module..."
+    if ! make -C "/usr/lib/modules/$(uname -r)/build" M="$BC250_VRM_DIR" modules; then
+        fail_with_log "Failed to build bc250_vrm module." "VRM Install — make"
+        return 1
+    fi
+
+    steamos_writable "install -D -m 644 '$BC250_VRM_DIR/bc250_vrm.ko' '/usr/lib/modules/$(uname -r)/updates/bc250_vrm.ko' && depmod && echo bc250_vrm > '$VRM_MODULES_LOAD_CONF'" || {
+        fail_with_log "Failed to install bc250_vrm module." "VRM Install — install"
+        return 1
+    }
+
+    if ! modprobe bc250_vrm; then
+        fail_with_log "Module installed but failed to load. A reboot may be required." "VRM Install — modprobe"
+        return 1
+    fi
+    print_success "bc250_vrm installed — run 'sensors' for CPU/GPU rail V/I/temp/power."
+}
+
+run_revert_vrm() {
+    print_step "R-VRM" "Revert BC-250 VRM Telemetry Driver"
+    if ! bc250_vrm_installed && [[ ! -f "$VRM_MODULES_LOAD_CONF" ]]; then
+        print_info "bc250_vrm not installed — nothing to revert."
+        return 0
+    fi
+    if ! confirm "This will unload bc250_vrm and remove its autoload config. Proceed?"; then
+        print_info "Cancelled."
+        return 0
+    fi
+    modprobe -r bc250_vrm 2>/dev/null || true
+    steamos_writable "rm -f '$VRM_MODULES_LOAD_CONF' '/usr/lib/modules/$(uname -r)/updates/bc250_vrm.ko' && depmod"
+    print_success "bc250_vrm removed."
+}
+
 run_sensors_menu() {
     while true; do
         print_banner
@@ -2144,6 +2315,8 @@ run_sensors_menu() {
         print_item "1" "Read-Only Sensors (nct6683)"    "Monitoring only — temps, voltages, fan RPM"
         print_item "2" "Full PWM Fan Control (nct6687)" "Recommended — builds module, adds writable PWM control"
         print_item "3" "Revert / Remove Sensor Driver"  "Unload driver and remove autoload config"
+        print_item "4" "VRM Telemetry (bc250_vrm)"      "CPU/GPU rail V/I/temp/power via NCT6687 SMBus"
+        print_item "5" "Revert VRM Driver"              "Unload bc250_vrm and remove autoload config"
         print_item "0" "Back" ""
         echo ""
         echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
@@ -2153,6 +2326,8 @@ run_sensors_menu() {
             1) install_sensors_readonly; press_enter ;;
             2) install_sensors_pwm;      press_enter ;;
             3) run_revert_sensors;       press_enter ;;
+            4) install_bc250_vrm;        press_enter ;;
+            5) run_revert_vrm;           press_enter ;;
             0) return 0 ;;
             *)
                 print_error "Invalid selection: '$sens_choice'"
@@ -2166,13 +2341,97 @@ run_sensors_menu() {
 # COOLERCONTROL
 # ==============================================================================
 
+COOLERCONTROL_VER="5.1.1"
+COOLERCONTROL_BASE="https://gitlab.com/api/v4/projects/30707566/packages/generic/coolercontrol/${COOLERCONTROL_VER}"
+# sha256 pinned — upstream's generic registry publishes no checksum sidecars.
+COOLERCONTROL_DAEMON_SHA256="c4845f9c6f1d975c50c18a62bcddeeb1e765d4dd07376fb60e938dd6b23df86f"
+COOLERCONTROL_GUI_SHA256="3bbbc3d0569951726754333b8cc0a586f3ca761f05715a94f8b3f36abbc201c3"
+
 coolercontrol_installed() {
     pacman -Qq coolercontrold-bin &>/dev/null || pacman -Qq coolercontrold &>/dev/null || \
+        [[ -x /usr/bin/coolercontrold ]] || \
         systemctl list-unit-files coolercontrold.service &>/dev/null
 }
 
 coolercontrol_gui_installed() {
-    pacman -Qq coolercontrol-bin &>/dev/null || pacman -Qq coolercontrol &>/dev/null
+    pacman -Qq coolercontrol-bin &>/dev/null || pacman -Qq coolercontrol &>/dev/null || \
+        [[ -x /usr/bin/coolercontrol ]]
+}
+
+# Official upstream binaries from GitLab releases — the AUR -bin packages were
+# removed (issues #53/#55), and the surviving -git PKGBUILDs need a full Rust +
+# Node build that segfaults on some SteamOS installs. The raw x86_64 daemon +
+# desktop binaries are glibc-linked and run on SteamOS directly.
+coolercontrol_install_official() {
+    local want_gui="${1:-0}"
+
+    print_info "Downloading coolercontrold ${COOLERCONTROL_VER} (official GitLab release)..."
+    local tmp; tmp=$(mktemp)
+    curl -fSL --progress-bar -o "$tmp" \
+        "${COOLERCONTROL_BASE}/coolercontrold_${COOLERCONTROL_VER}" || {
+        rm -f "$tmp"
+        fail_with_log "Failed to download coolercontrold binary." "CoolerControl Install — download"
+        return 1
+    }
+    echo "${COOLERCONTROL_DAEMON_SHA256}  $tmp" | sha256sum -c - &>/dev/null || {
+        rm -f "$tmp"
+        fail_with_log "coolercontrold checksum mismatch — refusing to install." "CoolerControl Install — checksum"
+        return 1
+    }
+    install -m 755 "$tmp" /usr/bin/coolercontrold
+    rm -f "$tmp"
+    /usr/bin/coolercontrold --version &>/dev/null || {
+        rm -f /usr/bin/coolercontrold
+        fail_with_log "Downloaded coolercontrold does not run on this system." "CoolerControl Install — binary check"
+        return 1
+    }
+
+    mkdir -p /etc/coolercontrol /var/lib/coolercontrol
+    cat > /etc/systemd/system/coolercontrold.service <<'EOF'
+[Unit]
+Description=CoolerControl Daemon
+After=network.target lm-sensors.service lm_sensors.service
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=notify
+Environment="CC_LOG=INFO"
+ExecStart=/usr/bin/coolercontrold
+Restart=always
+RestartSec=1
+TimeoutStopSec=10
+TimeoutStartSec=300
+WatchdogSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    if [[ "$want_gui" == 1 ]]; then
+        print_info "Downloading CoolerControl desktop GUI ${COOLERCONTROL_VER}..."
+        if curl -fSL --progress-bar -o "$tmp" \
+               "${COOLERCONTROL_BASE}/coolercontrol_${COOLERCONTROL_VER}" && \
+           echo "${COOLERCONTROL_GUI_SHA256}  $tmp" | sha256sum -c - &>/dev/null; then
+            install -m 755 "$tmp" /usr/bin/coolercontrol
+            rm -f "$tmp"
+            runuser -u "$REAL_USER" -- mkdir -p "${REAL_HOME}/.local/share/applications" 2>/dev/null || \
+                mkdir -p "${REAL_HOME}/.local/share/applications"
+            cat > "${REAL_HOME}/.local/share/applications/coolercontrol.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=CoolerControl
+Exec=/usr/bin/coolercontrol
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Utility;
+EOF
+            chown "$REAL_USER:$REAL_USER" "${REAL_HOME}/.local/share/applications/coolercontrol.desktop" 2>/dev/null || true
+        else
+            print_error "GUI download failed — daemon still works via the web UI."
+        fi
+    fi
+    systemctl daemon-reload
 }
 
 install_coolercontrol() {
@@ -2191,21 +2450,19 @@ install_coolercontrol() {
         fi
         systemctl stop coolercontrold.service 2>/dev/null || true
         systemctl disable coolercontrold.service 2>/dev/null || true
+        # Remove any AUR package that owns these paths — the -bin packages were
+        # deleted from the AUR, and a source-built -git/plain package would leave
+        # pacman-owned files that our raw binaries would diverge from.
+        for pkg in coolercontrol-bin coolercontrold-bin coolercontrol coolercontrold \
+                   coolercontrol-git coolercontrold-git; do
+            steamos_writable "aur_remove $pkg" || true
+        done
     fi
 
-    print_info "Installing coolercontrold-bin via AUR helper..."
-    steamos_writable 'aur_install coolercontrold-bin' || {
-        fail_with_log "Failed to install coolercontrold-bin." "CoolerControl Install — aur_install"
-        return 1
-    }
+    local want_gui=0
+    confirm "Also install the desktop GUI (~0.6 MB binary + menu entry)?" && want_gui=1
 
-    if confirm "Also install the desktop GUI (coolercontrol-bin)? This pulls in Qt6 WebEngine (larger download)."; then
-        print_info "Installing coolercontrol-bin (GUI) via AUR helper..."
-        steamos_writable 'aur_install coolercontrol-bin' || {
-            fail_with_log "Failed to install coolercontrol-bin (GUI)." "CoolerControl Install — aur_install GUI"
-            return 1
-        }
-    fi
+    steamos_writable "coolercontrol_install_official $want_gui" || return 1
 
     print_info "Enabling and starting coolercontrold service..."
     systemctl enable --now coolercontrold.service || {
@@ -2240,6 +2497,9 @@ run_revert_coolercontrol() {
     steamos_writable 'aur_remove coolercontrol' || true
     steamos_writable 'aur_remove coolercontrold-bin' || true
     steamos_writable 'aur_remove coolercontrold' || true
+    steamos_writable 'rm -f /usr/bin/coolercontrold /usr/bin/coolercontrol /etc/systemd/system/coolercontrold.service' || true
+    rm -f "${REAL_HOME}/.local/share/applications/coolercontrol.desktop"
+    systemctl daemon-reload 2>/dev/null || true
 
     print_success "CoolerControl removed successfully."
 }
@@ -3941,7 +4201,7 @@ dual_audio_ensure_wireplumber() {
 }
 
 install_dual_audio() {
-    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.15)"
+    print_step "DUAL-AUDIO" "Installing BC-250 Dual-Output Audio (MastaG v0.15+v0.17)"
     echo -e "  ${DIM}  Native HDMI/DP + Dolby Digital 5.1 (AC3 640 kbps)${RESET}"
     echo ""
     dual_audio_installed && { print_info "Already installed."; return 0; }
@@ -4000,7 +4260,7 @@ install_dual_audio() {
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user disable --now bc250-eac3-backend.service 2>/dev/null || true
     sudo -u "$REAL_USER" env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
     sleep 4
-    print_success "Dual-output audio v0.15 installed! Reboot before use."
+    print_success "Dual-output audio v0.15+v0.17 installed! Reboot before use."
 }
 
 run_revert_dual_audio() {
@@ -4300,22 +4560,25 @@ install_fsr4_proton() {
     for t in $installed_tools; do
         echo -e "  ${DIM}     ${t}${RESET}"
     done
-    echo -e "  ${DIM}  3. OptiScaler (HelixSR upscaler) and FSR4 upgrade are ON by default${RESET}"
+    echo -e "  ${DIM}  3. New prefixes default to no upscaling — the OptiScaler menu opens on${RESET}"
+    echo -e "  ${DIM}     first launch to pick one; frame-gen ships OFF${RESET}"
     echo ""
     echo -e "  ${BOLD}Launch options (optional, per-game):${RESET}"
     echo -e "  ${DIM}  PROTON_FSR4_UPGRADE=0 %command%            # disable FSR4 upgrade${RESET}"
     echo -e "  ${DIM}  BC250_FSR4_DEBUG=1 %command%               # FSR4 watermark + OptiScaler log${RESET}"
     echo -e "  ${DIM}  RADV_DIRECTMESH=1 %command%                # enable mesh/task shaders${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411f %command%   # FSR4 bridge: BC-250 fork RC11 (set to opt back in)${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=signed %command%     # AMD's signed 4.0.2 bridge${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411b %command%     # third-party 4.1.1b, RDNA2 ghosting fix${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411rc9 %command%   # older fork bridge RC9${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=fsr411rc10 %command%  # older fork bridge RC10${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=helixsr %command%     # default: HelixSR Scaler 1.1.0 (HelixSR 2.0.0 + OptiScaler, Insert menu, FG)${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=helixsr-ffx %command%  # pure DLSS Model E via DX12 compute (D3D12 only)${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=freefg %command%       # FreeFG: XeSS frame-gen w/ BC-250 shaders + VRR pacing${RESET}"
-    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=freefg-helixsr %command% # FreeFG + HelixSR Scaler${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=freefg-all %command%          # all 5 upscalers — pick in-game via OptiScaler menu${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=freefg-hlxfsr4 %command%      # FreeFG 1.4.0 FG + HLX FSR 4 (HelixSR 3.3.0, native Vulkan)${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=freefg-hlxdlss %command%      # FreeFG FG + HLX DLSS (Model E) upscaler${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=freefg %command%              # FreeFG FG + FSR4 RC12 upscaler${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=freefg-hlxdlssk %command%     # HLX DLSS Preset K — sharper, slower, can sparkle${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=freefg-hlxfsr4full %command%  # full FSR 4.1.2 network — sharper, slower${RESET}"
+    echo -e "  ${DIM}  PROTON_USE_OPTISCALER=off %command%                 # no OptiScaler/FSR4 at all${RESET}"
+    echo -e "  ${DIM}  PROTON_OPTISCALER_MENU=1 %command%             # re-show the first-launch upscaler/FG menu${RESET}"
+    echo -e "  ${DIM}  # persistent defaults live in ~/.config/bc250-fsr4/settings (menu=, default=)${RESET}"
+    echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"FrameGen.Enabled=true\" %command%  # frame-gen (off by default)${RESET}"
     echo -e "  ${DIM}  PROTON_OPTISCALER_NAME=dxgi.dll %command%  # fix for games shipping own winmm.dll${RESET}"
+    echo -e "  ${DIM}  Old variant names (helixsr, fsr411f, signed, ...) still work — auto-aliased.${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true\" %command%  # enable DLSS+Reflex via OptiScaler${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=\"Spoofing.Dxgi=true;Spoofing.Registry=true\" %command%${RESET}"
     echo -e "  ${DIM}  BC250_OPTISCALER_EXTRA=... %command%        # per-game OptiScaler overrides${RESET}"
@@ -6796,7 +7059,7 @@ run_status() {
 
     local dual_icon dual_color dual_label
     if dual_audio_installed; then
-        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.15)"
+        dual_icon="$ICON_OK"; dual_color="$GREEN"; dual_label="installed (v0.15+v0.17)"
     else
         dual_icon="$DIM"; dual_color="$DIM"; dual_label="not installed"
     fi
@@ -6935,7 +7198,7 @@ run_install_manual() {
         print_item "10R" "Revert Combined Fix"           "Restore stock amdgpu.ko + remove patched Mesa"
         print_item "11"  "Install AC-3 Surround Encoding"  "HDMI/DP Dolby Digital 5.1 via eARC — zero latency, native a52 encoding"
         print_item "11R" "Revert AC-3 Surround Encoding"   "Restore HDMI stereo profile"
-        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.15) — requires WP 0.5.17"
+        print_item "12"  "Install Dual-Output Audio"       "WirePlumber-native AC3 + HDMI with hotplug guard (MastaG v0.15+v0.17) — requires WP 0.5.17"
         print_item "12R" "Revert Dual-Output Audio"        "Remove dual-output audio, restore stock WirePlumber"
         print_item "13"  "Install FSR4 Proton (MastaG)"     "Pre-built Proton + OptiScaler + FSR4 + fakenvapi — 3 variants (GE/Native/SLR)"
         print_item "13R" "Revert FSR4 Proton"              "Remove FSR4 Proton compatibility tool"
@@ -7181,6 +7444,381 @@ install_fsr4_launch_options_plugin() {
         return 1
     }
     print_success "BC-250 FSR4 Launch Options installed. Open Decky's Quick Access Menu to use it."
+}
+
+# ==============================================================================
+# EMULATORS
+# ==============================================================================
+
+KYTY_REPO="dmorazasanchez/KytyPS5-Native-beta"
+KYTY_DIR="${REAL_HOME}/Applications/kytyps5-beta"
+KYTY_HELPER_SVC="kyty-lodhw.service"
+LICHII_REPO="lethevimlet/lichii-bc250"
+LICHII_DIR="${REAL_HOME}/Applications/lichii-bc250"
+LICHII_INSTALL_URL="https://raw.githubusercontent.com/${LICHII_REPO}/main/tools/bc250/bc250-install.sh"
+LICHII_UNINSTALL_URL="https://raw.githubusercontent.com/${LICHII_REPO}/main/tools/bc250/bc250-uninstall.sh"
+
+kyty_appimage() {
+    [[ -d "$KYTY_DIR" ]] || return 0
+    find "$KYTY_DIR" -maxdepth 1 -name 'KytyPS5-*.AppImage' 2>/dev/null | sort -V | tail -n1 || true
+}
+
+kyty_installed() {
+    [[ -n "$(kyty_appimage)" ]] && { [[ -d /var/lib/kyty-beta-system ]] || [[ -f "/etc/systemd/system/${KYTY_HELPER_SVC}" ]]; }
+}
+
+lichii_installed() {
+    # eden-cli is a symlink (lichii/eden-cli -> usr/bin/eden-cli) — test -x follows it.
+    [[ -x "$LICHII_DIR/lichii/eden-cli" ]] || \
+        find "$LICHII_DIR" -maxdepth 3 \( -type f -o -type l \) -name 'eden*' 2>/dev/null | grep -q .
+}
+
+install_kyty() {
+    print_step "KYTY" "Install KytyPS5-Native Beta (PS5 emulator)"
+    echo -e "  ${DIM}  dmorazasanchez fork — plug-and-play AppImage built for SteamOS${RESET}"
+    echo -e "  ${DIM}  You provide your own games; no game data/firmware is included${RESET}"
+    echo ""
+
+    if modinfo amdgpu 2>/dev/null | grep -q bc250_gfx_queues; then
+        print_success "Patched amdgpu detected (bc250_gfx_queues) — kernel prerequisites OK."
+    else
+        print_error "Patched amdgpu not detected (no bc250_gfx_queues module param)."
+        print_info  "KytyPS5 works best with this toolkit's Combined Fix / GFX1013 kernel patches."
+        confirm "Continue anyway?" || return 0
+    fi
+    print_info "KytyPS5 also recommends UMA_SIZE=512MB — the RAM/VRAM Split default (menu 2 → option 9)."
+
+    local meta tag app_url sha_url img name
+    # releases are all marked prerelease upstream → /releases/latest 404s; take the newest entry instead.
+    meta=$(curl -fsSL "https://api.github.com/repos/${KYTY_REPO}/releases?per_page=1") || {
+        fail_with_log "Could not query the KytyPS5-Native-beta releases." "KytyPS5"; return 1; }
+    tag=$(python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["tag_name"])' <<<"$meta" 2>/dev/null) || true
+    app_url=$(python3 -c 'import json,sys; print(next(a["browser_download_url"] for a in json.load(sys.stdin)[0]["assets"] if a["name"].endswith("x86_64.AppImage")))' <<<"$meta" 2>/dev/null) || true
+    sha_url=$(python3 -c 'import json,sys; print(next((a["browser_download_url"] for a in json.load(sys.stdin)[0]["assets"] if a["name"]=="SHA256SUMS"),""))' <<<"$meta" 2>/dev/null) || true
+    [[ -n "$app_url" ]] || { fail_with_log "No x86_64.AppImage asset in release ${tag:-unknown}." "KytyPS5"; return 1; }
+    name=$(basename "$app_url"); img="$KYTY_DIR/$name"
+
+    runuser -u "$REAL_USER" -- mkdir -p "$KYTY_DIR" || {
+        fail_with_log "Could not create ${KYTY_DIR}." "KytyPS5"; return 1; }
+    print_info "Downloading ${name} (~940 MB)..."
+    runuser -u "$REAL_USER" -- curl -fL -C - --retry 3 --progress-bar -o "$img" "$app_url" || {
+        fail_with_log "AppImage download failed." "KytyPS5"; return 1; }
+    if [[ -n "$sha_url" ]]; then
+        runuser -u "$REAL_USER" -- curl -fsSL -o "$KYTY_DIR/SHA256SUMS" "$sha_url" &&
+        (cd "$KYTY_DIR" && sha256sum -c SHA256SUMS --ignore-missing 2>/dev/null | grep -qF -- "${name}: OK") || {
+            fail_with_log "SHA-256 verification failed for the AppImage." "KytyPS5"; return 1; }
+        print_success "SHA-256 verified."
+    fi
+    chmod +x "$img"; chown "$REAL_USER:$REAL_USER" "$img" "$KYTY_DIR/SHA256SUMS" 2>/dev/null || true
+
+    print_info "Upstream --prepare-system dry-run (exact changes it wants to make):"
+    "$img" --prepare-system --dry-run || true
+    echo ""
+    confirm "Apply --prepare-system (amdgpu options + 14 GiB GTT + GPU helper)?" || {
+        print_info "AppImage kept at ${img} — run '--prepare-system' yourself later."
+        return 0; }
+    "$img" --prepare-system || { fail_with_log "--prepare-system failed." "KytyPS5"; return 1; }
+    runuser -u "$REAL_USER" -- "$img" --install-desktop 2>/dev/null || \
+        print_info "Desktop entry step skipped — add the AppImage to Steam as a non-Steam game (Proton OFF)."
+    print_success "KytyPS5 Beta installed. REBOOT, then launch it (add to Steam as non-Steam game if missing)."
+}
+
+run_kyty_status() {
+    print_step "KYTY" "KytyPS5-Native status"
+    local img; img=$(kyty_appimage)
+    [[ -n "$img" ]] || { print_info "No AppImage in ${KYTY_DIR}."; return 0; }
+    "$img" --prepare-system --status 2>/dev/null || print_info "--prepare-system --status unavailable."
+    echo ""
+    local st; st=$(systemctl is-active "$KYTY_HELPER_SVC" 2>/dev/null || echo "not installed")
+    echo "  GPU helper (kyty-lodhw): ${st}"
+}
+
+revert_kyty() {
+    print_step "KYTY" "Revert KytyPS5-Native Beta"
+    local img; img=$(kyty_appimage)
+    confirm "Removes the driver options, GTT override and GPU helper (upstream --revert) and deletes the AppImage. Proceed?" || return 0
+    if [[ -n "$img" ]]; then
+        runuser -u "$REAL_USER" -- "$img" --install-desktop --remove 2>/dev/null || true
+        "$img" --prepare-system --revert || print_error "Upstream --revert reported errors — check /var/lib/kyty-beta-system/prepare-system.json"
+    else
+        print_info "AppImage missing — removing known artifacts directly."
+        systemctl disable --now "$KYTY_HELPER_SVC" 2>/dev/null || true
+        rm -f "/etc/systemd/system/${KYTY_HELPER_SVC}" \
+              /etc/modprobe.d/kytyps5-native.conf /etc/default/grub.d/kytyps5-native.cfg
+        rm -rf /var/lib/kyty-beta-system
+        systemctl daemon-reload
+        # Only regenerate the bootloader on non-SteamOS hosts — SteamOS's grub.d
+        # drop-in removal is enough (the toolkit never touches the bootloader there).
+        if ! is_steamos; then
+            command -v update-grub >/dev/null && update-grub || \
+                print_info "Run update-grub (or reboot) so the ttm.pages_limit override leaves the cmdline."
+        fi
+    fi
+    rm -rf "$KYTY_DIR"
+    print_info "Saves/settings kept at ~/.local/share/KytyPS5-Beta — delete manually to purge."
+    print_success "KytyPS5 reverted — REBOOT to restore stock amdgpu behavior."
+}
+
+install_lichii() {
+    print_step "LICHII" "Install Lichii BC-250 (Zelda: Ocarina of Time — Switch 2 native)"
+    echo -e "  ${DIM}  lethevimlet fork — prebuilt eden-cli tuned for GFX1013 (~100 MB)${RESET}"
+    echo -e "  ${DIM}  Requires your own game dump, keys and firmware — none included${RESET}"
+    echo ""
+    if lichii_installed; then
+        print_info "Lichii already present in ${LICHII_DIR}."
+        confirm "Reinstall/update via the upstream installer?" || return 0
+    fi
+    print_info "Lichii assumes a 512MB UMA carve-out — our RAM/VRAM Split default (menu 2 → option 9)."
+    local script="$REAL_HOME/.cache/lichii-bc250-install.sh"
+    mkdir -p "$REAL_HOME/.cache" && chown "$REAL_USER:$REAL_USER" "$REAL_HOME/.cache"
+    runuser -u "$REAL_USER" -- curl -fsSL -o "$script" "$LICHII_INSTALL_URL" || {
+        fail_with_log "Could not download the upstream installer." "Lichii"; return 1; }
+    chmod +x "$script"; chown "$REAL_USER:$REAL_USER" "$script"
+    runuser -u "$REAL_USER" -- bash "$script" || { fail_with_log "Lichii installer failed." "Lichii"; return 1; }
+    # The upstream wrapper defaults to running inside a distrobox container whose
+    # stock Fedora Mesa has no gfx1013 patches — radv can't bind the BC-250 there
+    # and Vulkan init fails (no WSI surfaces). Force native mode: the package is
+    # self-contained and uses the host's patched RADV.
+    if [[ -f "$LICHII_DIR/lichii-bc250" ]]; then
+        runuser -u "$REAL_USER" -- sed -i 's/^INSTALL_MODE=.*/INSTALL_MODE="native"/' "$LICHII_DIR/lichii-bc250"
+        print_info "Wrapper set to native mode (uses the host's patched RADV — the distrobox image can't see gfx1013)."
+    fi
+    print_success "Lichii installed to ${LICHII_DIR}."
+    print_info "The first game boot stays black 3–5 min while shader pipelines build."
+}
+
+lichii_game_shortcut() {
+    print_step "LICHII" "Create a game shortcut (Linux menu + Steam)"
+    if ! lichii_installed; then
+        print_error "Lichii not installed — run option 4 first."
+        return 1
+    fi
+
+    # ROM path: .nup file or loose dump directory. read -e gives tab completion.
+    local rom
+    read -erp "  ROM path (.nup file or dump folder): " rom
+    rom="${rom/#\~/$REAL_HOME}"
+    rom="${rom%/}"
+    if [[ -f "$rom" ]]; then
+        [[ "$rom" == *.nup || "$rom" == *.NUP || "$rom" == *.npdm || "$rom" == main ]] || \
+            print_info "Not a .nup file — eden-cli accepts loose dumps and NUP archives; continuing anyway."
+    elif [[ -d "$rom" ]]; then
+        # Loose dumps ship <dir>/exefs/{main,main.npdm,rtld,...} + <dir>/romfs/ — often
+        # nested one level deep (base/, update/, dlc/ from the dump tool). The loader
+        # rejects the bare directory ("Failed to obtain loader"); point it at the
+        # main.npdm entry instead.
+        local npdm=""
+        if   [[ -f "$rom/exefs/main.npdm" ]];      then npdm="$rom/exefs/main.npdm"
+        elif [[ -f "$rom/base/exefs/main.npdm" ]]; then npdm="$rom/base/exefs/main.npdm"
+        else
+            for cand in "$rom"/*/exefs/main.npdm; do
+                [[ -f "$cand" ]] && { npdm="$cand"; break; }
+            done
+        fi
+        if [[ -z "$npdm" ]]; then
+            print_error "No exefs/main.npdm found under $rom — is this an extracted game dump?"
+            print_info  "Expected layout: <dir>/exefs/main.npdm + <dir>/romfs/ (or <dir>/base/exefs/...)"
+            return 1
+        fi
+        rom="$npdm"
+        print_info "Folder dump → using ${npdm}"
+    else
+        print_error "No such file or folder: $rom"
+        return 1
+    fi
+    rom=$(realpath "$rom")
+
+    local name default_name
+    if [[ "$rom" == */exefs/main.npdm ]]; then
+        # <dump>/[base/]exefs/main.npdm → use the top dump folder as the name
+        default_name=$(basename "$(dirname "$(dirname "$rom")")")
+        [[ "$default_name" == base || "$default_name" == update ]] && \
+            default_name=$(basename "$(dirname "$(dirname "$(dirname "$rom")")")")
+    else
+        default_name=$(basename "$rom" | sed 's/\.[Nn][Uu][Pp]$//')
+    fi
+    [[ -n "$default_name" ]] || default_name="Lichii Game"
+    read -rp "  Shortcut name [${default_name}]: " name
+    name="${name:-$default_name}"
+
+    local apps_dir="$REAL_HOME/.local/share/applications"
+    local slug; slug=$(echo "$name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')
+    slug="${slug:-game}"   # non-ASCII names would slugify to nothing
+
+    # Game profile — the upstream wrapper's env is tuned for Ocarina of Time
+    # (VSYNC_HZ/SWAP_INTERVAL/VI2_MAX_RESOLUTION_MODE are OoT-specific knobs).
+    echo "  Game profile:"
+    print_item "1" "Ocarina of Time"  "upstream-tuned wrapper env"
+    print_item "2" "Mario Kart World" "mkw_30fps patch + frame-gen → 60, native mesh option"
+    print_item "3" "Generic"          "safe BC-250 knobs only — no OoT-specific tuning"
+    local prof_sel profile directmesh=0
+    read -rp "  Profile [1]: " prof_sel
+    case "${prof_sel:-1}" in
+        2) profile=mkw ;;
+        3) profile=generic ;;
+        *) profile=oot ;;
+    esac
+    if [[ "$profile" != oot ]]; then
+        confirm "Enable native mesh shaders (RADV_DIRECTMESH=1)? Recommended for MKW — the emulated path skips indirect mesh draws; experimental, may hang." && directmesh=1
+    fi
+
+    local exe="$LICHII_DIR/lichii-bc250" ini="$LICHII_DIR/oot.ini" launch_opts
+    if [[ "$profile" == oot ]]; then
+        launch_opts="-f"
+        [[ -f "$ini" ]] && launch_opts+=" -c \"$ini\""
+        launch_opts+=" -g \"$rom\""
+    else
+        ini="$LICHII_DIR/${slug}.ini"
+        if [[ -f "$LICHII_DIR/oot.ini" ]]; then
+            runuser -u "$REAL_USER" -- cp "$LICHII_DIR/oot.ini" "$ini"
+        else
+            runuser -u "$REAL_USER" -- touch "$ini"
+        fi
+        if [[ "$profile" == mkw ]]; then
+            # Force MKW's native 30 fps mode — the game's own paced path; the
+            # frame-gen settings inherited from oot.ini then double it to ~60.
+            if grep -q '^mkw_30fps=' "$ini"; then
+                sed -i 's/^mkw_30fps=.*/mkw_30fps=true/' "$ini"
+            elif grep -q '^\[Renderer\]' "$ini"; then
+                sed -i '/^\[Renderer\]/a mkw_30fps=true\nmkw_30fps\\default=false' "$ini"
+            else
+                printf '[Renderer]\nmkw_30fps=true\nmkw_30fps\\default=false\n' >> "$ini"
+            fi
+            chown "$REAL_USER:$REAL_USER" "$ini" 2>/dev/null || true
+        fi
+        # Per-game launcher — eden-cli directly (native), env per profile.
+        # Safe-for-all-games BC-250 knobs; the OoT-specific trio stays out
+        # unless the profile needs it (mkw_30fps uses the same 30 Hz recipe).
+        exe="$LICHII_DIR/lichii-${slug}"
+        {
+            echo '#!/usr/bin/env bash'
+            echo "# Lichii per-game launcher — profile: ${profile} (generated by bc250-toolkit)"
+            echo 'unset LD_PRELOAD'
+            echo 'export EDEN_NX2_TC_EXPECTED_MIB=1536 EDEN_NX2_TC_CRITICAL_MIB=2048'
+            echo 'export EDEN_NX2_SPLIT=2 EDEN_NX2_FENCE_BATCH=1 EDEN_NX2_FRAMES_AHEAD=2'
+            echo 'export EDEN_NX2_PRELOAD_ALL_PIPELINES=0 EDEN_NX2_PIPELINE_WORKERS=4'
+            echo 'export EDEN_NX2_PIPELINE_DRIVER_THREADS=2 EDEN_NX2_IR_POOL_CAP_MIB=64'
+            if [[ "$profile" == mkw ]]; then
+                echo 'export EDEN_NX2_VSYNC_HZ=30 EDEN_NX2_SWAP_INTERVAL=2 EDEN_VI2_MAX_RESOLUTION_MODE=1'
+                echo 'export EDEN_NX2_MESH_ARENA_MIB=64   # MKW is mesh-heavier than OoT (default 16)'
+            fi
+            if [[ "$directmesh" == 1 ]]; then
+                echo 'export RADV_DIRECTMESH=1'
+                echo 'unset EDEN_NX2_FORCE_MESH_FALLBACK   # presence-check var — any value would force the emulated path'
+            fi
+            echo "exec \"$LICHII_DIR/lichii/eden-cli\" -f -c \"$ini\" -g \"$rom\""
+        } | runuser -u "$REAL_USER" -- tee "$exe" >/dev/null
+        runuser -u "$REAL_USER" -- chmod 755 "$exe"
+        launch_opts=""
+    fi
+    local desk="$apps_dir/lichii-${slug}.desktop"
+    runuser -u "$REAL_USER" -- mkdir -p "$apps_dir"
+    runuser -u "$REAL_USER" -- tee "$desk" >/dev/null <<EOF
+[Desktop Entry]
+Type=Application
+Name=${name}
+Exec="${exe}" ${launch_opts}
+Terminal=false
+Categories=Game;
+Comment=Lichii BC-250 [${profile}] — ${rom}
+EOF
+    [[ -f "$desk" ]] && print_success "Linux menu entry: ${desk}"
+    runuser -u "$REAL_USER" -- update-desktop-database "$apps_dir" 2>/dev/null || true
+
+    # 2) Steam non-Steam shortcut — Steam must be fully closed (it rewrites
+    #    shortcuts.vdf from memory otherwise).
+    if pgrep -x steam >/dev/null; then
+        print_error "Steam is running — it rewrites shortcuts.vdf from memory."
+        print_info  "Fully quit Steam (System → Exit Steam, not just the window), then re-run this option."
+        print_info  "The Linux menu entry above is already created."
+        return 0
+    fi
+    local vdf; vdf=$(ls -1 "$REAL_HOME"/.local/share/Steam/userdata/*/config/shortcuts.vdf 2>/dev/null | head -n1 || true)
+    if [[ -z "$vdf" ]]; then
+        print_info "No shortcuts.vdf — launch Steam once, quit it, then re-run this option."
+        return 0
+    fi
+    local py="$LICHII_DIR/lichii/tools/add_steam_shortcut.py"
+    [[ -f "$py" ]] || py="$LICHII_DIR/lichii/tools/bc250/add_steam_shortcut.py"
+    if [[ ! -f "$py" ]]; then
+        print_error "add_steam_shortcut.py not found in the installed package — create the Steam shortcut manually."
+        return 1
+    fi
+    runuser -u "$REAL_USER" -- python3 "$py" \
+        --vdf "$vdf" --name "$name" \
+        --exe "$exe" --launch-options "$launch_opts" || {
+        print_error "Steam shortcut writer failed."
+        return 1
+    }
+    print_success "Steam shortcut added — it appears under Non-Steam games (also in Game Mode)."
+    print_info "First launch: black screen for 3–5 min while shader pipelines build — normal."
+}
+
+revert_lichii() {
+    print_step "LICHII" "Revert Lichii BC-250"
+    lichii_installed || [[ -d "$LICHII_DIR" ]] || { print_info "Lichii not installed — nothing to revert."; return 0; }
+    confirm "Remove Lichii from ${LICHII_DIR}? (Saves/user data under ~/.local/share/eden are kept.) Proceed?" || return 0
+    local script="$REAL_HOME/.cache/lichii-bc250-uninstall.sh"
+    if runuser -u "$REAL_USER" -- curl -fsSL -o "$script" "$LICHII_UNINSTALL_URL"; then
+        chmod +x "$script"; chown "$REAL_USER:$REAL_USER" "$script"
+        runuser -u "$REAL_USER" -- bash "$script" --yes || runuser -u "$REAL_USER" -- bash "$script" || \
+            print_error "Upstream uninstaller reported errors."
+    else
+        print_info "Upstream uninstaller unavailable — removing ${LICHII_DIR} directly."
+        rm -rf "$LICHII_DIR"
+    fi
+    # Drop the per-game launchers/profiles we generated — otherwise they linger
+    # as dead entries pointing at the removed install.
+    rm -f "$REAL_HOME"/.local/share/applications/lichii-*.desktop \
+          "$LICHII_DIR"/lichii-* 2>/dev/null || true
+    print_info "Steam non-Steam entries for Lichii games are stored in shortcuts.vdf — remove them in Steam if any remain."
+    print_success "Lichii reverted."
+}
+
+install_emudeck() {
+    print_step "EMUDECK" "EmuDeck installer (generic emulators)"
+    echo -e "  ${DIM}  Downloads the official installer to the Desktop — you run it yourself.${RESET}"
+    local dest="$REAL_HOME/Desktop/EmuDeck.desktop"
+    mkdir -p "$REAL_HOME/Desktop" && chown "$REAL_USER:$REAL_USER" "$REAL_HOME/Desktop"
+    runuser -u "$REAL_USER" -- curl -fsSL -o "$dest" "https://www.emudeck.com/EmuDeck.desktop" || {
+        fail_with_log "EmuDeck installer download failed." "EmuDeck"; return 1; }
+    chmod +x "$dest"; chown "$REAL_USER:$REAL_USER" "$dest"
+    print_success "EmuDeck installer saved to the Desktop — double-click it in Desktop Mode."
+}
+
+run_emulators_menu() {
+    while true; do
+        print_banner
+        print_section "Emulators"
+        echo -e "  ${DIM}BC-250-tuned emulators + the generic EmuDeck suite. Games/firmware are never included.${RESET}"
+        echo ""
+        print_item "1" "KytyPS5-Native Beta"        "PS5 emulator (dmorazasanchez AppImage) — status: $(kyty_installed && echo installed || echo "not installed")"
+        print_item "2" "KytyPS5 Status"              "Driver options, GTT, GPU helper, upscalers"
+        print_item "3" "Revert KytyPS5"              "Remove driver options + helper + AppImage (keeps saves)"
+        print_item "4" "Lichii BC-250"               "Zelda OoT Switch 2 native — status: $(lichii_installed && echo installed || echo "not installed")"
+        print_item "5" "Lichii Game Shortcut"        "ROM path (.nup/folder) → Linux menu + Steam shortcut"
+        print_item "6" "Revert Lichii"               "Remove Lichii via upstream uninstaller"
+        print_item "7" "EmuDeck Installer"           "Download official installer to Desktop (all other emulators)"
+        print_item "0" "Back" ""
+        echo ""
+        echo -e "  ${BOLD}${CYAN}═════════════════════════════════════════════════════════════════════${RESET}"
+        read -rp "$(echo -e "  ${BOLD}${WHITE}Enter selection:${RESET} ")" emu_choice
+
+        case "$emu_choice" in
+            1) install_kyty;          press_enter ;;
+            2) run_kyty_status;       press_enter ;;
+            3) revert_kyty;           press_enter ;;
+            4) install_lichii;        press_enter ;;
+            5) lichii_game_shortcut;  press_enter ;;
+            6) revert_lichii;         press_enter ;;
+            7) install_emudeck;       press_enter ;;
+            0) return 0 ;;
+            *)
+                print_error "Invalid selection: '$emu_choice'"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 run_extras_menu() {
@@ -7800,6 +8438,7 @@ show_menu() {
     print_item  "3"  "Performance Profiles"  "CPU & GPU performance profiles"
     print_item  "4"  "Revert / Uninstall All" "Undo everything back to SteamOS defaults"
     print_item  "5"  "Extras"                "Sensors & fans, CoolerControl, HDMI-CEC, AIC8800 WiFi"
+    print_item  "6"  "Emulators"             "KytyPS5-Native (PS5), Lichii (Zelda OoT native), EmuDeck"
     echo ""
     print_section "System"
     print_item  "V"  "Verify My Setup"       "Current system summary"
@@ -7921,6 +8560,7 @@ while true; do
         3) run_overclock_menu ;;
         4) run_revert_all;        press_enter ;;
         5) run_extras_menu ;;
+        6) run_emulators_menu ;;
         V) run_status;            press_enter ;;
         G) run_changelog;         press_enter ;;
         I) run_help;              press_enter ;;

@@ -7,6 +7,119 @@ como histórico datado de antes da adoção de versões numeradas.
 
 🇺🇸 Prefer English? Read the [CHANGELOG.md](./CHANGELOG.md).
 
+## v1.12.0 — 2026-11-13
+
+**Correções (lote de issues #41–#57):**
+
+- **CoolerControl volta a instalar** — `coolercontrold-bin`/`coolercontrol-bin`
+  foram deletados do AUR (`could not find all required packages`). O
+  instalador agora usa os **binários oficiais do release upstream** (daemon +
+  GUI) do GitLab do CoolerControl — com verificação de checksum, unit
+  systemd, revert limpo, sem pacote AUR e sem build Rust. Corrige #55, #53.
+- **Governor de GPU instala sem toolchain Rust** — o build via cargo (a
+  fonte do segfault por trás dos relatos de tela preta/verde) foi trocado
+  pelo **tarball pré-compilado do upstream** com verificação sha256. A
+  instalação também não roda mais `udevadm trigger`, que apagava a tela no
+  meio do processo. Builds antigos são limpos no revert. Corrige #54, #49, #45.
+- **Governor de CPU sem pipx** — instala num venv dedicado
+  (`/var/lib/bc250/smu-oc-venv`) com shims estáveis em `/var/lib/bc250/bin`;
+  instalações pipx quebradas migram automaticamente. Remove o caminho
+  frágil `pip list --format=json` que quebrava com JSONDecodeError. Corrige #41.
+- **Layout do menu adapta à largura do terminal** — a caixa do banner era
+  fixa em 69 chars e quebrava/embolava em terminais estreitos; agora se
+  dimensiona sozinha (cabeçalho simples abaixo de ~44 colunas) e limpa a
+  tela via escape codes em vez do `clear` do terminfo. Corrige #51.
+- **Docs** — README informa a faixa de kernels testados (`7.2.4`–`7.2.7`,
+  SteamOS 3.10) com mais precisão. Ajuda a #56.
+
+**Emulators — correções no Lichii e tuning por jogo:**
+
+- **Lichii realmente abre** — o wrapper upstream usava por padrão um
+  container distrobox com Mesa Fedora stock 25.1.9, que não reconhece o
+  gfx1013 (sem `VK_KHR_*_surface` → lavapipe headless → fecha na hora).
+  O toolkit agora força `INSTALL_MODE="native"` para os jogos renderizarem
+  no RADV patcheado do host (Mesa 26.2.4). A criação de atalho também
+  detecta o `eden-cli` através do symlink e resolve pastas de dump
+  (incl. aninhamento `base/`) para o `exefs/main.npdm` automaticamente.
+- **Launcher e perfil por jogo** — a criação de atalho pergunta qual perfil
+  de tuning usar e gera um launcher dedicado `lichii-<nome>` + `<nome>.ini`
+  em vez de forçar todo jogo pela config do OoT:
+  - `mkw` (Mario Kart World): knobs seguros + pacing 30 Hz
+    (`VSYNC_HZ=30`/`SWAP_INTERVAL=2`/`VI2_MAX_RESOLUTION_MODE=1` +
+    config `mkw_30fps` — a mesma receita que dobrou o fps do OoT),
+    `EDEN_NX2_MESH_ARENA_MIB=64` para os mesh draws pesados do MKW, e
+    `RADV_DIRECTMESH=1` para os mesh shaders rodarem no pipeline
+    **nativo** de task/mesh em vez de emulação por vertex (a "vantagem
+    do Windows" do upstream). `EDEN_NX2_FORCE_MESH_FALLBACK` é
+    explicitamente desativado — é uma var de presença, então `=0`
+    continuaria forçando a emulação.
+  - `generic`: só os knobs seguros — o trio de 30 Hz do OoT fica fora.
+  Verificado: MKW boota no RADV nativo a ~59 FPS de jogo com frame
+  generation FSR3 2× (~68 fps apresentados) — o resultado real in-game
+  varia por cena; `EDEN_NX2_GPU_PROFILE=1` etc. disponíveis para tracing.
+
+**Novo — seção Emulators (menu principal 6):**
+
+- **KytyPS5-Native Beta** — AppImage plug-and-play SteamOS do
+  dmorazasanchez (emulador de PS5, gfx1013 nativo). Download com SHA-256
+  verificado; `--prepare-system` upstream aplica as opções amdgpu + GTT
+  de 14 GiB + helper GPU (só escreve em `/etc`+`/var`, sobrevive update
+  do SteamOS, reversível via `--revert`). Checagem de pré-requisito avisa
+  se o amdgpu patchado do toolkit não está carregado. Revert mantém saves.
+- **Lichii BC-250** — eden-cli pré-compilado do lethevimlet otimizado
+  pra GFX1013 (Zelda: Ocarina of Time, recompilação nativa Switch 2).
+  Usa o installer/uninstaller upstream; espera nosso split UMA de 512MB.
+  O launcher é forçado pro modo nativo — o padrão distrobox do upstream
+  traz Mesa stock que não reconhece gfx1013 (sem superfícies Vulkan).
+  Sub-opção cria atalhos por jogo (menu de jogos do Linux + entrada
+  non-Steam no Steam) a partir de .nup ou pasta de dump — pastas de dump
+  são resolvidas pro `exefs/main.npdm` automaticamente (incl. aninhamento
+  `base/`); writer de vdf upstream, Steam precisa estar fechado.
+- **EmuDeck** — item de menu baixa o instalador oficial pro Desktop
+  (todos os demais emuladores).
+
+**Novo (sync upstream, 24/out → 8/nov):**
+
+- **Hunk dual-audio v0.17** — streams que nomeiam sink de outro
+  dispositivo (haptics 4ch do DualSense, DACs USB) não são mais
+  arrastados pro HDMI/AC-3. Adição em Lua no `90-bc250-audio-mode.lua`.
+- **DirectMesh v1.4** — fix upstream de pipelines Task+Mesh (Task roda
+  como produtor compute, Mesh via pipeline vertex comum — jogos que
+  renderizavam mundo 3D preto agora funcionam) portado pro nosso pin
+  Mesa 26.2.4 (MastaG `f1f2dc6` / lonewolf `cac0bcc`; v1.4.1 pulada —
+  retirada por hangs). Opt-out: `RADV_BC250_MESH_TASK_IDX=0`. Continua
+  opt-in via `RADV_DIRECTMESH=1`.
+- **Docs/plugins FSR4 sincronizados ao rework de 10/nov** — todas as
+  variantes agora são FreeFG: `freefg-all` (5 upscalers, escolha in-game),
+  `freefg-hlxfsr4` (FreeFG 1.4.0 + HLX FSR 4 / HelixSR 3.3.0 — Vulkan
+  nativo ffx_vk, sem ponte DX12), `freefg-hlxdlss` (Model E), `freefg`
+  (FSR4 RC12), `freefg-hlxdlssk` (Preset K), `freefg-hlxfsr4full`, `off`.
+  Prefixos novos default NÃO upscalam — menu GTK4 na 1ª execução escolhe
+  (`~/.config/bc250-fsr4/settings`, `PROTON_OPTISCALER_MENU=0/1`). Nomes
+  antigos viram alias. FG vem OFF; preset DB por-jogo; MFG Unlocker
+  (XeFG 3×/4×). Atualizados hints do start.sh, presets dos dois plugins
+  Decky (incl. FrameGen/DLSSG) e `.kb`.
+- **Novos patches kernel vendored** — knob `bc250_tlb_flush_type`,
+  flush VMID estático sem-HWS (sched_policy=2), flush KFD-VMID via MMIO
+  type-0 (upstream mediu ~20 stalls KIQ → 0), mais enablement
+  KytyPS5-Native (2º ring gfx, eventos EOP, mtype-rw). Inertes/gated por
+  padrão; ligados no build.sh após 0003 com pristine-reset.
+- **Sensor bc250_vrm** (menu Sensores 4/5) — V/I/temp/potência dos
+  trilhos CPU/GPU via SMBus do NCT6687, sem mod de fiação; build
+  out-of-tree.
+- **Pré-requisitos KytyPS5** — patches kernel vendored; `.kb/kyty.md`
+  rastreia o empacotamento restante.
+
+**Notas:** DirectMesh v1.4.1 retirada no mesmo dia (hangs) — pulada,
+shipamos a v1.4. HelixSR 3.3.0/Scaler 2.3.0 + FreeFG 1.4.0 pinados
+upstream (pacotes atualizam automático). MFG Unlocker 1.7.1 saiu;
+upstream segue em 1.7.0. Kernel upstream foi pra 7.3/7.4 e o set estável
+de Mesa pra 26.3.0 — seguimos no Valve 7.2 + Mesa 26.2.4. KytyPS5 agora
+tem AppImage plug-and-play SteamOS (beta) e repo pacman próprio — caminho
+de instalação precisa spec própria (`--prepare-system` sobrepõe nosso
+GRUB/ram-split). ROCm agora recomenda `amdgpu.sched_policy=2`; runlist
+flush marcado instável.
+
 ## v1.11.0 — 2026-10-24
 
 **Removido:**

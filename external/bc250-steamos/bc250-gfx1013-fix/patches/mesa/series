@@ -1,14 +1,16 @@
 # Mesa patch series for GFX1013 (BC-250), applied in order against
 # pristine mesa-26.2.4 with `git apply` / `patch -p1`.
 #
-# Patches 0001-0007 from MastaG/linux-cachyos-bc250 (Oct 2026 sync,
+# Patches 0001-0007 from MastaG/linux-cachyos-bc250 (Oct/Nov 2026 sync,
 # patches/mesa/ stable series for Mesa 26.2.4).
 #
 # 0001: Expose ACE compute queue + async compute threadgroup workaround.
 #       Always active.
-# 0002: DirectMesh v1.3.1 (lonewolf0622/bc250meshtaskwork) — VK_EXT_mesh_shader
-#       Mesh AND Task + VK_KHR_fragment_shader_barycentric + no-op VRS +
-#       VK_EXT_device_generated_commands + multiview + indexed Mesh draws.
+# 0002: DirectMesh v1.4 (lonewolf0622 cac0bcc, via MastaG f1f2dc6) —
+#       VK_EXT_mesh_shader Mesh AND Task + VK_KHR_fragment_shader_barycentric
+#       + no-op VRS + VK_EXT_device_generated_commands + multiview + indexed
+#       Mesh draws + the v1.4 Task index route (Task+Mesh pipelines that no
+#       Mesh route can take; RADV_BC250_MESH_TASK_IDX=0 opt-out).
 #       Replaces the old GFX10.3-spoof path (0002-0004 in the previous
 #       series); RADV_GFX103 is gone. Off unless RADV_DIRECTMESH=1 is set
 #       per game — never affects other GPUs or default rendering.

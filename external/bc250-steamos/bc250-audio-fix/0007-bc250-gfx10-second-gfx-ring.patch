@@ -1,0 +1,109 @@
+# Vendored from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0023-bc250-gfx10-second-gfx-ring.patch (kernel 7.3),
+# adapted for linux-neptune-72 (Valve 7.2). Pristine copy: mastag/kernel-7.3/0023-bc250-gfx10-second-gfx-ring.patch
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c
+@@ -33,7 +33,7 @@
+ 	container_of((e), struct amdgpu_ctx_entity, entity)
+ 
+ const unsigned int amdgpu_ctx_num_entities[AMDGPU_HW_IP_NUM] = {
+-	[AMDGPU_HW_IP_GFX]	=	1,
++	[AMDGPU_HW_IP_GFX]	=	2, /* BC-250: two gfx rings (gfx_v10_0 bc250_gfx_queues); one elsewhere */
+ 	[AMDGPU_HW_IP_COMPUTE]	=	4,
+ 	[AMDGPU_HW_IP_DMA]	=	2,
+ 	[AMDGPU_HW_IP_UVD]	=	1,
+@@ -244,6 +244,16 @@
+ 		goto error_free_entity;
+ 	}
+ 
++	/* BC-250: two gfx rings of one priority (the PS5's main and AGR rings, gfx_v10_0
++	 * bc250_gfx_queues=2): ring index N is gfx ring N, as a title's queue is one hardware queue on
++	 * the PS5, instead of a balance over both. Everything that asks for ring 0 stays on ring 0.
++	 */
++	if (hw_ip == AMDGPU_HW_IP_GFX && num_scheds > 1) {
++		sched = scheds[ring < num_scheds ? ring : 0];
++		scheds = &sched;
++		num_scheds = 1;
++	}
++
+ 	/* disable load balance if the hw engine retains context among dependent jobs */
+ 	if (hw_ip == AMDGPU_HW_IP_VCN_ENC ||
+ 	    hw_ip == AMDGPU_HW_IP_VCN_DEC ||
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.c
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.c
+@@ -244,7 +244,13 @@
+ 	int i, queue, pipe;
+ 	bool multipipe_policy = amdgpu_gfx_is_graphics_multipipe_capable(adev);
+ 	int num_queue_per_pipe = 1; /* we only enable 1 KGQ per pipe */
+-	int max_queues_per_me = adev->gfx.me.num_pipe_per_me * num_queue_per_pipe;
++	int max_queues_per_me;
++
++	/* BC-250: more rings than pipes asked for (gfx_v10_0 bc250_gfx_queues) take more queues of a pipe. */
++	if (adev->gfx.num_gfx_rings > adev->gfx.me.num_pipe_per_me)
++		num_queue_per_pipe = min(adev->gfx.num_gfx_rings / adev->gfx.me.num_pipe_per_me,
++					 adev->gfx.me.num_queue_per_pipe);
++	max_queues_per_me = adev->gfx.me.num_pipe_per_me * num_queue_per_pipe;
+ 
+ 	if (multipipe_policy) {
+ 		/* policy: amdgpu owns the first queue per pipe at this stage
+diff --git a/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c b/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
+--- a/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
+@@ -54,6 +54,19 @@
+  */
+ #define GFX10_NUM_GFX_RINGS_NV1X	1
+ #define GFX10_NUM_GFX_RINGS_Sienna_Cichlid	2
++
++/* BC-250: the PS5 runs a title's graphics on two queues of gfx pipe 0, the main one (queue 0) and
++ * the "AGR" ring (queue 1); amdgpu gives Navi1x one. 2 maps queue 1 too, as a second gfx ring
++ * (gfx_0.0.1), the same way as the first: an MQD the KIQ maps (bc250 gfx queues).
++ */
++static int bc250_gfx_queues = 1;
++module_param(bc250_gfx_queues, int, 0444);
++MODULE_PARM_DESC(bc250_gfx_queues, "BC-250: graphics queues of gfx pipe 0 amdgpu maps as rings (1 = stock, 2 = also the PS5's second one)");
++#define BC250_PCI_DEVICE_ID_GFX 0x13FE
++static bool bc250_two_gfx_queues(struct amdgpu_device *adev)
++{
++	return bc250_gfx_queues >= 2 && amdgpu_async_gfx_ring && adev->pdev->device == BC250_PCI_DEVICE_ID_GFX;
++}
+ #define GFX10_MEC_HPD_SIZE	2048
+ 
+ #define F32_CE_PROGRAM_RAM_SIZE		65536
+@@ -4756,7 +4769,7 @@
+ 	int i, j, k, r, ring_id = 0;
+ 	int xcc_id = 0;
+ 	struct amdgpu_device *adev = ip_block->adev;
+-	int num_queue_per_pipe = 1; /* we only enable 1 KGQ per pipe */
++	int num_queue_per_pipe = bc250_two_gfx_queues(adev) ? 2 : 1; /* we only enable 1 KGQ per pipe (BC-250: 2) */
+ 
+ 	INIT_DELAYED_WORK(&adev->gfx.idle_work, amdgpu_gfx_profile_idle_work_handler);
+ 
+@@ -7852,7 +7865,7 @@
+ 	case IP_VERSION(10, 1, 2):
+ 	case IP_VERSION(10, 1, 3):
+ 	case IP_VERSION(10, 1, 4):
+-		adev->gfx.num_gfx_rings = GFX10_NUM_GFX_RINGS_NV1X;
++		adev->gfx.num_gfx_rings = bc250_two_gfx_queues(adev) ? 2 : GFX10_NUM_GFX_RINGS_NV1X; /* BC-250 */
+ 		break;
+ 	case IP_VERSION(10, 3, 0):
+ 	case IP_VERSION(10, 3, 2):
+@@ -9220,7 +9233,17 @@
+ 
+ 	switch (me_id) {
+ 	case 0:
+-		if (pipe_id == 0)
++		if (bc250_two_gfx_queues(adev)) {
++			/* BC-250: both rings on pipe 0; the EOP of queue 1 does not arrive
++			 * as its own (amdgpu's fallback timer found its fences), so an EOP on
++			 * the pipe checks the fences of every ring on it (cheap: a sequence read).
++			 */
++			for (i = 0; i < adev->gfx.num_gfx_rings; i++) {
++				ring = &adev->gfx.gfx_ring[i];
++				if (ring->pipe == pipe_id)
++					amdgpu_fence_process(ring);
++			}
++		} else if (pipe_id == 0)
+ 			amdgpu_fence_process(&adev->gfx.gfx_ring[0]);
+ 		else
+ 			amdgpu_fence_process(&adev->gfx.gfx_ring[1]);

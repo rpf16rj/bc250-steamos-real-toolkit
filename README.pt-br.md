@@ -1,6 +1,6 @@
 # BC-250 SteamOS Real Toolkit
 
-> 🧪 **Versão do SteamOS exigida:** este toolkit acompanha apenas o canal **Beta/Preview** mais recente do SteamOS — atualmente o kernel `7.2.4-valve1-1-neptune-72`. Ele **não é compatível com o SteamOS 3.8 estável**: os patches de kernel são específicos de versão e não compilam nem instalam em kernels mais antigos. Confirme que seu sistema está no canal Beta/Preview antes de instalar.
+> 🧪 **Versão do SteamOS exigida:** este toolkit acompanha apenas o canal **Beta/Preview** mais recente do SteamOS — atualmente o kernel `7.2.7-valve2-2-neptune-72` (testado em `7.2.4`–`7.2.7`). Ele **não é compatível com o SteamOS 3.8 estável**: os patches de kernel são específicos de versão e não compilam nem instalam em kernels mais antigos. Confirme que seu sistema está no canal Beta/Preview antes de instalar.
 
 > ⚠️ **Aviso de responsabilidade:** esta ferramenta altera configurações de baixo nível do sistema (bootloader, módulos do kernel, perfis de energia e overclock) em um hardware BC-250 não oficial. Use por sua conta e risco — o autor e os colaboradores não se responsabilizam por qualquer dano, perda de dados ou falha de hardware. Sempre verifique se sua fonte, cabeamento e refrigeração suportam os perfis de overclock antes de aplicá-los, e mantenha backups sempre que possível.
 
@@ -43,7 +43,8 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 ### Drivers & Correções
 
 - **Correção da fila de compute GFX1013** — compute assíncrono + Mesa/RADV patchadas com DirectMesh (mesh/task shaders via `RADV_DIRECTMESH=1`) e suporte a FSR4 V3
-- **FSR4 Proton** — variantes Proton pré-compiladas do MastaG com FSR4 (GE-Proton, CachyOS native/SLR) com manifest OptiScaler pinado, provider FSR4 e o HelixSR Scaler 1.1.0 padrão (OptiScaler com HelixSR 2.0.0 — upscaling/frame-gen DLSS em compute DX12, só jogos D3D12; `PROTON_USE_OPTISCALER=fsr411f` volta pro bridge FSR4, `helixsr-ffx` pro Model E puro)
+- **FSR4 Proton** — variantes Proton pré-compiladas do MastaG com FSR4 (GE-Proton, CachyOS native/SLR) com manifest OptiScaler pinado e provider FSR4; prefixos novos default sem upscaling (menu na 1ª execução escolhe; `freefg-all`, `freefg-hlxfsr4` = FG FreeFG 1.4.0 + HLX FSR 4 / HelixSR 3.3.0, Vulkan nativo — frame-gen vem off; nomes antigos viram alias)
+- **Emuladores** — KytyPS5-Native (PS5, AppImage plug-and-play SteamOS com opções do driver + helper GPU + revert) e Lichii BC-250 (Zelda: OoT, recompilação nativa), mais atalho do instalador do EmuDeck
 - **Correção de estados de energia ACPI** — tabelas ACPI C-/P-state corretas (compatíveis com 6c e 8c)
 - **Drivers WiFi/BT AIC8800** — suporte atual ao AIC8800D80 e perfil legacy-MCU1 explícito para dongles WiFi AIC8800DC/DW mais antigos
 - **Firmware BE200 Wi-Fi 7** — para placas PCIe Intel BE200/BE201 sem ucode
@@ -67,7 +68,7 @@ Um toolkit amigável e guiado por menus para a placa AMD BC-250 (Cyan Skillfish 
 
 ## Sistema Compatível
 
-- SteamOS real no canal **Beta/Preview** — kernel `7.2.x` (`linux-neptune-72`; testado no SteamOS 3.10)
+- SteamOS real no canal **Beta/Preview** — kernel `7.2.x` (`linux-neptune-72`; testado no SteamOS 3.10, kernels `7.2.4` e `7.2.7`)
 - Placa AMD BC-250
 - Acesso root e conexão com a internet
 
@@ -171,7 +172,7 @@ Este toolkit se apoia em um ótimo trabalho feito pela comunidade do BC-250. Um 
 - [keyboardspecialist](https://github.com/keyboardspecialist) — [bc250-steamos](https://github.com/keyboardspecialist/bc250-steamos) (correção ACPI, correção de áudio/vídeo do DisplayPort, driver WiFi/BT AIC8800, controle HDMI-CEC)
 - [DryhoppedIPA](https://github.com/DryhoppedIPA) — [bc250-gfx1013-fix](https://github.com/DryhoppedIPA/bc250-gfx1013-fix) (patches de kernel + Mesa/RADV para a fila de compute GFX1013)
 - [MastaG](https://github.com/MastaG) — [linux-cachyos-bc250](https://github.com/MastaG/linux-cachyos-bc250) (patches atualizados de Mesa/RADV: DirectMesh, compute queue, FSR4 — além dos pacotes Proton FSR4 pré-compilados)
-- [lonewolf0622](https://github.com/lonewolf0622) — [bc250meshtaskwork](https://github.com/lonewolf0622/bc250meshtaskwork) (DirectMesh v1.3.1: mesh/task shaders, barycentrics, DGC, multiview) e [HelixSR](https://github.com/lonewolf0622/HelixSR) (upscaler DLSS Model E via compute DX12)
+- [lonewolf0622](https://github.com/lonewolf0622) — [Mesh-Shaders-for-Rdna-1-](https://github.com/lonewolf0622/Mesh-Shaders-for-Rdna-1-) (DirectMesh v1.4: mesh/task shaders, pipelines Task+Mesh, barycentrics, DGC, multiview) e [HelixSR](https://github.com/lonewolf0622/HelixSR) (upscaler DLSS Model E via compute DX12)
 - [dmorazasanchez](https://github.com/dmorazasanchez) — [bc250-fsr4](https://github.com/dmorazasanchez/bc250-fsr4) (otimização FSR4 V3 deferred SDot hybrid)
 - [Fred78290](https://github.com/Fred78290) — [nct6687d](https://github.com/Fred78290/nct6687d) (driver de controle PWM dos fans)
 - [duggasco](https://github.com/duggasco) — [bc250-40cu-unlock](https://github.com/duggasco/bc250-40cu-unlock) (patch de kernel para o desbloqueio de 40 CUs)

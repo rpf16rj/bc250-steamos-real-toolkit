@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MastaG <mastag@gmail.com>
+Date: Fri, 6 Nov 2026 15:40:00 +0100
+Subject: [PATCH] drm/amdgpu/gmc10: BC-250 KFD VMID flushes over MMIO, not the
+ KIQ
+
+Without HWS (sched_policy=2) kfd_flush_tlb() flushes a process's static
+VMID by number (0025-bc250-kfd-nohws-vmid-flush.patch). That goes through
+amdgpu_gmc_flush_gpu_tlb() to gmc_v10_0_flush_gpu_tlb(), which hands it to
+the KIQ whenever the KIQ is up -- the route 0006 already takes the GFX1013
+PASID flushes off. Under sustained compute from several processes the
+KIQ stops answering: "failed to write reg 28b4 wait reg 28c6" and
+"Timeout waiting for VM flush hub: 0!", each one stalling its caller for
+seconds.
+
+Route GFX hub flushes of KFD VMIDs (first_kfd_vmid and up) on the BC-250
+through the same MMIO, semaphore-guarded, type-0 path as the PASID
+flushes. Graphics VMIDs and the GART flush (VMID 0) keep their route.
+GFXOFF is held off while a KFD process is active (0007), so the MMIO
+access is safe there.
+
+Tested on a BC-250 (40 CUs, sched_policy=2, kernel 7.3.1-1.391) with a
+HIP stress test that reallocates buffers every iteration under a
+continuous ALU load and checks each result on the CPU:
+- three processes, 2 min: before, ~20 KIQ flush failures and 3328
+  iterations in 135 s; after, none and 5085 iterations in 120 s;
+- four processes, 10 min: 40762 iterations, 0 wrong results, no kernel
+  messages.
+---
+diff --git a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+index 2eb8185b3..97346e210 100644
+--- a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+@@ -357,8 +357,21 @@ static void gmc_v10_0_flush_gpu_tlb_internal(struct amdgpu_device *adev,
+ static void gmc_v10_0_flush_gpu_tlb(struct amdgpu_device *adev, uint32_t vmid,
+ 					uint32_t vmhub, uint32_t flush_type)
+ {
++	/*
++	 * BC-250: a KFD VMID's GFX hub flush must not go through the KIQ
++	 * either. Without HWS, kfd_flush_tlb() flushes the process's static
++	 * VMID by number; under sustained concurrent compute the KIQ then
++	 * stops answering ("failed to write reg ... wait reg ...", several
++	 * seconds each). Take the same MMIO, semaphore-guarded, type-0 path as
++	 * the PASID flushes.
++	 */
++	bool bc250_kfd_vmid = adev->pdev->device == 0x13FE &&
++		amdgpu_ip_version(adev, GC_HWIP, 0) == IP_VERSION(10, 1, 3) &&
++		vmhub == AMDGPU_GFXHUB(0) &&
++		vmid >= adev->vm_manager.first_kfd_vmid;
++
+ 	gmc_v10_0_flush_gpu_tlb_internal(adev, vmid, vmhub, flush_type,
+-					   false);
++					   bc250_kfd_vmid);
+ }
+ 
+ /**

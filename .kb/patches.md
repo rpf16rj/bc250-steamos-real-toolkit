@@ -100,6 +100,34 @@ All patches live in `external/bc250-steamos/bc250-audio-fix/`.
   series, opt-in via `RADV_DIRECTMESH=1`; the kernel patches are the
   matching kernel fixes DirectMesh's compute-queue path requires)
 
+### Mesa 0002-bc250-directmesh (DirectMesh v1.4, Mesa 26.2.4)
+- **Provenance**: DirectMesh v1.4 — lonewolf0622 `cac0bcc` (repo renamed to
+  `Mesh-Shaders-for-Rdna-1-`), vendored via MastaG/linux-cachyos-bc250
+  `f1f2dc6` (`patches/mesa/` stable set, pre-`928c9ea`; MastaG HEAD is a
+  26.3.0 port we do not take).
+- **Feature delta vs v1.3.1**: Task index route — Task+Mesh pipelines no Mesh
+  route can take run Task as compute producer + Mesh as a stored-output
+  compute pass drawn by an ordinary vertex pipeline (was: refused at
+  pipeline creation → black-3D-world games). `RADV_BC250_MESH_TASK_IDX=0`
+  opt-out. Preset values now live in a table (radv_directmesh.c) instead of
+  setenv — nothing leaks to other GPUs/child processes.
+- **Toolkit adaptations on top of MastaG's file**:
+  - `radv_shader.h` `radv_compiler_info` key struct: on 26.2.4 the 28 bc250
+    flags exactly fill the 28-bit padding word (36 named bits + 28 = two
+    words), so upstream's third-word `padding : 31` is DROPPED together with
+    the `force_exact_glsl_fma` context line (26.2.5 spent that bit — it's
+    why upstream's file needs the third word).
+  - Strict opt-in kept: `radv_bc250_directmesh_requested()` is
+    `RADV_DIRECTMESH=1`-only (`: false` when unset/other), `radv_bc250_present()`
+    kept `UNUSED`. MastaG's file turns it on automatically when a BC-250 is
+    present — we deliberately do not.
+- **Verify (done Nov-12)**: full series 0001-0007 applies on pristine
+  mesa-26.2.4 with 0 rejects; 0002 has one fuzz-1 hunk
+  (`radv_amdgpu_bo.c` #2) + offsets; all patches reverse cleanly in series
+  order. `RADV_DIRECTMESH` string + `RADV_BC250_MESH_TASK_IDX` knob present.
+- v1.4.1 exists upstream but was WITHDRAWN by its author (washed-out frames,
+  GPU hangs) — never ship it.
+
 ### bc250-vcn-ungate.patch (DIAGNOSTIC ONLY — investigation concluded 2026-09-23)
 - **Verdict**: VCN block is electrically dead — `mmUVD_PGFSM_CONFIG` write
   completes (posted write) but the first `mmUVD_PGFSM_STATUS` **read**
@@ -173,3 +201,20 @@ In `start.sh`, both `install_audio_fix` and `install_combined_fix` use
 `pick_items` (whiptail --checklist) to show all patches in a single
 navigable list with arrow keys + space to toggle. All items are
 pre-selected by default.
+
+## Upstream notes — Nov-8 sync
+
+- **`bc250-kfd-flush-tlb-by-runlist` (upstream `0008` rewritten)**: upstream
+  turned the bool into a bitmask `bc250_flush_by_runlist` (1=unmap,2=map)
+  hooking KFD map ioctl + SVM map/unmap — BUT their docs now mark it
+  **experimental/unstable**: issue #13 measured board lockups under
+  sustained training on `sched_policy=0` (abandoned MEC preemption →
+  unrecoverable GPU reset). We keep our old bool version; do NOT port.
+- **ROCm**: upstream `docs/ROCM.md` now recommends `amdgpu.sched_policy=2`
+  (no HWS) for compute — pairs with the new 0025/0028 flush path.
+- New vendored (inert at default): `0025` nohws-vmid-flush (sched_policy=2
+  static-VMID flush — fixes silent data corruption path), `0026`
+  `amdgpu.bc250_tlb_flush_type` knob, `0028` KFD-VMID MMIO type-0 flush
+  (upstream-measured: ~20 KIQ flush stalls → 0 under HIP stress), and
+  `0023`/`0024`/`0027` KytyPS5 enablement (2nd gfx ring, EOP events,
+  mtype-rw→C_RW_S) — all default-off.

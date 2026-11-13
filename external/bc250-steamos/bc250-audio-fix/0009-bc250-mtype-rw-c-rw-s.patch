@@ -1,0 +1,32 @@
+# Vendored from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0027-bc250-mtype-rw-c-rw-s.patch (kernel 7.3),
+# adapted for linux-neptune-72 (Valve 7.2). Pristine copy: mastag/kernel-7.3/0027-bc250-mtype-rw-c-rw-s.patch
+diff --git a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+--- a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+@@ -63,6 +63,16 @@
+ module_param(bc250_tlb_flush_type, int, 0644);
+ MODULE_PARM_DESC(bc250_tlb_flush_type, "BC-250: TLB flush type for every GPU TLB flush (-1 = as requested, 0 = legacy)");
+ 
++/* BC-250: AMDGPU_VM_MTYPE_RW has no case here (only gmc_v9_0 and gmc_v12_1 have
++ * one), so a request for it fell through to the default MTYPE_NC. The PS5 kernel
++ * gives its shared memory a cached and shared type (SCE_KERNEL_MTYPE_C_SHARED,
++ * MTYPE 4 here), which is what titles running on it expect; the knob reports
++ * which of the two the case maps to.
++ */
++static int bc250_mtype_rw = 1;
++module_param(bc250_mtype_rw, int, 0444);
++MODULE_PARM_DESC(bc250_mtype_rw, "BC-250: AMDGPU_VM_MTYPE_RW maps MTYPE C_RW_S (1) or NC (0)");
++
+ static int gmc_v10_0_ecc_interrupt_state(struct amdgpu_device *adev,
+ 					 struct amdgpu_irq_src *src,
+ 					 unsigned int type,
+@@ -559,6 +569,9 @@
+ 	case AMDGPU_VM_MTYPE_UC:
+ 		*flags = AMDGPU_PTE_MTYPE_NV10(*flags, MTYPE_UC);
+ 		break;
++	case AMDGPU_VM_MTYPE_RW: /* BC-250 */
++		*flags = AMDGPU_PTE_MTYPE_NV10(*flags, bc250_mtype_rw ? MTYPE_C_RW_S : MTYPE_NC);
++		break;
+ 	}
+ 
+ 	if (vm_flags & AMDGPU_VM_PAGE_NOALLOC)

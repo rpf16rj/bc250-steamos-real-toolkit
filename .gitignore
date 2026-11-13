@@ -37,3 +37,12 @@
 /external/bc250-steamos/bc250-audio-fix/prebuilt/
 /external/bc250-steamos/bc250-audio-fix/amdgpu-*.ko.zst*
 /external/bc250-steamos/bc250-audio-fix/amdgpu-*.flags
+
+# bc250-vrm out-of-tree module build artifacts (root-owned kbuild droppings)
+/external/bc250-vrm/*.o
+/external/bc250-vrm/*.ko
+/external/bc250-vrm/*.ko.zst
+/external/bc250-vrm/*.mod.c
+/external/bc250-vrm/*.mod.o
+/external/bc250-vrm/Module.symvers
+/external/bc250-vrm/modules.order

@@ -21,27 +21,27 @@ const DFL = window.DFL;
 // variants) deselect each other inside the group.
 const OPTION_GROUPS = [
     { title: "Upscaler / OptiScaler variant (pick one)", exclusive: true, options: [
-        { id: "helixsr", label: "HelixSR Scaler (default)", prefix: "PROTON_USE_OPTISCALER=helixsr", desc: "HelixSR 2.0.0 + OptiScaler: DLSS upscale + FG, Insert menu" },
-        { id: "helixsr-ffx", label: "HelixSR pure (Model E)", prefix: "PROTON_USE_OPTISCALER=helixsr-ffx", desc: "Pure DLSS Model E via DX12 compute — D3D12 only" },
-        { id: "fsr411f", label: "fsr411f RC11", prefix: "PROTON_USE_OPTISCALER=fsr411f", desc: "BC-250 fork FSR4 bridge RC11" },
-        { id: "signed", label: "AMD signed FSR4", prefix: "PROTON_USE_OPTISCALER=signed", desc: "AMD's signed 4.0.2 bridge" },
-        { id: "fsr411b", label: "fsr411b", prefix: "PROTON_USE_OPTISCALER=fsr411b", desc: "Third-party 4.1.1b, RDNA2 ghosting fix" },
-        { id: "fsr411rc9", label: "fsr411rc9", prefix: "PROTON_USE_OPTISCALER=fsr411rc9", desc: "Older fork bridge RC9" },
-        { id: "fsr411rc10", label: "fsr411rc10", prefix: "PROTON_USE_OPTISCALER=fsr411rc10", desc: "Older fork bridge RC10" },
-        { id: "freefg", label: "FreeFG", prefix: "PROTON_USE_OPTISCALER=freefg", desc: "XeSS frame-gen, BC-250 shaders + VRR pacing" },
-        { id: "freefg-helixsr", label: "FreeFG + HelixSR", prefix: "PROTON_USE_OPTISCALER=freefg-helixsr", desc: "FreeFG pacing + HelixSR Scaler" },
-        { id: "optiscaler", label: "Plain OptiScaler", prefix: "PROTON_USE_OPTISCALER=optiscaler", desc: "OptiScaler without HelixSR" }
+        { id: "freefg-all", label: "FreeFG all-in-one", prefix: "PROTON_USE_OPTISCALER=freefg-all", desc: "All 5 upscalers — pick in-game via the OptiScaler menu" },
+        { id: "freefg-hlxfsr4", label: "FreeFG + HLX FSR 4", prefix: "PROTON_USE_OPTISCALER=freefg-hlxfsr4", desc: "FreeFG 1.4.0 FG + HLX FSR 4 (HelixSR 3.3.0, native Vulkan) — FG ships off" },
+        { id: "freefg-hlxdlss", label: "FreeFG + HLX DLSS", prefix: "PROTON_USE_OPTISCALER=freefg-hlxdlss", desc: "FreeFG FG + HLX DLSS (Model E) upscaler" },
+        { id: "freefg", label: "FreeFG + FSR4 RC12", prefix: "PROTON_USE_OPTISCALER=freefg", desc: "FreeFG FG + FSR4 RC12 upscaler" },
+        { id: "freefg-hlxdlssk", label: "FreeFG + HLX DLSS Preset K", prefix: "PROTON_USE_OPTISCALER=freefg-hlxdlssk", desc: "Preset K — sharper, slower, can sparkle on foliage" },
+        { id: "freefg-hlxfsr4full", label: "FreeFG + HLX FSR 4 Full", prefix: "PROTON_USE_OPTISCALER=freefg-hlxfsr4full", desc: "Full FSR 4.1.2 network — sharper, slower" },
+        { id: "off", label: "No upscaling", prefix: "PROTON_USE_OPTISCALER=off", desc: "The game as it ships — no OptiScaler/FSR4" }
     ]},
     { title: "Extra options", exclusive: false, options: [
-        { id: "directmesh", label: "DirectMesh shaders", prefix: "RADV_DIRECTMESH=1", desc: "v1.3.1 mesh/task shaders, barycentrics, DGC" },
+        { id: "directmesh", label: "DirectMesh shaders", prefix: "RADV_DIRECTMESH=1", desc: "v1.4 mesh/task shaders incl. Task+Mesh pipelines, barycentrics, DGC" },
         { id: "fsr4debug", label: "FSR4 debug watermark", prefix: "BC250_FSR4_DEBUG=1", desc: "Watermark + OptiScaler overlay log" },
         { id: "nofsr4", label: "Disable FSR4 upgrade", prefix: "PROTON_FSR4_UPGRADE=0", desc: "Turn off FSR4 upscaling for this game" },
         { id: "anticheat", label: "Ignore anti-cheat block", prefix: "BC250_FSR4_IGNORE_ANTICHEAT=1", desc: "Keep FSR4/OptiScaler on EAC/BattlEye games (ban risk!)" },
-        { id: "winmmfix", label: "winmm.dll conflict fix", prefix: "PROTON_OPTISCALER_NAME=dxgi.dll", desc: "For games shipping their own winmm.dll" }
+        { id: "winmmfix", label: "winmm.dll conflict fix", prefix: "PROTON_OPTISCALER_NAME=dxgi.dll", desc: "For games shipping their own winmm.dll" },
+        { id: "optiscalermenu", label: "Re-show upscaler menu", prefix: "PROTON_OPTISCALER_MENU=1", desc: "One-shot: re-shows the GTK menu next launch — remove after" }
     ]},
-    { title: "DLSS spoof (pick one)", exclusive: true, options: [
+    { title: "DLSS / FrameGen (pick one — they share BC250_OPTISCALER_EXTRA)", exclusive: true, options: [
         { id: "spoofdxgi", label: "DLSS + Reflex spoof", prefix: 'BC250_OPTISCALER_EXTRA="Spoofing.Dxgi=true"', desc: "Game offers DLSS/Reflex, OptiScaler translates to FSR4" },
-        { id: "spoofreg", label: "DLSS + Registry spoof", prefix: 'BC250_OPTISCALER_EXTRA="Spoofing.Dxgi=true;Spoofing.Registry=true"', desc: "Add registry spoof if the game warns about GPU/driver" }
+        { id: "spoofreg", label: "DLSS + Registry spoof", prefix: 'BC250_OPTISCALER_EXTRA="Spoofing.Dxgi=true;Spoofing.Registry=true"', desc: "Add registry spoof if the game warns about GPU/driver" },
+        { id: "fgenable", label: "Frame generation ON", prefix: 'BC250_OPTISCALER_EXTRA="FrameGen.Enabled=true"', desc: "FreeFG ships OFF by default — force it on" },
+        { id: "dlssg", label: "Game's DLSS FG → XeFG", prefix: 'BC250_OPTISCALER_EXTRA="Spoofing.Dxgi=true;FrameGen.Enabled=true"', desc: "Game's own DLSS FG feeds FreeFG XeFG (needs spoofing)" }
     ]}
 ];
 
@@ -96,13 +96,29 @@ function buildOptionsString(existing, selectedIds) {
     return parts.join(" ");
 }
 
+// Old upstream variant names → current preset ids (upstream auto-aliases
+// these at launch; mirror it so saved configs still show a selection).
+var VARIANT_ALIASES = {
+    "PROTON_USE_OPTISCALER=helixsr": "freefg-hlxdlss",
+    "PROTON_USE_OPTISCALER=helixsr-ffx": "freefg-hlxdlss",
+    "PROTON_USE_OPTISCALER=freefg-helixsr": "freefg-hlxdlss",
+    "PROTON_USE_OPTISCALER=hlxfsr4": "freefg-hlxfsr4",
+    "PROTON_USE_OPTISCALER=fsr411f": "freefg",
+    "PROTON_USE_OPTISCALER=fsr412f": "freefg",
+    "PROTON_USE_OPTISCALER=signed": "freefg"
+};
+
 function initialSelection(existing) {
     // Whole-token compare — substring matching would double-select
-    // ("helixsr" is a prefix of "helixsr-ffx", "freefg" of "freefg-helixsr").
+    // ("freefg" is a prefix of "freefg-hlxfsr4" etc. — exact tokens only).
     var toks = (existing || "").split(/\s+/);
     var sel = [];
     ALL_OPTIONS.forEach(function(o) {
         if (toks.indexOf(o.prefix) !== -1) sel.push(o.id);
+    });
+    toks.forEach(function(t) {
+        var mapped = VARIANT_ALIASES[t];
+        if (mapped && sel.indexOf(mapped) === -1) sel.push(mapped);
     });
     return sel;
 }
