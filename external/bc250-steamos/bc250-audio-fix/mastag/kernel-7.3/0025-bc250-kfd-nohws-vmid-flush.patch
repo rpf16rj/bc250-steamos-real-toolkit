@@ -1,0 +1,40 @@
+From 6783bc54c0d4f135b3f601c3ad2cbcdd261a3350 Mon Sep 17 00:00:00 2001
+From: MastaG <mastag@gmail.com>
+Date: Mon, 2 Nov 2026 18:33:37 +0100
+Subject: [PATCH] drm/amdkfd: BC-250 flush the compute queue's static VMID
+ without HWS
+
+With sched_policy=2 (KFD_SCHED_POLICY_NO_HWS) a process keeps one static
+VMID while it has queues, and neither invalidation reaches it: the PASID
+sweep matches no VMID on gfx1013 (see the runlist-rebuild patch) and the
+runlist rebuild itself needs the hardware scheduler, so it is inert in
+this mode. Kyty's setup runs this way, so its page-table updates landed
+on a TLB that was never flushed.
+
+Flush that VMID directly, as amdgpu did before PASID flushes existed.
+
+Based on KytyPS5-Native's bc250-amdgpu patch (faf53a5).
+---
+ drivers/gpu/drm/amd/amdkfd/kfd_priv.h | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
+index 25225fef0084..ab08a1e31c17 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
+@@ -1604,6 +1604,15 @@ static inline void kfd_flush_tlb(struct kfd_process_device *pdd)
+ 	struct amdgpu_device *adev = pdd->dev->adev;
+ 	struct amdgpu_vm *vm = drm_priv_to_vm(pdd->drm_priv);
+ 
++	/* BC-250: the PASID flush does not find KFD's VMIDs (ROCm#6313). Without
++	 * HWS a process keeps one static VMID while it has queues: flush that one,
++	 * as amdgpu did before PASID flushes (bc250 no-HWS vmid flush).
++	 */
++	if (sched_policy == KFD_SCHED_POLICY_NO_HWS && pdd->qpd.vmid) {
++		amdgpu_gmc_flush_gpu_tlb(adev, pdd->qpd.vmid, AMDGPU_GFXHUB(0),
++					 TLB_FLUSH_LEGACY);
++		return;
++	}
+ 	amdgpu_vm_flush_compute_tlb(adev, vm, TLB_FLUSH_HEAVYWEIGHT,
+ 				    pdd->dev->xcc_mask);
+ }

@@ -108,9 +108,10 @@ applies patches, builds only the amdgpu.ko module, and installs it.
 ### build-mesa.sh
 - Builds patched Mesa/RADV (base: `mesa-26.2.4` tarball) with GFX1013 fixes + mesh/task shader support
 - Two modes:
-  - MastaG (default): DirectMesh v1.3.1 (lonewolf0622) — Mesh+Task,
-    barycentrics, no-op VRS, DGC, multiview, indexed draws; opt-in per game
-    via `RADV_DIRECTMESH=1` (replaces the old GFX10.3-spoof series;
+  - MastaG (default): DirectMesh v1.4 (lonewolf0622 `cac0bcc`, via MastaG
+    `f1f2dc6`) — Mesh+Task, barycentrics, no-op VRS, DGC, multiview, indexed
+    draws + Task index route (`RADV_BC250_MESH_TASK_IDX=0` opt-out); opt-in
+    per game via `RADV_DIRECTMESH=1` (replaces the old GFX10.3-spoof series;
     `RADV_GFX103` no longer exists)
   - Native: Native MESH only on GFX10, no spoof
 - Series: `patches/mesa/series` = MastaG stable set 0001-0007

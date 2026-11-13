@@ -1,0 +1,21 @@
+# Vendored from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0025-bc250-kfd-nohws-vmid-flush.patch (kernel 7.3),
+# adapted for linux-neptune-72 (Valve 7.2). Pristine copy: mastag/kernel-7.3/0025-bc250-kfd-nohws-vmid-flush.patch
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
+@@ -1562,6 +1562,15 @@
+ 	struct amdgpu_device *adev = pdd->dev->adev;
+ 	struct amdgpu_vm *vm = drm_priv_to_vm(pdd->drm_priv);
+ 
++	/* BC-250: the PASID flush does not find KFD's VMIDs (ROCm#6313). Without
++	 * HWS a process keeps one static VMID while it has queues: flush that one,
++	 * as amdgpu did before PASID flushes (bc250 no-HWS vmid flush).
++	 */
++	if (sched_policy == KFD_SCHED_POLICY_NO_HWS && pdd->qpd.vmid) {
++		amdgpu_gmc_flush_gpu_tlb(adev, pdd->qpd.vmid, AMDGPU_GFXHUB(0),
++					 TLB_FLUSH_LEGACY);
++		return;
++	}
+ 	amdgpu_vm_flush_compute_tlb(adev, vm, TLB_FLUSH_HEAVYWEIGHT,
+ 				    pdd->dev->xcc_mask);
+ }

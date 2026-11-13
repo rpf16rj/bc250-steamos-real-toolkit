@@ -306,12 +306,18 @@ if [ "$WITH_GFX1013" = 1 ]; then
     git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
         drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c \
         drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c \
+        drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c \
+        drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.c \
+        drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c \
         drivers/gpu/drm/amd/amdkfd/kfd_chardev.c \
         drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c \
-        drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h
+        drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.h \
+        drivers/gpu/drm/amd/amdkfd/kfd_events.c \
+        drivers/gpu/drm/amd/amdkfd/kfd_int_process_v10.c \
+        drivers/gpu/drm/amd/amdkfd/kfd_priv.h
 fi
 
-# 0007 TTM NULL-page guard, 0008 SCLK range are always applied
+# TTM NULL-page guard and SCLK range are always applied
 git --git-dir="$PARKED" --work-tree="$TREE" checkout -f -- \
     drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c \
     drivers/gpu/drm/amd/amdgpu/amdgpu.h \
@@ -414,6 +420,16 @@ GFX1013_PATCHES=(
     "$HERE/0001-gfx1013-mmio-pasid-route.patch"
     "$HERE/0002-gfx1013-compute-gfxoff-guard.patch"
     "$HERE/0003-gfx1013-scoped-pasid-type0.patch"
+    # MastaG linux-cachyos-bc250 series (kernel 7.3), ported to 7.2; all
+    # default-inert tunables/fixes for the KFD/compute path. 0005 and 0009
+    # must stay ordered: 0009 anchors on the bc250_tlb_flush_type block 0005
+    # adds, and both need 0003's gmc_v10_0_flush_gpu_tlb_internal refactor.
+    "$HERE/0004-bc250-kfd-nohws-vmid-flush.patch"
+    "$HERE/0005-bc250-gmc-flush-type-knob.patch"
+    "$HERE/0006-bc250-gmc-kfd-vmid-mmio-flush.patch"
+    "$HERE/0007-bc250-gfx10-second-gfx-ring.patch"
+    "$HERE/0008-bc250-kfd-eop-events.patch"
+    "$HERE/0009-bc250-mtype-rw-c-rw-s.patch"
 )
 if [ "$WITH_GFX1013" = 1 ]; then
     for p in "${GFX1013_PATCHES[@]}"; do

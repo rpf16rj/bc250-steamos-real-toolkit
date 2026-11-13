@@ -1,6 +1,6 @@
 -- BC-250 global native-HDMI / realtime Dolby encoder arbiter
--- Target: WirePlumber 0.5.17
--- BC-250 policy revision: v0.15
+-- Target: WirePlumber 0.5.17 (v0.17 hunk: targets_other_device)
+-- BC-250 policy revision: v0.15 + upstream v0.17 targets_other_device
 --
 -- User-visible model:
 --   * stock/native HDMI/DP sink (ACP, EDID/ELD driven)
@@ -1047,7 +1047,31 @@ end
 --
 -- This hook intentionally runs before find-defined-target and overwrites any
 -- per-application / per-monitor target choice while the selected global mode is
--- native/AC3. Internal BC-250 bridge streams bypass it.
+-- native/AC3. Internal BC-250 bridge streams bypass it, and so does playback
+-- that names a sink of another device (targets_other_device).
+
+-- A playback stream that asks for a sink of another device keeps it: a
+-- DualSense's own USB audio for its haptics (KytyPS5-Native opens a 4-channel
+-- stream on it), a USB headset. Such a sink cannot touch hw:Generic,3, so the
+-- EBUSY race this hook prevents does not arise. A stream naming native HDMI or
+-- the AC3 frontend still follows the global choice, as does one naming nothing.
+local function targets_other_device (si_props)
+  local wanted = si_props["target.object"] or si_props["node.target"]
+  if wanted == nil or wanted == "" or wanted == "-1" then
+    return false
+  end
+  for node in nodes_om:iterate () do
+    local p = node.properties
+    if p["node.name"] == wanted or p["object.serial"] == wanted or
+        tostring (node["bound-id"]) == wanted then
+      local name = p["node.name"]
+      return p["media.class"] == "Audio/Sink" and name ~= nil and
+          name ~= AC3_FRONTEND and not starts_with (name, NATIVE_PREFIX)
+    end
+  end
+  return false
+end
+
 SimpleEventHook {
   name = "linking/bc250-global-output",
   before = "linking/find-defined-target",
@@ -1075,6 +1099,12 @@ SimpleEventHook {
         prop_is_true (si_props["stream.capture.sink"])
 
     if not is_playback and not is_sink_monitor_capture then
+      return
+    end
+
+    if is_playback and targets_other_device (si_props) then
+      log:debug (si, "playback keeps its own device target: " ..
+          tostring (si_props["target.object"] or si_props["node.target"]))
       return
     end
 

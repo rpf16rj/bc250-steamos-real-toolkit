@@ -208,3 +208,10 @@ Fix: EDID override makes the kernel aware of HDMI 2.1 capabilities from the star
 so FRL is negotiated properly for all high-bandwidth modes.
 
 
+
+## DirectMesh — Nov-8 watch items
+- Repo renamed: `lonewolf0622/bc250meshtaskwork` → `lonewolf0622/Mesh-Shaders-for-Rdna-1-` (old URL redirects).
+- **v1.4 released Nov-8**: new Task index route renders Task+Mesh pipelines that previously failed pipeline creation (black-3D-world games); `RADV_BC250_MESH_TASK_IDX=0` opt-out; ~19 MiB/cmdbuf GTT, 1 GiB budget.
+- **v1.4.1 released and WITHDRAWN same-day** — washed-out frames, high memory use, GPU hangs on BC-250. Do NOT ship.
+- **v1.4 vendored Nov-12**: MastaG's 26.2.6 port (linux-cachyos-bc250 `f1f2dc6`, `patches/mesa/0002`) adapted to our 26.2.4 pin — dropped the third-word `padding : 31` in `radv_compiler_info` (26.2.4's 28-bit padding fits the 28 bc250 flags exactly; 26.2.5+ spent a bit on `force_exact_glsl_fma`) and kept the strict `RADV_DIRECTMESH=1` opt-in. Full series applies/reverses clean. Needs real-hardware test before release.
+- Dev tag `directmesh-v131-auto-rdna1-975ec91` (what MastaG shipped before v1.4): auto IDX pass + RDNA1 + 6 new env knobs, CPU-test-only validation.

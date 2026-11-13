@@ -57,15 +57,28 @@ extras/                           # Optional add-ons (not in start.sh)
 - **FSR4 Proton** — MastaG's prebuilt Proton packages (protonge /
   proton-cachyos native/slr) pulled from his pacman repo, extracted to
   `~/.local/share/Steam/compatibilitytools.d`. Ship pinned OptiScaler
-  manifest + FSR4 provider. Upstream pin is now **HelixSR 2.0.0** (DLSS
-  upscale + DLSS FG in one DLL). Variant semantics changed Oct-19:
-  `PROTON_USE_OPTISCALER=helixsr` = **HelixSR Scaler 1.1.0** (OptiScaler
-  with HelixSR inside, in-game Insert menu, FG selectable) — the pure
-  DLSS-Model-E DX12-compute path moved to **`helixsr-ffx`** (opt-in).
-  Also `freefg`/`freefg-helixsr` (XeSS FG + VRR pacing) and
-  `BC250_FSR4_IGNORE_ANTICHEAT=1`. Preset is seed-once — overlay saves
-  persist; HelixSR FG ships OFF on fresh installs (enable via overlay or
-  `BC250_OPTISCALER_EXTRA="FrameGen.Enabled=true"`).
+  manifest + FSR4 provider. Since Nov-07 every variant is FreeFG
+  (`PROTON_USE_OPTISCALER=`): `freefg-all` (all 5 upscalers — pick
+  in-game via OptiScaler menu), `freefg-hlxfsr4` (FreeFG 1.4.0 FG +
+  HLX FSR 4, HelixSR 3.3.0 — native Vulkan `ffx_vk`, no DX12 bridge;
+  int8 Preset K fix, ~3.2 ms @1080p), `freefg-hlxdlss` (HLX DLSS
+  Model E), `freefg` (FSR4 RC12), `freefg-hlxdlssk` (Preset K —
+  sharper/slower; preset dir renamed `hlx-dlss-k` in FreeFG 1.4.0),
+  `freefg-hlxfsr4full` (full FSR 4.1.2 network), `off` (no OptiScaler).
+  Since Nov-10 (`03b3442`): **new prefixes default to NO upscaling** —
+  the GTK4 menu opens on first launch to pick; persistent defaults in
+  `~/.config/bc250-fsr4/settings` (`menu=0`, `default=off|freefg-all|…`);
+  `PROTON_OPTISCALER_MENU=0` now actually suppresses it.
+  HelixSR Scaler is GONE — old names alias: `helixsr`/`helixsr-ffx`/
+  `freefg-helixsr`→`freefg-hlxdlss`, `hlxfsr4`→`freefg-hlxfsr4`,
+  bridges (`fsr411f`/`signed`/`fsr412f`…)→`freefg`. FG ships OFF in all
+  variants (`BC250_OPTISCALER_EXTRA="FrameGen.Enabled=true"` or the
+  first-launch GTK4 menu — `PROTON_OPTISCALER_MENU=1` re-shows it;
+  GTK4+SDL3 menu is upstream-tested on CachyOS, UNTESTED on SteamOS).
+  Per-game preset DB ships in the bc250-game-presets release
+  (`BC250_GAME_PRESETS_FILE` override); MFG Unlocker enables XeFG 3×/4×;
+  `BC250_XEFG_NO_STAGGERED_SUBMIT=0` opt-out;
+  `BC250_FSR4_IGNORE_ANTICHEAT=1` still present.
 - **Combined Fix** — single kernel build with selectable: audio + gfx1013 + vrr + allm
 - **EDID Override** — HF-VSDB for HDMI 2.1 PCON (FRL 48G, VRR 48-120, ALLM)
 - **AC-3 Surround** — HDMI/DP Dolby Digital 5.1 via eARC (a52 @ 640 kbps).
@@ -115,7 +128,10 @@ extras/                           # Optional add-ons (not in start.sh)
   driver links `libx264.so.<N>` which lives in the private lib dirs, and
   the sandbox ignores the host's `ld.so.conf.d`.
   Undo: `flatpak override --user --reset <app-id>`.
-  **v0.5.1 upstream notes** (2026-09-25, pulled automatically via
+  **v0.5.4 knobs (Nov-8)** — `BC250_HEVC_PRESET=live` real-time HEVC
+  (auto for sunshine/steam/gamescope/wivrn), libx265 zero-GPU fallback,
+  zero-copy DMA-BUF, dlopen() probing of libx264/x265 (no SONAME
+  lock-in). **v0.5.1 upstream notes** (2026-09-25, pulled automatically via
   releases/latest): Gamescope/Steam-Link green-screen fix
   (`vaCreateSurfaces2` now rejects unsupported DMA-BUF imports → forces
   EGL blit path), H.264 intra-prediction sanitization across multi-slice

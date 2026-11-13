@@ -1,0 +1,209 @@
+# Vendored from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0024-bc250-kfd-eop-events.patch (kernel 7.3),
+# adapted for linux-neptune-72 (Valve 7.2). Pristine copy: mastag/kernel-7.3/0024-bc250-kfd-eop-events.patch
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c b/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+@@ -894,6 +894,23 @@
+ 	return kfd_event_destroy(p, args->event_id);
+ }
+ 
++/* BC-250: registers the EOP log (kfd_bc250_eop_log_register); not in the uapi header. */
++struct kfd_ioctl_bc250_eop_log_args {
++	__u32 event_id;	/* to KFD: the signal event the log signals */
++	__u32 pad;
++};
++#define AMDKFD_BC250_EOP_LOG_NR	0x80
++#define AMDKFD_IOC_BC250_EOP_LOG \
++		AMDKFD_IOW(AMDKFD_BC250_EOP_LOG_NR, struct kfd_ioctl_bc250_eop_log_args)
++
++static int kfd_ioctl_bc250_eop_log(struct file *filp, struct kfd_process *p,
++				   void *data)
++{
++	struct kfd_ioctl_bc250_eop_log_args *args = data;
++
++	return kfd_bc250_eop_log_register(p, args->event_id);
++}
++
+ static int kfd_ioctl_set_event(struct file *filp, struct kfd_process *p,
+ 				void *data)
+ {
+@@ -3549,6 +3566,9 @@
+ 
+ 	AMDKFD_IOCTL_DEF(AMDKFD_IOC_PROFILER,
+ 			kfd_ioctl_profiler, 0),
++
++	AMDKFD_IOCTL_DEF(AMDKFD_IOC_BC250_EOP_LOG,
++			kfd_ioctl_bc250_eop_log, 0),
+ };
+ 
+ #define AMDKFD_CORE_IOCTL_COUNT	ARRAY_SIZE(amdkfd_ioctls)
+@@ -3570,7 +3590,8 @@
+ 		goto err_i1;
+ 	}
+ 
+-	if ((nr >= AMDKFD_COMMAND_START) && (nr < AMDKFD_COMMAND_END)) {
++	if ((nr >= AMDKFD_COMMAND_START) &&
++	    (nr < AMDKFD_COMMAND_END || nr == AMDKFD_BC250_EOP_LOG_NR)) {
+ 		u32 amdkfd_size;
+ 
+ 		ioctl = &amdkfd_ioctls[nr];
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_events.c b/drivers/gpu/drm/amd/amdkfd/kfd_events.c
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_events.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_events.c
+@@ -751,6 +751,79 @@
+ 	}
+ }
+ 
++/* BC-250: the EOP log. The PS5 kernel hands a title each end-of-pipe interrupt of its queues with
++ * the context id the RELEASE_MEM carried, and the title's event queue gets that id. A process that
++ * registers a signal event (AMDKFD_IOC_BC250_EOP_LOG, after mapping its whole signal page) gets
++ * every EOP interrupt of its VM whose context id is not a KFD event's (bit 27 clear, not 0) appended
++ * to a ring in the upper half of the signal page, then that event signaled. A u64 entry holds the
++ * context id (low 32 bits) and the source: VMID << 8 | the IV's ring id (me, pipe, queue). The
++ * kernel advances the head after writing an entry; the process advances the tail as it reads, and
++ * a full ring counts the entries it drops. The IH work queue is serialized, so one writer.
++ */
++#define BC250_EOP_LOG_HEAD	2048
++#define BC250_EOP_LOG_TAIL	2049
++#define BC250_EOP_LOG_DROPPED	2050
++#define BC250_EOP_LOG_FIRST	3072
++#define BC250_EOP_LOG_SIZE	1024
++
++int kfd_bc250_eop_log_register(struct kfd_process *p, uint32_t event_id)
++{
++	struct kfd_event *ev;
++	uint64_t *slots;
++	int ret = 0;
++
++	mutex_lock(&p->event_mutex);
++	ev = lookup_event_by_id(p, event_id);
++	if (!ev || ev->type != KFD_EVENT_TYPE_SIGNAL || !p->signal_page ||
++	    p->signal_mapped_size < KFD_SIGNAL_EVENT_LIMIT * 8 ||
++	    event_id >= BC250_EOP_LOG_HEAD) {
++		ret = -EINVAL;
++		goto out;
++	}
++	slots = page_slots(p->signal_page);
++	WRITE_ONCE(slots[BC250_EOP_LOG_HEAD], 0);
++	WRITE_ONCE(slots[BC250_EOP_LOG_TAIL], 0);
++	WRITE_ONCE(slots[BC250_EOP_LOG_DROPPED], 0);
++	smp_wmb();
++	WRITE_ONCE(p->bc250_eop_log_event, event_id + 1);
++out:
++	mutex_unlock(&p->event_mutex);
++	return ret;
++}
++
++bool kfd_bc250_eop_log(u32 pasid, uint32_t ctx, uint32_t source)
++{
++	struct kfd_process *p = kfd_lookup_process_by_pasid(pasid, NULL);
++	struct kfd_event *ev;
++	uint64_t *slots, head, tail;
++	u32 log;
++
++	if (!p)
++		return false;
++	log = READ_ONCE(p->bc250_eop_log_event);
++	if (!log || !p->signal_page) {
++		kfd_unref_process(p);
++		return false;
++	}
++	slots = page_slots(p->signal_page);
++	head = READ_ONCE(slots[BC250_EOP_LOG_HEAD]);
++	tail = READ_ONCE(slots[BC250_EOP_LOG_TAIL]);
++	if (head - tail < BC250_EOP_LOG_SIZE) {
++		WRITE_ONCE(slots[BC250_EOP_LOG_FIRST + head % BC250_EOP_LOG_SIZE],
++			   ((uint64_t)source << 32) | ctx);
++		smp_wmb();
++		WRITE_ONCE(slots[BC250_EOP_LOG_HEAD], head + 1);
++	} else {
++		WRITE_ONCE(slots[BC250_EOP_LOG_DROPPED], slots[BC250_EOP_LOG_DROPPED] + 1);
++	}
++	rcu_read_lock();
++	ev = lookup_event_by_id(p, log - 1);
++	set_event_from_interrupt(p, ev);
++	rcu_read_unlock();
++	kfd_unref_process(p);
++	return true;
++}
++
+ void kfd_signal_event_interrupt(u32 pasid, uint32_t partial_id,
+ 				uint32_t valid_id_bits, bool signal_mailbox_updated)
+ {
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_int_process_v10.c b/drivers/gpu/drm/amd/amdkfd/kfd_int_process_v10.c
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_int_process_v10.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_int_process_v10.c
+@@ -25,6 +25,22 @@
+ #include "soc15_int.h"
+ #include "kfd_device_queue_manager.h"
+ 
++/* BC-250: an end-of-pipe interrupt raised by a submission of the render node (a gfx or amdgpu
++ * compute ring, VMIDs below KFD's) whose context id is not 0 reaches KFD too, for the process
++ * sharing the VM (AMDKFD_IOC_ACQUIRE_VM gives it the same PASID). The PS5 kernel takes a title's EOP
++ * interrupts from its graphics and compute queues alike. A context id with bit 27 set names a KFD
++ * event (the other bits) and signals it without its mailbox slot being written: Kyty's own. Any
++ * other goes to the process's EOP log when it has one (kfd_bc250_eop_log: a title's ids, which
++ * libSceAgc keeps to 27 bits), else names an event as before. amdgpu's own fences use id 0 and run
++ * in the ring, outside any IB, as VMID 0; with 2 an id-0 interrupt from a non-zero VMID
++ * (inside an IB: a title's RELEASE_MEM with context id 0) goes to the EOP log too.
++ */
++#define BC250_EOP_EVENT_BIT	(1u << 27)
++static int bc250_gfx_eop_events = 0;
++module_param(bc250_gfx_eop_events, int, 0444);
++MODULE_PARM_DESC(bc250_gfx_eop_events,
++		 "EOP interrupts of render-node submissions signal the KFD event named by their context id (0 = off, the default; 1 = on; 2 = on, id 0 from an IB to the EOP log too)");
++
+ /*
+  * GFX10 SQ Interrupts
+  *
+@@ -143,6 +159,9 @@
+ 	/* Only handle interrupts from KFD VMIDs */
+ 	vmid = SOC15_VMID_FROM_IH_ENTRY(ih_ring_entry);
+ 	if (!KFD_IRQ_IS_FENCE(client_id, source_id) &&
++	    !(bc250_gfx_eop_events && client_id == SOC15_IH_CLIENTID_GRBM_CP &&
++	      source_id == SOC15_INTSRC_CP_END_OF_PIPE &&
++	      (SOC15_CONTEXT_ID0_FROM_IH_ENTRY(ih_ring_entry) != 0 || (bc250_gfx_eop_events >= 2 && vmid != 0))) &&
+ 	   (vmid < dev->vm_info.first_vmid_kfd ||
+ 	    vmid > dev->vm_info.last_vmid_kfd))
+ 		return false;
+@@ -210,8 +229,17 @@
+ 	    client_id == SOC15_IH_CLIENTID_SE1SH ||
+ 	    client_id == SOC15_IH_CLIENTID_SE2SH ||
+ 	    client_id == SOC15_IH_CLIENTID_SE3SH) {
+-		if (source_id == SOC15_INTSRC_CP_END_OF_PIPE)
+-			kfd_signal_event_interrupt(pasid, context_id0, 32, true);
++		if (source_id == SOC15_INTSRC_CP_END_OF_PIPE) {
++			if (!context_id0 && bc250_gfx_eop_events >= 2 && vmid &&
++			    kfd_bc250_eop_log(pasid, 0, vmid << 8 | SOC15_RING_ID_FROM_IH_ENTRY(ih_ring_entry)))
++				; /* a title's id-0 interrupt, logged */
++			else if (!bc250_gfx_eop_events || !context_id0)
++				kfd_signal_event_interrupt(pasid, context_id0, 32, true);
++			else if ((context_id0 & BC250_EOP_EVENT_BIT) ||
++				 !kfd_bc250_eop_log(pasid, context_id0,
++						    vmid << 8 | SOC15_RING_ID_FROM_IH_ENTRY(ih_ring_entry)))
++				kfd_signal_event_interrupt(pasid, context_id0 & ~BC250_EOP_EVENT_BIT, 32, false);
++		}
+ 		else if (source_id == SOC15_INTSRC_SQ_INTERRUPT_MSG) {
+ 			encoding = REG_GET_FIELD(context_id1,
+ 						SQ_INTERRUPT_WORD_WAVE_CTXID1, ENCODING);
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
+@@ -957,6 +957,8 @@
+ 	size_t signal_mapped_size;
+ 	size_t signal_event_count;
+ 	bool signal_event_limit_reached;
++	/* BC-250: signal event id + 1 of the EOP log (0: none), see kfd_bc250_eop_log() */
++	u32 bc250_eop_log_event;
+ 
+ 	/* Information used for memory eviction */
+ 	void *kgd_process_info;
+@@ -1531,6 +1533,8 @@
+ 		       uint32_t num_events, void __user *data,
+ 		       bool all, uint32_t *user_timeout_ms,
+ 		       uint32_t *wait_result);
++int kfd_bc250_eop_log_register(struct kfd_process *p, uint32_t event_id);
++bool kfd_bc250_eop_log(u32 pasid, uint32_t ctx, uint32_t source);
+ void kfd_signal_event_interrupt(u32 pasid, uint32_t partial_id,
+ 				uint32_t valid_id_bits, bool signal_mailbox_updated);
+ void kfd_signal_hw_exception_event(u32 pasid);

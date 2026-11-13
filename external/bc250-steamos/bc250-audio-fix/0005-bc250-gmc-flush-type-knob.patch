@@ -1,0 +1,34 @@
+# Vendored from MastaG/linux-cachyos-bc250 patches/linux-cachyos/0026-bc250-gmc-flush-type-knob.patch (kernel 7.3),
+# adapted for linux-neptune-72 (Valve 7.2). Pristine copy: mastag/kernel-7.3/0026-bc250-gmc-flush-type-knob.patch
+diff --git a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+--- a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+@@ -51,6 +51,18 @@
+ #include "athub_v2_0.h"
+ #include "athub_v2_1.h"
+ 
++/* BC-250: a heavyweight invalidation (flush type 2) of a KFD VMID waits for that
++ * VMID's outstanding requests and did not complete while a KFD queue's GL2 flush
++ * was in flight: no ACK, the KIQ waiting for it stopped, and with it the GPU. The
++ * PASID path of this board is already forced to type 0 (see
++ * gmc_v10_0_flush_gpu_tlb_internal); this knob covers every flush so the paths
++ * that stay heavyweight can be validated without a rebuild. -1 keeps the type the
++ * caller asked for.
++ */
++static int bc250_tlb_flush_type = -1;
++module_param(bc250_tlb_flush_type, int, 0644);
++MODULE_PARM_DESC(bc250_tlb_flush_type, "BC-250: TLB flush type for every GPU TLB flush (-1 = as requested, 0 = legacy)");
++
+ static int gmc_v10_0_ecc_interrupt_state(struct amdgpu_device *adev,
+ 					 struct amdgpu_irq_src *src,
+ 					 unsigned int type,
+@@ -251,6 +263,9 @@
+ 	    flush_type == 2)
+ 		flush_type = 0;
+ 
++	if (bc250_tlb_flush_type >= 0)
++		flush_type = bc250_tlb_flush_type;
++
+ 	use_semaphore = gmc_v10_0_use_invalidate_semaphore(adev, vmhub) ||
+ 		(gfx1013_pasid_path && vmhub == AMDGPU_GFXHUB(0));
+ 	inv_req = hub->vmhub_funcs->get_invalidate_req(vmid, flush_type);

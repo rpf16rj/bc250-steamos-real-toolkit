@@ -1,0 +1,50 @@
+From 7340fa71e3a52d9095c2babbfe02f7f98a02cc8e Mon Sep 17 00:00:00 2001
+From: MastaG <mastag@gmail.com>
+Date: Mon, 2 Nov 2026 18:33:37 +0100
+Subject: [PATCH] drm/amdgpu/gmc10: BC-250 map AMDGPU_VM_MTYPE_RW to C_RW_S
+
+The switch has no case for AMDGPU_VM_MTYPE_RW (only gmc_v9_0 and
+gmc_v12_1 answer it), so a buffer requesting that type got the default
+MTYPE_NC. The PS5 kernel maps a title's shared memory cached and shared
+(SCE_KERNEL_MTYPE_C_SHARED, MTYPE 4 on this IP) and titles written
+against it expect those semantics, so Kyty passes the flag and needs the
+case here.
+
+bc250_mtype_rw=0 restores the NC mapping for a title that regresses.
+
+Based on KytyPS5-Native's bc250-amdgpu patch (faf53a5).
+---
+ drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+index 5ae0e326115f..2eb8185b34f0 100644
+--- a/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gmc_v10_0.c
+@@ -63,6 +63,16 @@ static int bc250_tlb_flush_type = -1;
+ module_param(bc250_tlb_flush_type, int, 0644);
+ MODULE_PARM_DESC(bc250_tlb_flush_type, "BC-250: TLB flush type for every GPU TLB flush (-1 = as requested, 0 = legacy)");
+ 
++/* BC-250: AMDGPU_VM_MTYPE_RW has no case here (only gmc_v9_0 and gmc_v12_1 have
++ * one), so a request for it fell through to the default MTYPE_NC. The PS5 kernel
++ * gives its shared memory a cached and shared type (SCE_KERNEL_MTYPE_C_SHARED,
++ * MTYPE 4 here), which is what titles running on it expect; the knob reports
++ * which of the two the case maps to.
++ */
++static int bc250_mtype_rw = 1;
++module_param(bc250_mtype_rw, int, 0444);
++MODULE_PARM_DESC(bc250_mtype_rw, "BC-250: AMDGPU_VM_MTYPE_RW maps MTYPE C_RW_S (1) or NC (0)");
++
+ static int gmc_v10_0_ecc_interrupt_state(struct amdgpu_device *adev,
+ 					 struct amdgpu_irq_src *src,
+ 					 unsigned int type,
+@@ -546,6 +556,9 @@ static void gmc_v10_0_get_vm_pte(struct amdgpu_device *adev,
+ 	case AMDGPU_VM_MTYPE_UC:
+ 		*flags = AMDGPU_PTE_MTYPE_NV10(*flags, MTYPE_UC);
+ 		break;
++	case AMDGPU_VM_MTYPE_RW: /* BC-250 */
++		*flags = AMDGPU_PTE_MTYPE_NV10(*flags, bc250_mtype_rw ? MTYPE_C_RW_S : MTYPE_NC);
++		break;
+ 	}
+ 
+ 	if (vm_flags & AMDGPU_VM_PAGE_NOALLOC)
